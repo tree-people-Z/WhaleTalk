@@ -1,5 +1,6 @@
 # Build with: python -m PyInstaller --clean --noconfirm WhaleTalk.spec
 from pathlib import Path
+import sys
 
 project_root = Path(SPECPATH)
 datas = [
@@ -8,11 +9,18 @@ datas = [
     (str(project_root / "requirements-transcription.txt"), "."),
 ]
 hiddenimports = ["bilibili_api"]
+# Python's DLL imports the MSVC runtime. Some Windows PCs lack the redistributable,
+# so ship the Python installation's matching runtime beside the bundled interpreter.
+binaries = [
+    (str(Path(sys.prefix) / name), ".")
+    for name in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+    if (Path(sys.prefix) / name).exists()
+]
 
 analysis = Analysis(
     [str(project_root / "main.py")],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
