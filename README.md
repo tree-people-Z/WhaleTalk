@@ -1,4 +1,4 @@
-﻿# 鲸语 · B站智能运营助手
+# 鲸语 · B站智能运营助手
 
 鲸语是一个桌面端 AI 角色运营助手，可搜索和分析 B 站视频、生成评论、监听并回复评论。它支持手动巡视和可选自动巡视；自动运行默认关闭。
 
@@ -60,22 +60,39 @@ python main.py
 
 ### 手动放置模型（下载太慢时）
 
-如果自动下载 `medium` 模型很慢，可以自己下载 faster-whisper 的 CTranslate2 格式模型，放到：
+如果自动下载 `medium` 模型很慢，可以自己下载 faster-whisper 的 CTranslate2 格式模型，放到 EXE 同目录下的：
 
 ```
 WhaleTalk\data\models\faster-whisper\medium\
 ```
 
-只需要这 4 个文件：
+例如完整路径：
 
-| 文件 | 说明 |
+```
+C:\Users\<你的用户名>\Desktop\WhaleTalk-Windows-x64\WhaleTalk\data\models\faster-whisper\medium\
+```
+
+**只需要且只需要这 4 个文件**（`.gitattributes`、`README.md` 不需要）：
+
+| 文件 | 大小（字节） |
 |---|---|
-| `config.json` | 约 2 KB |
-| `model.bin` | 约 1.5 GB |
-| `tokenizer.json` | 约 2 MB |
-| `vocabulary.txt` | 约 450 KB |
+| `config.json` | 2,257 |
+| `model.bin` | 1,527,906,378 |
+| `tokenizer.json` | 2,203,239 |
+| `vocabulary.txt` | 459,861 |
 
-程序会优先使用这个目录，不再联网下载模型；在线下载方式仍然可用。也可以从其他机器 HuggingFace 缓存中的 `models--Systran--faster-whisper-medium\snapshots\<hash>\` 里复制这 4 个文件。
+下载地址（HuggingFace 原站或镜像均可）：
+
+- https://huggingface.co/Systran/faster-whisper-medium/tree/main
+- https://hf-mirror.com/Systran/faster-whisper-medium/tree/main
+
+放置后：
+
+1. 确认 `data\transcription` 里的识别组件已经存在（如果没有，先在设置页点一次“下载本地识别组件和模型”，92 MB）；
+2. 重启程序；程序检测到完整的 `medium` 目录后会直接加载它，不再联网下载模型。也可以在设置页点“打开模型目录”直接打开目标文件夹；
+3. 日志里会出现「使用手动放置的本地语音识别模型: data\models\faster-whisper\medium」。
+
+在线下载方式仍然保留；`data/` 目录在程序升级时会保留。也可以从其他机器 HuggingFace 缓存中的 `models--Systran--faster-whisper-medium\snapshots\<hash>\` 里复制这 4 个文件。
 
 音频提取和画面抽帧需要 FFmpeg，并且 `ffmpeg -version` 可运行。每条视频最多抽取三张压缩画面。配置的 AI 服务需要支持视觉输入；DeepSeek `deepseek-flash` 支持图像输入。音频、抽帧等临时文件会在处理后删除。
 
