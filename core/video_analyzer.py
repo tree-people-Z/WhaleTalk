@@ -52,6 +52,7 @@ class VideoAnalyzer:
         self.config = config
         self._stop_requested = threading.Event()
         self._greetings_sent_this_run = 0
+        self._interactions_sent_this_run = 0
 
         # 初始化双日记系统
         self.diary = DiarySystem()
@@ -210,6 +211,140 @@ class VideoAnalyzer:
                 logger.warning(f"向其他鲸鱼娘打招呼失败: {exc}")
         return sent
 
+    @staticmethod
+    def _looks_like_reply_invitation(content: str) -> bool:
+        """Detect comments that invite a reply, e.g. '鱼会回复吗'."""
+        text = (content or '').strip()
+        if not text or len(text) > 200:
+            return False
+        bot_terms = (
+            '鲸鱼娘', '大肥鱼', '鱼', '回复', '回我', '理我',
+            '在吗', '冒泡', '机器人', 'AI娘', '主播',
+        )
+        if not any(term in text for term in bot_terms):
+            return False
+        asks = any(mark in text for mark in ('?', '？', '吗', '么', '呢', '嘛'))
+        return asks or '回复' in text
+
+    async def _find_reply_invitations(self, comments) -> List[Dict[str, Any]]:
+        """Collect a few top-level comments that invite a reply."""
+        if not self.config.get('interaction.reply_interesting_comments', True):
+            return []
+        only_owner = bool(self.config.get('interaction.reply_only_owner', False))
+        reply_to_others = self.config.get('interaction.reply_to_others', True)
+        owner_name = self.config.get('bilibili.owner_name', '')
+        if only_owner and not owner_name:
+            return []
+        if not only_owner and not reply_to_others:
+            return []
+        try:
+            self_info = await self.bili.get_self_info()
+        except Exception:  # noqa: BLE001
+            self_info = {}
+        if not isinstance(self_info, dict):
+            self_info = {}
+        self_uid = self_info.get('uid')
+        self_name = self_info.get('name') or ''
+        try:
+            already_replied = set(self.db.get_replied_comment_ids())
+        except Exception:  # noqa: BLE001
+            already_replied = set()
+        try:
+            max_candidates = int(
+                self.config.get('limits.max_interactions_per_video', 1)
+            )
+        except (TypeError, ValueError):
+            max_candidates = 1
+        if max_candidates <= 0:
+            return []
+
+        candidates = []
+        for comment in comments or []:
+            rpid = comment.get('rpid')
+            if not rpid or rpid in already_replied:
+                continue
+            # 只处理顶层评论；楼中楼回复由回复检查处理。
+            if comment.get('root') not in (0, None):
+                continue
+            if self_uid is not None and comment.get('mid') == self_uid:
+                continue
+            user = comment.get('user') or ''
+            if self_name and user == self_name:
+                continue
+            if only_owner and user != owner_name:
+                continue
+            content = comment.get('content') or ''
+            if not self._looks_like_reply_invitation(content):
+                continue
+            candidates.append({
+                'rpid': rpid,
+                'user': user,
+                'content': content,
+                'root': rpid,
+                'parent': rpid,
+            })
+            if len(candidates) >= max_candidates:
+                break
+        if candidates:
+            logger.info(f"发现 {len(candidates)} 条可互动评论，准备回复")
+        return candidates
+
+    async def _reply_to_invitations(
+        self, video: Dict[str, Any], analysis: Dict[str, Any]
+    ) -> int:
+        """Reply to viewer comments such as '鱼会回复吗', with per-run limits."""
+        if not self.config.get('interaction.reply_interesting_comments', True):
+            return 0
+        if not self.config.get('interaction.auto_comment', False):
+            return 0
+        if self.bili.is_blocked():
+            return 0
+        candidates = analysis.get('reply_invitations') or []
+        if not candidates:
+            return 0
+        try:
+            per_run = int(self.config.get('limits.max_interactions_per_run', 3))
+        except (TypeError, ValueError):
+            per_run = 3
+        remaining = max(0, per_run - self._interactions_sent_this_run)
+        if remaining <= 0:
+            return 0
+
+        persona = self._load_persona()
+        sent = 0
+        for target in candidates[:remaining]:
+            try:
+                reply = await self.ai.generate_reply(
+                    original_comment=target.get('content', ''),
+                    video_context=f"视频: {video.get('title', '')}",
+                    persona=persona,
+                )
+                if not reply:
+                    continue
+                success = await self.bili.post_comment(
+                    aid=video['aid'],
+                    text=reply,
+                    root_rpid=target.get('rpid'),
+                    parent_rpid=target.get('rpid'),
+                )
+                if success:
+                    self.db.add_comment_record(
+                        bvid=video.get('bvid', ''),
+                        aid=video.get('aid'),
+                        content=reply,
+                        comment_type='reply',
+                        success=True,
+                        rpid=getattr(self.bili, 'last_comment_rpid', None),
+                        parent_rpid=target.get('rpid'),
+                    )
+                    self._interactions_sent_this_run += 1
+                    sent += 1
+                    logger.info(f"💬 已回复评论互动: {target.get('user')}")
+                await asyncio.sleep(2)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"回复评论互动失败: {exc}")
+        return sent
+
     async def check_replies(self) -> Dict[str, Any]:
         """单独检查并回复评论，供高频调度使用。"""
         self._raise_if_stopping()
@@ -244,6 +379,7 @@ class VideoAnalyzer:
         logger.info("开始新一轮视频分析")
         logger.info("=" * 60)
         self._greetings_sent_this_run = 0
+        self._interactions_sent_this_run = 0
         self._raise_if_stopping()
 
         # 检查今日配额
@@ -313,6 +449,8 @@ class VideoAnalyzer:
                     analysis=analysis
                 )
                 self.db.increment_videos()
+
+                await self._reply_to_invitations(video, analysis)
 
                 # 评论候选由「评论最低评分」设置控制；明确 @主人 指令的视频不参与再筛选。
                 if analysis['score'] >= min_comment_score or analysis.get('owner_directive'):
@@ -498,6 +636,7 @@ class VideoAnalyzer:
             comments = await self.bili.get_comments(video['aid'], count=15)
             comment_texts = [c['content'] for c in comments if c['content']]
             greeting_candidates = await self._find_greeting_candidates(comments)
+            reply_invitations = await self._find_reply_invitations(comments)
 
             # 加载人设
             persona = self._load_persona()
@@ -543,6 +682,7 @@ class VideoAnalyzer:
                 or analysis['owner_directive']
             )
             analysis['greeting_candidates'] = greeting_candidates
+            analysis['reply_invitations'] = reply_invitations
 
             logger.info(
                 f"分析结果: 评分={analysis['score']}, 值得={analysis['worthy']}, "

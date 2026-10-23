@@ -152,6 +152,8 @@ class ConfigManager:
                 "max_videos_per_run": 20,
                 "max_greetings_per_video": 2,
                 "max_greetings_per_run": 5,
+                "max_interactions_per_video": 1,
+                "max_interactions_per_run": 3,
                 "same_video_cooldown_days": 7,
                 "min_score_to_comment": 10,
                 "min_score_to_mention_owner": 13,
