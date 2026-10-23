@@ -1,0 +1,29 @@
+# B站API
+bilibili-api-python>=16.2.0
+aiohttp>=3.9.0
+
+# GUI框架
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+
+# AI模型调用
+openai>=1.0.0
+anthropic>=0.18.0
+
+# 任务调度
+APScheduler>=3.10.0
+
+# 数据存储
+sqlalchemy>=2.0.0
+
+# 二维码生成/识别
+qrcode[pil]>=7.4.0
+pillow>=10.0.0
+
+# 工具库
+pyyaml>=6.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# 日志
+loguru>=0.7.0
