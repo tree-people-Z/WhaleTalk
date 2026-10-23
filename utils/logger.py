@@ -18,13 +18,14 @@ def setup_logger(log_file: str = "data/logs/bot.log", level: str = "INFO"):
     # 移除默认handler
     logger.remove()
 
-    # 添加控制台输出
-    logger.add(
-        sys.stdout,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-        level=level,
-        colorize=True
-    )
+    # 窗口化打包（console=False）时没有控制台，sys.stdout 为 None，不能作为 sink。
+    if sys.stdout is not None:
+        logger.add(
+            sys.stdout,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+            level=level,
+            colorize=True
+        )
 
     # 添加文件输出
     log_path = Path(log_file)

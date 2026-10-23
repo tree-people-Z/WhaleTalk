@@ -28,7 +28,9 @@ from utils.dependency_bootstrap import ensure_required_dependencies
 try:
     ensure_required_dependencies()
 except Exception as exc:
-    print(f"依赖准备失败: {exc}", file=sys.stderr, flush=True)
+    # Windowed builds have no stderr; avoid turning a startup error into a crash.
+    if sys.stderr is not None:
+        print(f"依赖准备失败: {exc}", file=sys.stderr, flush=True)
     raise SystemExit(1)
 
 from PyQt6.QtWidgets import QApplication

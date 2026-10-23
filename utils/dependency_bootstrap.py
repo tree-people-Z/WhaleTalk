@@ -41,11 +41,16 @@ def missing_required_packages():
 
 def ensure_required_dependencies():
     """Install the base requirements before importing the GUI or app modules."""
+    if getattr(sys, 'frozen', False):
+        # The PyInstaller bundle ships these packages, and a frozen executable has
+        # no pip to install into. Never try to self-install from the packaged app.
+        return
     missing = missing_required_packages()
     if not missing:
         return
-    print(f"缺少运行依赖: {', '.join(missing)}", flush=True)
-    print("正在自动安装项目依赖，请保持网络连接...", flush=True)
+    if sys.stdout is not None:
+        print(f"缺少运行依赖: {', '.join(missing)}", flush=True)
+        print("正在自动安装项目依赖，请保持网络连接...", flush=True)
     result = subprocess.run(
         [sys.executable, '-m', 'pip', 'install', '-r', str(REQUIREMENTS)],
         cwd=PROJECT_ROOT,

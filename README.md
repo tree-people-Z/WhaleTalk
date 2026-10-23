@@ -13,7 +13,9 @@
 
 ## 安装和启动
 
-Windows 用户可从 GitHub Releases 下载便携版 ZIP，解压后双击 `WhaleTalk.exe` 即可启动，无需另行安装 Python。请保留同目录的 `_internal/` 运行文件夹。首次启动会在 EXE 同目录创建 `data/`，用于保存设置、登录凭证、数据库和日志。首次使用仍需在应用中配置 AI 服务并扫码登录 B 站。
+Windows 用户可从 GitHub Releases 下载便携版 ZIP，解压后双击 `WhaleTalk.exe` 即可启动，无需另行安装 Python 或 VC++ 运行库。请保留同目录的 `_internal/` 运行文件夹。首次启动会在 EXE 同目录创建 `data/`，用于保存设置、登录凭证、数据库和日志。首次使用仍需在应用中配置 AI 服务并扫码登录 B 站。
+
+便携版要求 64 位 Windows 10（1903 或更高版本）或 Windows 11：Qt 6 依赖系统自带的 ICU 组件，便携包不再附带 ICU 动态库，以免与系统组件冲突。
 
 从源码运行需要 Python 3.10+。Windows 双击 `start.bat`；其他系统运行 `./start.sh`。首次启动会检查并安装 `requirements.txt` 中缺少的程序依赖。也可以手动运行：
 
@@ -50,6 +52,15 @@ python -m compileall -q core gui utils tests
 ```
 
 可选本地转写依赖单独列在 `requirements-transcription.txt`，不会随基础依赖自动安装。
+
+### 构建 Windows 便携版
+
+```bash
+python -m pip install pyinstaller
+python -m PyInstaller --clean --noconfirm WhaleTalk.spec
+```
+
+产物在 `dist/WhaleTalk/`，将整个文件夹压缩为 ZIP 后即可发布到 GitHub Releases。构建机不需要在 PATH 中保留其他 SDK 的 `bin` 目录：`WhaleTalk.spec` 会丢弃 Python 安装目录之外收集到的 DLL，避免本机其他软件（如 poppler、libheif）的同名动态库混入并覆盖系统组件。
 
 ## 本地数据与隐私
 
