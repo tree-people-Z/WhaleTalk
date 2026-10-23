@@ -18,6 +18,7 @@ from loguru import logger
 
 from gui.login_dialog import LoginDialog
 from gui.settings_page import SettingsPage
+from gui.comments_tab import CommentsTab
 from gui.messages_tab import MessagesTab
 from gui.styles import MODERN_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
@@ -151,6 +152,10 @@ class MainWindow(QMainWindow):
         # 历史记录标签
         self.history_tab = self._create_history_tab()
         self.tabs.addTab(self.history_tab, "历史记录")
+
+        # 评论对话标签
+        self.comments_tab = CommentsTab(self.db)
+        self.tabs.addTab(self.comments_tab, "评论")
 
         # 私信标签
         self.messages_tab = MessagesTab()
@@ -292,6 +297,7 @@ class MainWindow(QMainWindow):
             # 初始化B站API
             self.bili_api = BilibiliAPI()
             self.messages_tab.set_bili_api(self.bili_api)
+            self.comments_tab.set_bili_api(self.bili_api)
 
             # 初始化AI客户端
             ai_config = self.config.get('ai', {})
@@ -385,6 +391,7 @@ class MainWindow(QMainWindow):
             self.login_btn.setText("🔐 切换账号")
             self.log("✅ 登录成功！")
             self.messages_tab.set_bili_api(self.bili_api)
+            self.comments_tab.set_bili_api(self.bili_api)
 
     def run_analysis_now(self):
         """立即运行分析"""
@@ -634,8 +641,11 @@ class MainWindow(QMainWindow):
         self.log_text.append(message)
 
     def _on_tab_changed(self, index: int):
-        """切换到私信页时按需刷新会话。"""
-        if self.tabs.widget(index) is self.messages_tab:
+        """切换到对话页时按需刷新数据。"""
+        widget = self.tabs.widget(index)
+        if widget is self.comments_tab:
+            self.comments_tab.refresh_if_stale()
+        elif widget is self.messages_tab:
             self.messages_tab.refresh_if_stale()
 
     def check_updates_manually(self):
@@ -747,6 +757,8 @@ class MainWindow(QMainWindow):
         """关闭事件"""
         self._update_timer.stop()
         self._update_recheck_timer.stop()
+        self.comments_tab.shutdown()
+        self.messages_tab.shutdown()
         if self._update_worker is not None and self._update_worker.isRunning():
             self._update_worker.wait(3000)
         if self._update_download is not None and self._update_download.isRunning():

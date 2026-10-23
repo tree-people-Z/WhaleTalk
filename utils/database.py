@@ -244,8 +244,9 @@ class Database:
                 'aid': record.aid,
                 'bvid': record.bvid,
                 'rpid': record.rpid,
+                'content': record.content or '',
                 'video_title': video.title if video else '',
-                'commented_at': record.created_at
+                'commented_at': record.created_at,
             })
 
         return results

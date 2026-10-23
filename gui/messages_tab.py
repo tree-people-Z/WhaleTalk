@@ -194,3 +194,8 @@ class MessagesTab(QWidget):
     def _on_load_failed(self, message: str):
         self.status_label.setText(f"加载失败：{message}")
         logger.warning(f"私信面板加载失败: {message}")
+
+    def shutdown(self, timeout_ms: int = 2000):
+        for worker in (self._session_worker, self._message_worker):
+            if worker is not None and worker.isRunning():
+                worker.wait(timeout_ms)

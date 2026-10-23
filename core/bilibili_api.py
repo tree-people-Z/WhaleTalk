@@ -627,6 +627,32 @@ class BilibiliAPI:
             return []
             return []
 
+    async def get_comment_thread(
+        self, aid: int, root_rpid: int, count: int = 50
+    ) -> List[Dict[str, Any]]:
+        """获取某条评论下的完整对话（我方楼层 + 网友回复），按时间排序。"""
+        try:
+            root_rpid = int(root_rpid)
+        except (TypeError, ValueError):
+            return []
+        comments = await self.get_comments(
+            aid, count=count, include_replies=True, root_rpids={root_rpid}
+        )
+        thread = [
+            comment for comment in comments
+            if comment.get('root') == root_rpid or comment.get('rpid') == root_rpid
+        ]
+        thread.sort(key=lambda comment: comment.get('ctime') or 0)
+        seen = set()
+        result = []
+        for comment in thread:
+            rpid = comment.get('rpid')
+            if rpid in seen:
+                continue
+            seen.add(rpid)
+            result.append(comment)
+        return result
+
     async def post_comment(
         self,
         aid: int,
