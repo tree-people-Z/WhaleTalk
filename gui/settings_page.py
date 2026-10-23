@@ -370,13 +370,14 @@ class SettingsPage(QWidget):
         self.cooldown_spin.setRange(1, 30)
         layout.addRow("同视频冷却天数:", self.cooldown_spin)
 
-        # 每轮分析视频数
+        # 每轮目标回复视频数
         self.max_videos_spin = QSpinBox()
         self.max_videos_spin.setRange(1, 20)
         self.max_videos_spin.setToolTip(
-            "配合巡视间隔 5–10 分钟，可设置每轮分析 1–2 条，做持续慢速巡视"
+            "每轮争取给这么多条视频发出评论；没达到时会继续分析候选，"
+            "最多分析目标的 3 倍数量"
         )
-        layout.addRow("每轮分析视频数:", self.max_videos_spin)
+        layout.addRow("每轮目标回复视频数:", self.max_videos_spin)
 
         # 最低评分阈值
         self.min_score_spin = QSpinBox()

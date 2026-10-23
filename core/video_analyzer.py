@@ -419,15 +419,38 @@ class VideoAnalyzer:
                 'comments_sent': 0
             }
 
-        # 2. 筛选和分析
+        # 2. 分析视频；每轮目标是对 1-2 条视频发出评论
         analyzed_videos = []
         worthy_videos = []
+        comments_sent = 0
 
         max_videos = self.config.get('limits.max_videos_per_run', 10)
         min_comment_score = self.config.get('limits.min_score_to_comment', 10)
+        auto_comment = self.config.get('interaction.auto_comment', False)
+        try:
+            target_comments = max(1, int(max_videos)) if auto_comment else 0
+        except (TypeError, ValueError):
+            target_comments = 2
+        # 为凑够目标，允许比目标多分析几条候选。
+        max_attempts = (
+            max(target_comments * 3, target_comments + 3)
+            if auto_comment else max_videos
+        )
+        remaining_quota = max(0, max_comments - quota.comments_sent)
+        if target_comments:
+            logger.info(
+                f"本轮目标: 给 {target_comments} 条视频发评论"
+                f"（最多分析 {max_attempts} 条候选）"
+            )
 
-        for video in videos[:max_videos]:
+        for video in videos:
             self._raise_if_stopping()
+            if target_comments and (
+                comments_sent >= target_comments or remaining_quota <= 0
+            ):
+                break
+            if len(analyzed_videos) >= max_attempts:
+                break
             # 持续巡视时跳过最近分析过的视频，避免反复分析同一批内容。
             if self.db.is_video_analyzed_recently(
                 video['bvid'],
@@ -468,41 +491,29 @@ class VideoAnalyzer:
                         'video': video,
                         'analysis': analysis
                     })
+                    can_comment = (
+                        auto_comment
+                        and comments_sent < target_comments
+                        and remaining_quota > 0
+                    )
+                    if can_comment:
+                        success = await self._post_comment_for_video(video, analysis)
+                        if success:
+                            comments_sent += 1
+                            remaining_quota -= 1
+                            self.db.increment_comments()
+                            logger.info(
+                                f"   视频链接: https://www.bilibili.com/video/{video['bvid']}"
+                            )
 
             # 避免请求过快
             await asyncio.sleep(2)
 
-        logger.info(f"分析完成: {len(analyzed_videos)} 个视频, {len(worthy_videos)} 个达到评论评分门槛")
-
-        # 3. 从值得的视频中挑选评论
-        comments_sent = 0
-        remaining_quota = max_comments - quota.comments_sent
-
-        if worthy_videos and remaining_quota > 0:
-            # 按评分排序
-            worthy_videos.sort(key=lambda x: x['analysis']['score'], reverse=True)
-
-            # 发送评论
-            for item in worthy_videos[:remaining_quota]:
-                self._raise_if_stopping()
-                bvid = item['video']['bvid']
-                title = item['video']['title']
-                video_url = f"https://www.bilibili.com/video/{bvid}"
-
-                success = await self._post_comment_for_video(
-                    item['video'],
-                    item['analysis']
-                )
-
-                if success:
-                    comments_sent += 1
-                    self.db.increment_comments()
-                    logger.info(f"✅ 评论成功: {title}")
-                    logger.info(f"   视频链接: {video_url}")
-
-                await asyncio.sleep(3)
-
-        # 4. 更新运行统计
+        logger.info(
+            f"分析完成: {len(analyzed_videos)} 个视频, "
+            f"{len(worthy_videos)} 个达到评论评分门槛, "
+            f"目标评论视频 {target_comments} 个, 实际发送 {comments_sent} 条"
+        )
         self.db.increment_runs()
 
         # 5. 检查并回复评论和私信
