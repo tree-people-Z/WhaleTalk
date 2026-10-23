@@ -53,6 +53,7 @@ class VideoAnalyzer:
         self._stop_requested = threading.Event()
         self._greetings_sent_this_run = 0
         self._interactions_sent_this_run = 0
+        self._search_page = 1
 
         # 初始化双日记系统
         self.diary = DiarySystem()
@@ -427,6 +428,13 @@ class VideoAnalyzer:
 
         for video in videos[:max_videos]:
             self._raise_if_stopping()
+            # 持续巡视时跳过最近分析过的视频，避免反复分析同一批内容。
+            if self.db.is_video_analyzed_recently(
+                video['bvid'],
+                hours=self.config.get('limits.skip_analyzed_within_hours', 2),
+            ):
+                logger.info(f"跳过最近已分析的视频: {video['bvid']}")
+                continue
             # 检查是否最近评论过
             if self.db.check_video_commented_recently(
                 video['bvid'],
@@ -539,12 +547,13 @@ class VideoAnalyzer:
 
         # 每轮随机关键词顺序，避免总是同一个关键词优先。
         random.shuffle(keywords)
+        page = getattr(self, '_search_page', 1)
         pools: List[List[Dict[str, Any]]] = []
         for keyword in keywords:
             try:
                 videos = await self.bili.search_videos(
                     keyword=keyword,
-                    page=1,
+                    page=page,
                     order=order
                 )
 
@@ -577,6 +586,8 @@ class VideoAnalyzer:
                     seen_bvids.add(bvid)
                     all_videos.append(video)
 
+        # 下一轮换搜索页，避免每轮都重复分析同一批视频。
+        self._search_page = page % 3 + 1
         return all_videos
 
     async def _analyze_video(self, video: Dict[str, Any]) -> Optional[Dict[str, Any]]:

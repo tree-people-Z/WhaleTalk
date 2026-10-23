@@ -132,6 +132,7 @@ class SettingsPage(QWidget):
         # 数字输入框
         self.max_comments_spin.valueChanged.connect(self.auto_save)
         self.cooldown_spin.valueChanged.connect(self.auto_save)
+        self.max_videos_spin.valueChanged.connect(self.auto_save)
         self.min_score_spin.valueChanged.connect(self.auto_save)
         self.max_results_spin.valueChanged.connect(self.auto_save)
         self.browse_interval_min_spin.valueChanged.connect(self.auto_save)
@@ -170,6 +171,7 @@ class SettingsPage(QWidget):
         # 禁用所有数字输入框的鼠标滚轮
         self.disable_wheel_event(self.max_comments_spin)
         self.disable_wheel_event(self.cooldown_spin)
+        self.disable_wheel_event(self.max_videos_spin)
         self.disable_wheel_event(self.min_score_spin)
         self.disable_wheel_event(self.max_results_spin)
         self.disable_wheel_event(self.mention_threshold_spin)
@@ -367,6 +369,14 @@ class SettingsPage(QWidget):
         self.cooldown_spin = QSpinBox()
         self.cooldown_spin.setRange(1, 30)
         layout.addRow("同视频冷却天数:", self.cooldown_spin)
+
+        # 每轮分析视频数
+        self.max_videos_spin = QSpinBox()
+        self.max_videos_spin.setRange(1, 20)
+        self.max_videos_spin.setToolTip(
+            "配合巡视间隔 5–10 分钟，可设置每轮分析 1–2 条，做持续慢速巡视"
+        )
+        layout.addRow("每轮分析视频数:", self.max_videos_spin)
 
         # 最低评分阈值
         self.min_score_spin = QSpinBox()
@@ -609,6 +619,7 @@ class SettingsPage(QWidget):
         # 限制设置
         self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 999))
         self.cooldown_spin.setValue(self.config.get('limits.same_video_cooldown_days', 7))
+        self.max_videos_spin.setValue(self.config.get('limits.max_videos_per_run', 20))
         self.min_score_spin.setValue(self.config.get('limits.min_score_to_comment', 13))
         self.mention_threshold_spin.setValue(
             self.config.get('limits.min_score_to_mention_owner', 13)
@@ -705,6 +716,7 @@ class SettingsPage(QWidget):
             # 限制设置
             self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
             self.config.set('limits.same_video_cooldown_days', self.cooldown_spin.value())
+            self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
             self.config.set('limits.min_score_to_comment', self.min_score_spin.value())
             self.config.set(
                 'limits.min_score_to_mention_owner', self.mention_threshold_spin.value()

@@ -6,6 +6,19 @@ from utils.database import Database
 
 
 class CommentHistoryTests(unittest.TestCase):
+    def test_skips_recently_analyzed_videos(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'history.db'))
+            try:
+                db.add_video_record(
+                    'BV1', {'aid': 1, 'title': '标题'}, {'score': 10}
+                )
+                self.assertTrue(db.is_video_analyzed_recently('BV1', hours=2))
+                self.assertFalse(db.is_video_analyzed_recently('BV2', hours=2))
+            finally:
+                db.session.close()
+                db.engine.dispose()
+
     def test_recent_comments_can_include_replies(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'history.db'))

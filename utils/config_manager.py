@@ -150,6 +150,7 @@ class ConfigManager:
             "limits": {
                 "max_comments_per_day": 999,
                 "max_videos_per_run": 20,
+                "skip_analyzed_within_hours": 2,
                 "max_greetings_per_video": 2,
                 "max_greetings_per_run": 5,
                 "max_interactions_per_video": 1,

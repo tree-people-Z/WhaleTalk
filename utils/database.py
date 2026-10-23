@@ -4,7 +4,7 @@
 """
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -230,6 +230,15 @@ class Database:
             .order_by(VideoRecord.created_at.desc())\
             .limit(limit)\
             .all()
+
+    def is_video_analyzed_recently(self, bvid: str, hours: float = 2) -> bool:
+        """检查视频是否在最近一段时间内分析过。"""
+        cutoff = datetime.now() - timedelta(hours=hours)
+        return self.session.query(VideoRecord).filter(
+            VideoRecord.bvid == bvid,
+            VideoRecord.analyzed_at.isnot(None),
+            VideoRecord.analyzed_at >= cutoff,
+        ).first() is not None
 
     def get_recent_comments(
         self, limit: int = 20, include_replies: bool = False
