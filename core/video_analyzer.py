@@ -1,9 +1,10 @@
-﻿"""
+"""
 视频分析器
 负责搜索、筛选、分析视频
 """
 
 import asyncio
+import random
 import re
 import threading
 import tempfile
@@ -391,14 +392,14 @@ class VideoAnalyzer:
         return result
 
     async def _search_videos(self) -> List[Dict[str, Any]]:
-        """搜索视频"""
-        keywords = self.config.get('search.keywords', ['Python', 'AI'])
+        """搜索视频，按关键词轮询交错，避免后面的关键词被截断。"""
+        keywords = list(self.config.get('search.keywords', ['Python', 'AI']))
         max_per_keyword = self.config.get('search.max_results_per_keyword', 5)
         order = self.config.get('search.order', 'pubdate')
 
-        all_videos = []
-        seen_bvids = set()
-
+        # 每轮随机关键词顺序，避免总是同一个关键词优先。
+        random.shuffle(keywords)
+        pools: List[List[Dict[str, Any]]] = []
         for keyword in keywords:
             try:
                 videos = await self.bili.search_videos(
@@ -407,15 +408,34 @@ class VideoAnalyzer:
                     order=order
                 )
 
+                pool = []
+                pool_seen = set()
                 for video in videos[:max_per_keyword]:
-                    if video['bvid'] not in seen_bvids:
-                        all_videos.append(video)
-                        seen_bvids.add(video['bvid'])
+                    bvid = video.get('bvid')
+                    if bvid and bvid not in pool_seen:
+                        pool_seen.add(bvid)
+                        pool.append(video)
+                if pool:
+                    pools.append(pool)
 
                 await asyncio.sleep(1)
 
             except Exception as e:
                 logger.error(f"搜索'{keyword}'失败: {e}")
+
+        # 轮询：各关键词轮流各取一条，保证名额公平分配。
+        all_videos: List[Dict[str, Any]] = []
+        seen_bvids = set()
+        max_pool_length = max((len(pool) for pool in pools), default=0)
+        for index in range(max_pool_length):
+            for pool in pools:
+                if index >= len(pool):
+                    continue
+                video = pool[index]
+                bvid = video.get('bvid')
+                if bvid and bvid not in seen_bvids:
+                    seen_bvids.add(bvid)
+                    all_videos.append(video)
 
         return all_videos
 
