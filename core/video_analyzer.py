@@ -16,6 +16,7 @@ from core.ai_client import AIClient
 from core.diary_system import DiarySystem
 from core.frame_analyzer import FrameAnalyzer
 from core.audio_transcriber import LocalAudioTranscriber
+from core.cloud_transcriber import CloudAudioTranscriber
 from utils.database import Database
 from utils.config_manager import ConfigManager
 
@@ -43,7 +44,7 @@ class VideoAnalyzer:
         self.frame_analyzer = FrameAnalyzer()
         self.enable_frame_analysis = self.config.get('analysis.enable_frame_analysis', True)
         self.local_transcriber = LocalAudioTranscriber(
-            model_name=self.config.get('analysis.local_transcription_model', 'small')
+            model_name=self.config.get('analysis.local_transcription_model', 'medium')
         )
 
         # 初始化评论管理器（用于自动回复）
@@ -53,6 +54,16 @@ class VideoAnalyzer:
             ai_client=self.ai,
             database=self.db,
             config=self.config
+        )
+
+    def _cloud_transcriber(self) -> CloudAudioTranscriber:
+        """Build a cloud transcriber from the current settings."""
+        return CloudAudioTranscriber(
+            base_url=self.config.get(
+                'analysis.cloud_transcription.base_url', 'https://api.openai.com/v1'
+            ),
+            api_key=self.config.get('analysis.cloud_transcription.api_key', ''),
+            model=self.config.get('analysis.cloud_transcription.model', 'whisper-1'),
         )
 
     async def check_replies(self) -> Dict[str, Any]:
@@ -271,18 +282,29 @@ class VideoAnalyzer:
                     media_urls['video'], frame_tempdir.name, count=3, duration=video.get('duration')
                 )
 
-            if not subtitle and self.config.get('analysis.local_transcription_enabled', True):
+            transcription_mode = self.config.get('analysis.transcription_mode', 'off')
+            if not subtitle and transcription_mode in ('local', 'cloud'):
                 if media_urls.get('audio') and self.frame_analyzer.ffmpeg_available:
                     try:
                         with tempfile.TemporaryDirectory(prefix='bili-audio-') as audio_dir:
-                            subtitle = await self.local_transcriber.transcribe_url(
-                                media_urls['audio'], str(Path(audio_dir) / 'audio.wav'),
-                                ffmpeg_path=self.frame_analyzer.ffmpeg_path,
-                            )
-                            if subtitle:
-                                text_evidence_type = '本地语音转写'
+                            if transcription_mode == 'cloud':
+                                subtitle = await self._cloud_transcriber().transcribe_url(
+                                    media_urls['audio'],
+                                    str(Path(audio_dir) / 'audio.mp3'),
+                                    ffmpeg_path=self.frame_analyzer.ffmpeg_path,
+                                )
+                                if subtitle:
+                                    text_evidence_type = '云端语音转写'
+                            else:
+                                subtitle = await self.local_transcriber.transcribe_url(
+                                    media_urls['audio'],
+                                    str(Path(audio_dir) / 'audio.wav'),
+                                    ffmpeg_path=self.frame_analyzer.ffmpeg_path,
+                                )
+                                if subtitle:
+                                    text_evidence_type = '本地语音转写'
                     except Exception as exc:
-                        logger.warning(f"本地语音转写失败 {bvid}: {exc}")
+                        logger.warning(f"语音转写失败 {bvid}: {exc}")
                 else:
                     logger.warning(f"视频 {bvid} 无法取得音频流或本机缺少ffmpeg")
 

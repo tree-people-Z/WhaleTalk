@@ -1,7 +1,8 @@
-"""Local speech-to-text fallback using faster-whisper."""
+﻿"""Local speech-to-text fallback using faster-whisper."""
 
 import asyncio
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
@@ -18,8 +19,8 @@ class LocalAudioTranscriber:
     _model_name = None
     _model_lock = threading.Lock()
 
-    def __init__(self, model_name: str = 'small', model_dir: str = 'data/models/faster-whisper'):
-        self.model_name = model_name or 'small'
+    def __init__(self, model_name: str = 'medium', model_dir: str = 'data/models/faster-whisper'):
+        self.model_name = model_name or 'medium'
         self.model_dir = Path(model_dir)
 
     @classmethod
@@ -27,9 +28,23 @@ class LocalAudioTranscriber:
         with cls._model_lock:
             if cls._model is not None and cls._model_name == model_name:
                 return cls._model
+            # 便携版按需下载的组件位于 data/transcription，需要先加入导入路径。
+            try:
+                from utils.transcription_component import (
+                    configure_hf_endpoint,
+                    ensure_importable,
+                )
+                ensure_importable()
+                configure_hf_endpoint()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"准备本地识别组件失败: {exc}")
             try:
                 from faster_whisper import WhisperModel
             except ImportError as exc:
+                if getattr(sys, 'frozen', False):
+                    raise RuntimeError(
+                        "本地识别组件未安装，请在设置页点击“下载本地识别组件和模型”后重试。"
+                    ) from exc
                 raise RuntimeError(
                     "本地语音识别依赖未安装，请执行 pip install faster-whisper"
                 ) from exc
@@ -75,8 +90,14 @@ class LocalAudioTranscriber:
                 detail = result.stderr.decode(errors='replace')[-500:]
                 raise RuntimeError(f"ffmpeg音频解码失败: {detail}")
             model = self._get_model(self.model_name, self.model_dir)
+            # 直接传入 float32 采样数组，避免依赖 PyAV 的版本相关解码接口。
+            try:
+                audio_input = self._read_wav_float32(output_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"读取 WAV 失败，回退为文件路径: {exc}")
+                audio_input = str(output_path)
             segments, _info = model.transcribe(
-                str(output_path), beam_size=3, vad_filter=True, condition_on_previous_text=False
+                audio_input, beam_size=3, vad_filter=True, condition_on_previous_text=False
             )
             text = ' '.join(segment.text.strip() for segment in segments if segment.text.strip())
             if not text:
@@ -88,3 +109,14 @@ class LocalAudioTranscriber:
             raise RuntimeError("音频提取超时") from exc
         finally:
             output_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _read_wav_float32(path: Path):
+        """Read the 16 kHz mono PCM WAV produced by ffmpeg as float32 samples."""
+        import wave
+
+        import numpy as np
+
+        with wave.open(str(path), 'rb') as handle:
+            frames = handle.readframes(handle.getnframes())
+        return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0

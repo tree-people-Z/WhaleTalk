@@ -28,8 +28,14 @@ class ConfigDefaultTests(unittest.TestCase):
         self.assertTrue(config.get('interaction.auto_reply'))
         self.assertFalse(config.get('interaction.mention_owner_on_interesting'))
         self.assertTrue(config.get('analysis.enable_frame_analysis'))
+        self.assertEqual(config.get('analysis.transcription_mode'), 'off')
         self.assertFalse(config.get('analysis.local_transcription_enabled'))
-        self.assertEqual(config.get('analysis.local_transcription_model'), 'small')
+        self.assertEqual(config.get('analysis.local_transcription_model'), 'medium')
+        self.assertEqual(
+            config.get('analysis.cloud_transcription.base_url'), 'https://api.openai.com/v1'
+        )
+        self.assertEqual(config.get('analysis.cloud_transcription.model'), 'whisper-1')
+        self.assertEqual(config.get('analysis.cloud_transcription.api_key'), '')
         self.assertEqual(config.get('ai.api_key'), '')
         self.assertEqual(config.get('bilibili.owner_uid'), '')
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 鲸语 - B站智能运营助手
 主入口文件
@@ -32,6 +32,82 @@ except Exception as exc:
     if sys.stderr is not None:
         print(f"依赖准备失败: {exc}", file=sys.stderr, flush=True)
     raise SystemExit(1)
+
+
+def _transcription_self_check(argv) -> int:
+    """Diagnostic entry point for the portable transcription component."""
+    log_dir = Path('data/logs')
+    log_dir.mkdir(parents=True, exist_ok=True)
+    lines = []
+    try:
+        from utils.transcription_component import (
+            component_info, configure_hf_endpoint, ensure_importable,
+        )
+        lines.append(f'component_info={component_info()}')
+        lines.append(f'importable={ensure_importable()}')
+        lines.append(f'hf_endpoint={configure_hf_endpoint()}')
+        import av
+        import ctranslate2
+        import faster_whisper
+        import numpy
+        lines.append(f'faster_whisper={getattr(faster_whisper, "__version__", "?")}')
+        lines.append(f'ctranslate2={getattr(ctranslate2, "__version__", "?")}')
+        lines.append(f'av={getattr(av, "__version__", "?")}')
+        lines.append(f'numpy={numpy.__version__}')
+        model_name = 'tiny'
+        if '--model' in argv:
+            model_index = argv.index('--model')
+            if model_index + 1 < len(argv) and not argv[model_index + 1].startswith('--'):
+                model_name = argv[model_index + 1]
+        if '--download-model' in argv:
+            from faster_whisper import WhisperModel
+            WhisperModel(
+                model_name,
+                device='cpu',
+                compute_type='int8',
+                download_root='data/models/faster-whisper',
+            )
+            lines.append(f'model_ready={model_name}')
+        if '--transcribe-wav' in argv:
+            wav_index = argv.index('--transcribe-wav')
+            if wav_index + 1 >= len(argv):
+                raise RuntimeError('--transcribe-wav 需要一个 WAV 文件路径')
+            wav_path = argv[wav_index + 1]
+            import wave
+
+            import numpy as np
+            from faster_whisper import WhisperModel
+            model = WhisperModel(
+                model_name,
+                device='cpu',
+                compute_type='int8',
+                download_root='data/models/faster-whisper',
+            )
+            with wave.open(wav_path, 'rb') as handle:
+                frames = handle.readframes(handle.getnframes())
+            audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            segments, info = model.transcribe(
+                audio, beam_size=3, vad_filter=True,
+                condition_on_previous_text=False,
+            )
+            text = ' '.join(
+                segment.text.strip() for segment in segments if segment.text.strip()
+            )
+            lines.append(f'transcript_language={getattr(info, "language", "?")}')
+            lines.append(f'transcript={text}')
+        lines.append('RESULT=OK')
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        lines.append(f'RESULT=ERROR: {exc}')
+        lines.append(traceback.format_exc())
+    (log_dir / 'transcription-selfcheck.log').write_text(
+        '\n'.join(lines), encoding='utf-8'
+    )
+    return 0
+
+
+if '--transcription-self-test' in sys.argv:
+    sys.exit(_transcription_self_check(sys.argv))
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt

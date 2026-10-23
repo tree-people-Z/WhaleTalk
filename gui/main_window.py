@@ -1,4 +1,4 @@
-"""
+﻿"""
 主窗口GUI
 """
 
@@ -491,7 +491,7 @@ class MainWindow(QMainWindow):
             'analysis.enable_frame_analysis', True
         )
         self.video_analyzer.local_transcriber = LocalAudioTranscriber(
-            model_name=self.config.get('analysis.local_transcription_model', 'small')
+            model_name=self.config.get('analysis.local_transcription_model', 'medium')
         )
         self.log("⚙️ 画面分析与本地转写设置已应用")
 

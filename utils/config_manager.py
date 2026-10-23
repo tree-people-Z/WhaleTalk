@@ -29,6 +29,7 @@ class ConfigManager:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
                 self._normalize_secrets()
+                self._normalize_transcription()
                 logger.info(f"配置已加载: {self.config_path}")
             except Exception as e:
                 logger.error(f"加载配置失败: {e}")
@@ -41,12 +42,32 @@ class ConfigManager:
         """保存配置"""
         try:
             self._normalize_secrets()
+            self._normalize_transcription()
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2, ensure_ascii=False)
             logger.info("配置已保存")
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
+
+    def _normalize_transcription(self):
+        """本地转写只提供 medium 模型；transcription_mode 控制关闭/本地/云端。"""
+        analysis = self.config.get('analysis')
+        if not isinstance(analysis, dict):
+            return
+        mode = analysis.get('transcription_mode')
+        if mode not in ('off', 'local', 'cloud'):
+            mode = 'local' if analysis.get('local_transcription_enabled') else 'off'
+        analysis['transcription_mode'] = mode
+        analysis['local_transcription_enabled'] = mode == 'local'
+        analysis['local_transcription_model'] = 'medium'
+        cloud = analysis.get('cloud_transcription')
+        if not isinstance(cloud, dict):
+            cloud = {}
+        cloud.setdefault('base_url', 'https://api.openai.com/v1')
+        cloud.setdefault('api_key', '')
+        cloud.setdefault('model', 'whisper-1')
+        analysis['cloud_transcription'] = cloud
 
     def _normalize_secrets(self):
         """清除密钥首尾空白，避免换行破坏 HTTP 请求头。"""
@@ -146,8 +167,14 @@ class ConfigManager:
             },
             "analysis": {
                 "enable_frame_analysis": True,
+                "transcription_mode": "off",
                 "local_transcription_enabled": False,
-                "local_transcription_model": "small"
+                "local_transcription_model": "medium",
+                "cloud_transcription": {
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": "",
+                    "model": "whisper-1"
+                }
             },
             "diary": {
                 "enabled": True

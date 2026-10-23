@@ -24,22 +24,59 @@ from utils.updater import APP_VERSION, REPOSITORY_URL
 
 
 class TranscriptionSetupWorker(QThread):
-    """Install optional faster-whisper and download its selected local model."""
+    """Prepare local transcription: component download (portable) and model download."""
     setup_complete = pyqtSignal(bool, str)
+    status = pyqtSignal(str)
 
     def __init__(self, model_name: str):
         super().__init__()
         self.model_name = model_name
 
     def run(self):
-        if getattr(sys, 'frozen', False):
+        try:
+            if getattr(sys, 'frozen', False):
+                if not self._ensure_portable_component():
+                    return
+            else:
+                if not self._install_source_dependencies():
+                    return
+            self._download_model()
             self.setup_complete.emit(
-                False,
-                "便携版无法自动安装本地识别组件；如需本地转写，请使用源码版（python main.py）安装 faster-whisper。",
+                True, f"本地识别组件与 {self.model_name} 模型已准备完成。"
             )
-            return
+        except Exception as exc:  # noqa: BLE001
+            self.setup_complete.emit(False, f"本地识别准备失败：{exc}")
+
+    def _ensure_portable_component(self) -> bool:
+        from utils.transcription_component import (
+            download_component, ensure_importable, is_installed,
+        )
+
+        if not is_installed():
+            self.status.emit("正在下载本地识别组件（约 100 MB）…")
+
+            def report(done: int, total: int):
+                if total:
+                    self.status.emit(
+                        f"正在下载本地识别组件… {done / 1048576:.1f} / {total / 1048576:.1f} MB"
+                    )
+                else:
+                    self.status.emit("正在下载本地识别组件…")
+
+            try:
+                download_component(progress=report)
+            except Exception as exc:  # noqa: BLE001
+                self.setup_complete.emit(False, f"下载本地识别组件失败：{exc}")
+                return False
+        if not ensure_importable():
+            self.setup_complete.emit(False, "本地识别组件不可用，请重试。")
+            return False
+        return True
+
+    def _install_source_dependencies(self) -> bool:
         project_root = Path(__file__).resolve().parent.parent
         requirements = project_root / 'requirements-transcription.txt'
+        self.status.emit("正在安装 faster-whisper…")
         install = subprocess.run(
             [sys.executable, '-m', 'pip', 'install', '-r', str(requirements)],
             cwd=project_root, capture_output=True, text=True,
@@ -47,17 +84,24 @@ class TranscriptionSetupWorker(QThread):
         )
         if install.returncode:
             self.setup_complete.emit(False, (install.stderr or install.stdout)[-1800:])
-            return
+            return False
+        return True
+
+    def _download_model(self):
+        from utils.transcription_component import configure_hf_endpoint, ensure_importable
+
         try:
-            from faster_whisper import WhisperModel
-            model_dir = project_root / 'data' / 'models' / 'faster-whisper'
-            WhisperModel(
-                self.model_name, device='cpu', compute_type='int8',
-                download_root=str(model_dir),
-            )
-            self.setup_complete.emit(True, f"本地识别依赖与 {self.model_name} 模型已准备完成。")
-        except Exception as exc:
-            self.setup_complete.emit(False, f"依赖已安装，但模型下载/初始化失败：{exc}")
+            ensure_importable()
+        except Exception:  # noqa: BLE001
+            pass
+        configure_hf_endpoint()
+        from faster_whisper import WhisperModel
+
+        self.status.emit(f"正在下载/加载 {self.model_name} 模型（首次使用需要一些时间）…")
+        WhisperModel(
+            self.model_name, device='cpu', compute_type='int8',
+            download_root=str(Path('data/models/faster-whisper')),
+        )
 
 
 class SettingsPage(QWidget):
@@ -107,6 +151,12 @@ class SettingsPage(QWidget):
         # Save the whole range after editing; saving every keystroke would
         # temporarily persist malformed windows and restart the scheduler.
         self.deepseek_offpeak_windows_input.editingFinished.connect(self.auto_save)
+        self.transcription_mode_combo.currentIndexChanged.connect(
+            self.on_transcription_mode_changed
+        )
+        self.cloud_stt_base_url_input.editingFinished.connect(self.auto_save)
+        self.cloud_stt_api_key_input.editingFinished.connect(self.auto_save)
+        self.cloud_stt_model_input.editingFinished.connect(self.auto_save)
 
         # 禁用所有数字输入框的鼠标滚轮
         self.disable_wheel_event(self.max_comments_spin)
@@ -118,6 +168,7 @@ class SettingsPage(QWidget):
         # 禁用所有下拉框的鼠标滚轮
         self.disable_wheel_event(self.ai_provider_combo)
         self.disable_wheel_event(self.order_combo)
+        self.disable_wheel_event(self.transcription_mode_combo)
 
     def disable_wheel_event(self, widget):
         """禁用控件的鼠标滚轮事件"""
@@ -383,16 +434,37 @@ class SettingsPage(QWidget):
         self.frame_analysis_check = QCheckBox("每条视频分析画面（需要ffmpeg和支持视觉的模型）")
         layout.addWidget(self.frame_analysis_check)
 
+        # 语音转写（可开关：关闭 / 本地 medium / 云端）
         transcription_layout = QHBoxLayout()
-        transcription_layout.addWidget(QLabel("本地语音识别模型:"))
-        self.transcription_model_combo = QComboBox()
-        self.transcription_model_combo.addItems(["base", "small", "medium"])
-        transcription_layout.addWidget(self.transcription_model_combo)
+        transcription_layout.addWidget(QLabel("语音转写:"))
+        self.transcription_mode_combo = QComboBox()
+        self.transcription_mode_combo.addItem("关闭", "off")
+        self.transcription_mode_combo.addItem("本地识别（medium，需下载模型）", "local")
+        self.transcription_mode_combo.addItem("云端识别（OpenAI 兼容接口）", "cloud")
+        transcription_layout.addWidget(self.transcription_mode_combo)
         self.transcription_setup_btn = QPushButton("下载本地识别组件和模型")
         self.transcription_setup_btn.clicked.connect(self.setup_local_transcription)
         transcription_layout.addWidget(self.transcription_setup_btn)
+        transcription_layout.addStretch()
         layout.addLayout(transcription_layout)
-        self.transcription_status_label = QLabel("可选功能：点击后安装 faster-whisper 并下载所选模型；音频仅在本地转写。")
+
+        cloud_form = QFormLayout()
+        self.cloud_stt_base_url_input = QLineEdit()
+        self.cloud_stt_base_url_input.setPlaceholderText("https://api.openai.com/v1")
+        cloud_form.addRow("云端接口地址:", self.cloud_stt_base_url_input)
+        self.cloud_stt_api_key_input = QLineEdit()
+        self.cloud_stt_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.cloud_stt_api_key_input.setPlaceholderText("云端转写服务的 API Key")
+        cloud_form.addRow("云端 API Key:", self.cloud_stt_api_key_input)
+        self.cloud_stt_model_input = QLineEdit()
+        self.cloud_stt_model_input.setPlaceholderText("whisper-1")
+        cloud_form.addRow("云端模型:", self.cloud_stt_model_input)
+        layout.addLayout(cloud_form)
+
+        self.transcription_status_label = QLabel(
+            "关闭时不转写；本地识别需先下载 medium 模型（约 1.5 GB），音频不出本机；"
+            "云端识别会把音频上传到上面配置的服务（接口需兼容 /audio/transcriptions）。"
+        )
         self.transcription_status_label.setWordWrap(True)
         layout.addWidget(self.transcription_status_label)
 
@@ -515,10 +587,19 @@ class SettingsPage(QWidget):
         self.reply_only_owner_check.setChecked(self.config.get('interaction.reply_only_owner', True))
         self.reply_to_others_check.setChecked(self.config.get('interaction.reply_to_others', False))
         self.frame_analysis_check.setChecked(self.config.get('analysis.enable_frame_analysis', True))
-        model = self.config.get('analysis.local_transcription_model', 'small')
-        model_index = self.transcription_model_combo.findText(model)
-        if model_index >= 0:
-            self.transcription_model_combo.setCurrentIndex(model_index)
+        mode = self.config.get('analysis.transcription_mode', 'off')
+        mode_index = self.transcription_mode_combo.findData(mode)
+        self.transcription_mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+        self.cloud_stt_base_url_input.setText(
+            self.config.get('analysis.cloud_transcription.base_url', 'https://api.openai.com/v1')
+        )
+        self.cloud_stt_api_key_input.setText(
+            self.config.get('analysis.cloud_transcription.api_key', '')
+        )
+        self.cloud_stt_model_input.setText(
+            self.config.get('analysis.cloud_transcription.model', 'whisper-1')
+        )
+        self._update_transcription_controls()
         self.diary_check.setChecked(self.config.get('diary.enabled', True))
 
         # 自动运行
@@ -596,7 +677,22 @@ class SettingsPage(QWidget):
             self.config.set('interaction.reply_only_owner', self.reply_only_owner_check.isChecked())
             self.config.set('interaction.reply_to_others', self.reply_to_others_check.isChecked())
             self.config.set('analysis.enable_frame_analysis', self.frame_analysis_check.isChecked())
-            self.config.set('analysis.local_transcription_model', self.transcription_model_combo.currentText())
+            self.config.set(
+                'analysis.transcription_mode',
+                self.transcription_mode_combo.currentData() or 'off',
+            )
+            self.config.set(
+                'analysis.cloud_transcription.base_url',
+                self.cloud_stt_base_url_input.text().strip(),
+            )
+            self.config.set(
+                'analysis.cloud_transcription.api_key',
+                self.cloud_stt_api_key_input.text().strip(),
+            )
+            self.config.set(
+                'analysis.cloud_transcription.model',
+                self.cloud_stt_model_input.text().strip() or 'whisper-1',
+            )
             self.config.set('diary.enabled', self.diary_check.isChecked())
             self.analysis_settings_saved.emit()
 
@@ -622,16 +718,33 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "错误", f"保存设置失败:\n{e}")
             logger.error(f"保存设置失败: {e}")
 
+    def on_transcription_mode_changed(self):
+        self._update_transcription_controls()
+        self.auto_save()
+
+    def _update_transcription_controls(self):
+        mode = self.transcription_mode_combo.currentData()
+        is_cloud = mode == 'cloud'
+        is_local = mode == 'local'
+        for widget in (
+            self.cloud_stt_base_url_input,
+            self.cloud_stt_api_key_input,
+            self.cloud_stt_model_input,
+        ):
+            widget.setEnabled(is_cloud)
+        self.transcription_setup_btn.setEnabled(is_local)
+
     def setup_local_transcription(self):
         """Install faster-whisper and download the chosen model on demand."""
         if getattr(self, '_transcription_worker', None) and self._transcription_worker.isRunning():
             return
-        model_name = self.transcription_model_combo.currentText()
+        model_name = 'medium'
         self.transcription_setup_btn.setEnabled(False)
         self.transcription_status_label.setText(
             f"正在准备 {model_name} 模型，首次下载可能需要一些时间..."
         )
         self._transcription_worker = TranscriptionSetupWorker(model_name)
+        self._transcription_worker.status.connect(self.transcription_status_label.setText)
         self._transcription_worker.setup_complete.connect(self.on_transcription_setup_complete)
         self._transcription_worker.start()
 
@@ -639,8 +752,13 @@ class SettingsPage(QWidget):
         self.transcription_setup_btn.setEnabled(True)
         self.transcription_status_label.setText(message)
         if success:
+            self.config.set('analysis.transcription_mode', 'local')
             self.config.set('analysis.local_transcription_enabled', True)
-            self.config.set('analysis.local_transcription_model', self.transcription_model_combo.currentText())
+            self.config.set('analysis.local_transcription_model', 'medium')
+            mode_index = self.transcription_mode_combo.findData('local')
+            if mode_index >= 0:
+                self.transcription_mode_combo.setCurrentIndex(mode_index)
+            self._update_transcription_controls()
             self.analysis_settings_saved.emit()
             QMessageBox.information(self, "本地识别已就绪", message)
         else:
