@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from bilibili_api import login_v2, search, video, comment, user
+from bilibili_api import session as bili_session
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
 from bilibili_api.comment import OrderType
@@ -35,6 +36,8 @@ class BilibiliAPI:
 
         # 风控状态
         self.blocked_until: Optional[datetime] = None
+        # 当前登录账号（用于过滤自己发出的评论，避免自问自答）
+        self._self_info: Optional[Dict[str, Any]] = None
 
     def _load_credential(self):
         """从文件加载凭证"""
@@ -69,6 +72,7 @@ class BilibiliAPI:
             bili_jct=bili_jct,
             buvid3=buvid3
         )
+        self._self_info = None
         logger.info("凭证已保存")
 
     async def login_with_qr(self) -> tuple[bool, Optional[bytes], Optional[any]]:
@@ -198,6 +202,102 @@ class BilibiliAPI:
             import traceback
             logger.error(traceback.format_exc())
             return {'status': 'error', 'message': str(e)}
+
+    async def get_self_info(self) -> Dict[str, Any]:
+        """获取当前登录账号的 uid 和昵称（缓存）。"""
+        if self._self_info is not None:
+            return self._self_info
+        if not self.credential:
+            return {}
+        try:
+            info = await user.get_self_info(self.credential)
+            self._self_info = {
+                'uid': info.get('mid'),
+                'name': info.get('name') or '',
+            }
+        except Exception as exc:
+            logger.debug(f"获取登录账号信息失败: {exc}")
+            self._self_info = {}
+        return self._self_info
+
+    @staticmethod
+    def _message_text(message: Dict[str, Any]) -> str:
+        """Extract readable text from a private-message payload."""
+        content = message.get('content')
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (TypeError, ValueError):
+                return content.strip()
+        if isinstance(content, dict):
+            for key in ('content', 'text', 'title'):
+                value = content.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return '[非文本消息]'
+        return '' if content is None else str(content)
+
+    async def get_private_sessions(self, session_type: int = 1) -> List[Dict[str, Any]]:
+        """获取私信会话列表。session_type: 1 私信, 4 全部。"""
+        if not self.credential:
+            return []
+        try:
+            data = await bili_session.get_sessions(
+                credential=self.credential, session_type=session_type
+            )
+        except Exception as exc:
+            logger.warning(f"获取私信会话失败: {exc}")
+            return []
+
+        sessions = []
+        for item in (data.get('session_list') or []):
+            talker_id = item.get('talker_id')
+            if not talker_id:
+                continue
+            last = item.get('last_msg') or {}
+            account = item.get('account_info') or {}
+            sessions.append({
+                'talker_id': int(talker_id),
+                'session_type': item.get('session_type') or session_type,
+                'name': account.get('name') or item.get('name') or f'UID {talker_id}',
+                'unread': int(item.get('unread_count') or 0),
+                'last_message': self._message_text(last),
+                'last_sender_uid': last.get('sender_uid'),
+                'last_timestamp': int(last.get('timestamp') or item.get('top_ts') or 0),
+            })
+        sessions.sort(key=lambda row: row.get('last_timestamp') or 0, reverse=True)
+        return sessions
+
+    async def get_private_messages(
+        self, talker_id: int, session_type: int = 1
+    ) -> List[Dict[str, Any]]:
+        """获取与某个用户的私信消息（按时间升序）。"""
+        if not self.credential:
+            return []
+        try:
+            data = await bili_session.fetch_session_msgs(
+                talker_id=int(talker_id),
+                credential=self.credential,
+                session_type=session_type,
+            )
+        except Exception as exc:
+            logger.warning(f"获取私信消息失败 talker={talker_id}: {exc}")
+            return []
+
+        messages = []
+        for item in (data.get('messages') or []):
+            if item.get('msg_type') == 5:  # 撤回的消息
+                content = '[消息已撤回]'
+            else:
+                content = self._message_text(item)
+            messages.append({
+                'sender_uid': item.get('sender_uid'),
+                'timestamp': int(item.get('timestamp') or 0),
+                'content': content,
+                'msg_type': item.get('msg_type'),
+            })
+        messages.sort(key=lambda row: row.get('timestamp') or 0)
+        return messages
 
     async def check_login(self) -> bool:
         """检查登录状态"""
@@ -480,6 +580,7 @@ class BilibiliAPI:
                     comments.append({
                         'rpid': entry.get('rpid'),
                         'user': entry.get('member', {}).get('uname', '未知用户'),
+                        'mid': entry.get('member', {}).get('mid'),
                         'content': entry.get('content', {}).get('message', ''),
                         'like': entry.get('like', 0),
                         'ctime': entry.get('ctime', 0),
@@ -505,6 +606,7 @@ class BilibiliAPI:
                             comments.append({
                                 'rpid': entry.get('rpid'),
                                 'user': entry.get('member', {}).get('uname', '未知用户'),
+                                'mid': entry.get('member', {}).get('mid'),
                                 'content': entry.get('content', {}).get('message', ''),
                                 'like': entry.get('like', 0),
                                 'ctime': entry.get('ctime', 0),

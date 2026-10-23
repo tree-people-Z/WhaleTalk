@@ -258,6 +258,13 @@ class Database:
                     CommentRecord.parent_rpid.isnot(None)).all()
         }
 
+    def get_own_comment_rpids(self) -> set:
+        """读取自己发出过的评论/回复 rpid，避免把自己当作回复对象。"""
+        return {
+            row[0] for row in self.session.query(CommentRecord.rpid)
+            .filter(CommentRecord.rpid.isnot(None)).all()
+        }
+
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         total_videos = self.session.query(VideoRecord).count()

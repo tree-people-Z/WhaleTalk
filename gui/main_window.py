@@ -18,6 +18,7 @@ from loguru import logger
 
 from gui.login_dialog import LoginDialog
 from gui.settings_page import SettingsPage
+from gui.messages_tab import MessagesTab
 from gui.styles import MODERN_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
@@ -112,6 +113,12 @@ class MainWindow(QMainWindow):
         self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_timer.start()
 
+        # 运行期间每 6 小时复查一次更新。
+        self._update_recheck_timer = QTimer(self)
+        self._update_recheck_timer.setInterval(6 * 60 * 60 * 1000)
+        self._update_recheck_timer.timeout.connect(lambda: self.check_updates(silent=True))
+        self._update_recheck_timer.start()
+
     def init_ui(self):
         """初始化UI"""
         self.setWindowTitle("鲸语 · B站智能运营助手")
@@ -145,6 +152,10 @@ class MainWindow(QMainWindow):
         self.history_tab = self._create_history_tab()
         self.tabs.addTab(self.history_tab, "历史记录")
 
+        # 私信标签
+        self.messages_tab = MessagesTab()
+        self.tabs.addTab(self.messages_tab, "私信")
+
         # 设置标签
         self.settings_page = SettingsPage(self.config)
         self.settings_page.auto_run_btn.clicked.connect(self.toggle_auto_run)
@@ -154,6 +165,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_page, "设置")
 
         layout.addWidget(self.tabs)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         # 状态栏
         self.statusBar = QStatusBar()
@@ -279,6 +291,7 @@ class MainWindow(QMainWindow):
         try:
             # 初始化B站API
             self.bili_api = BilibiliAPI()
+            self.messages_tab.set_bili_api(self.bili_api)
 
             # 初始化AI客户端
             ai_config = self.config.get('ai', {})
@@ -371,6 +384,7 @@ class MainWindow(QMainWindow):
             self.login_status_label.setStyleSheet("color: #2ea44f; font-size: 14px; font-weight: 600;")
             self.login_btn.setText("🔐 切换账号")
             self.log("✅ 登录成功！")
+            self.messages_tab.set_bili_api(self.bili_api)
 
     def run_analysis_now(self):
         """立即运行分析"""
@@ -619,6 +633,11 @@ class MainWindow(QMainWindow):
         """Append structured runtime logs safely from workers to the GUI."""
         self.log_text.append(message)
 
+    def _on_tab_changed(self, index: int):
+        """切换到私信页时按需刷新会话。"""
+        if self.tabs.widget(index) is self.messages_tab:
+            self.messages_tab.refresh_if_stale()
+
     def check_updates_manually(self):
         """手动检查更新（来自设置页按钮）。"""
         self.check_updates(silent=False)
@@ -648,6 +667,15 @@ class MainWindow(QMainWindow):
         action = prompt_update(self, result, silent)
         if action == "install":
             self._start_update_download(result)
+            return
+        if result.get("status") == "update":
+            version = result.get("version", "")
+            self.settings_page.check_update_btn.setText(f"⬆️ 更新到 v{version}")
+            self.statusBar.showMessage(
+                f"发现新版本 v{version}：可在 设置 → 关于与更新 中一键更新"
+            )
+        elif result.get("status") == "latest":
+            self.settings_page.check_update_btn.setText("🔃 检查更新")
 
     def _start_update_download(self, result):
         if not getattr(sys, 'frozen', False):
@@ -718,6 +746,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """关闭事件"""
         self._update_timer.stop()
+        self._update_recheck_timer.stop()
         if self._update_worker is not None and self._update_worker.isRunning():
             self._update_worker.wait(3000)
         if self._update_download is not None and self._update_download.isRunning():

@@ -46,6 +46,17 @@ class CommentManager:
             mentions = []
             already_replied = self.db.get_replied_comment_ids()
             self.processed_rpids.update(already_replied)
+            # 自己发过的评论/回复不能当作“别人回复我”，否则会自问自答刷屏。
+            own_rpids = self.db.get_own_comment_rpids()
+            self.processed_rpids.update(own_rpids)
+            self_uid = None
+            self_name = ''
+            try:
+                self_info = await self.bili.get_self_info()
+                self_uid = self_info.get('uid')
+                self_name = self_info.get('name') or ''
+            except Exception as exc:
+                logger.debug(f"获取当前账号信息失败: {exc}")
 
             # 1. 检查我发送的评论是否有回复
             my_comments = self.db.get_recent_comments(limit=20)
@@ -72,22 +83,30 @@ class CommentManager:
                         parent = comment.get('parent', 0)
                         rpid = comment.get('rpid')
 
+                        # 跳过自己发出的评论（含自动回复产生的楼层），避免自问自答。
+                        if rpid in self.processed_rpids:
+                            continue
+                        if self_uid is not None and comment.get('mid') == self_uid:
+                            logger.debug(f"跳过自己发出的评论: {rpid}")
+                            continue
+                        if self_name and comment.get('user') == self_name:
+                            logger.debug(f"跳过自己账号的评论: {rpid}")
+                            continue
+
                         # 如果root或parent是我的评论ID，说明是回复我的
                         if root == my_rpid or parent == my_rpid:
-                            if (rpid not in self.processed_rpids
-                                    and comment.get('user') != self.config.get('bilibili.owner_name', '')):
-                                thread_root = root or my_rpid
-                                mentions.append({
-                                    'rpid': rpid,
-                                    'root_rpid': thread_root,
-                                    'user': comment.get('user'),
-                                    'content': comment.get('content'),
-                                    'aid': aid,
-                                    'bvid': my_comment.get('bvid'),
-                                    'type': 'reply',
-                                    'video_title': my_comment.get('video_title', '')
-                                })
-                                logger.info(f"发现回复: {comment.get('user')} -> {comment.get('content')[:30]}")
+                            thread_root = root or my_rpid
+                            mentions.append({
+                                'rpid': rpid,
+                                'root_rpid': thread_root,
+                                'user': comment.get('user'),
+                                'content': comment.get('content'),
+                                'aid': aid,
+                                'bvid': my_comment.get('bvid'),
+                                'type': 'reply',
+                                'video_title': my_comment.get('video_title', '')
+                            })
+                            logger.info(f"发现回复: {comment.get('user')} -> {comment.get('content')[:30]}")
 
                 except Exception as e:
                     logger.debug(f"检查评论回复失败 aid={aid}: {e}")
