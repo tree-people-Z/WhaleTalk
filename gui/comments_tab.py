@@ -47,6 +47,7 @@ class CommentsTab(QWidget):
         self.own_rpids = set()
         self._worker = None
         self._loaded_at = 0.0
+        self._notified_aids = set()
         self._build_ui()
 
     def _build_ui(self):
@@ -62,10 +63,19 @@ class CommentsTab(QWidget):
         toolbar.addWidget(self.refresh_btn)
         layout.addLayout(toolbar)
 
+        self.notice_label = QLabel("")
+        self.notice_label.setWordWrap(True)
+        self.notice_label.setStyleSheet(
+            "background-color: #fff7e0; border: 1px solid #f0d38a; border-radius: 8px;"
+            " padding: 10px 12px; color: #6b4b00;"
+        )
+        self.notice_label.hide()
+        layout.addWidget(self.notice_label)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.thread_list = QListWidget()
         self.thread_list.setMinimumWidth(240)
-        self.thread_list.itemClicked.connect(self._on_thread_selected)
+        self.thread_list.itemClicked.connect(self._on_user_selected_thread)
         splitter.addWidget(self.thread_list)
 
         self.transcript = QTextEdit()
@@ -106,7 +116,8 @@ class CommentsTab(QWidget):
             )
             title = thread.get('video_title') or thread.get('bvid') or '视频'
             content = (thread.get('content') or '').replace('\n', ' ')[:50]
-            item = QListWidgetItem(f"{title}\n{when} · {content}")
+            prefix = "🔔 " if thread.get('aid') in self._notified_aids else ""
+            item = QListWidgetItem(f"{prefix}{title}\n{when} · {content}")
             item.setData(Qt.ItemDataRole.UserRole, thread)
             self.thread_list.addItem(item)
         if self.threads:
@@ -116,6 +127,37 @@ class CommentsTab(QWidget):
         else:
             self.status_label.setText("还没有发送过评论")
             self.transcript.setPlainText("")
+
+    def show_reply_notice(self, replies: List[Dict[str, Any]]):
+        """Display a banner for newly detected replies and mark their threads."""
+        if not replies:
+            return
+        for mention in replies:
+            aid = mention.get('aid')
+            if aid is not None:
+                self._notified_aids.add(aid)
+        lines = []
+        for mention in replies[:3]:
+            user = mention.get('user') or '网友'
+            content = (mention.get('content') or '').replace('\n', ' ')[:60]
+            lines.append(f"🔔 {user}：{content}")
+        if len(replies) > 3:
+            lines.append(f"…等 {len(replies)} 条新回复")
+        self.notice_label.setText("收到新回复：\n" + "\n".join(lines))
+        self.notice_label.show()
+        self._mark_notified_threads()
+
+    def _mark_notified_threads(self):
+        """Mark thread rows that received a newly detected reply."""
+        for row in range(self.thread_list.count()):
+            item = self.thread_list.item(row)
+            thread = item.data(Qt.ItemDataRole.UserRole) or {}
+            if thread.get('aid') in self._notified_aids and not item.text().startswith("🔔"):
+                item.setText("🔔 " + item.text())
+
+    def _on_user_selected_thread(self, item):
+        self.notice_label.hide()
+        self._on_thread_selected(item)
 
     def _on_thread_selected(self, item):
         if item is None:

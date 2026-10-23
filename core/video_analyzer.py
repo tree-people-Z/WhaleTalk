@@ -70,9 +70,13 @@ class VideoAnalyzer:
         """单独检查并回复评论，供高频调度使用。"""
         self._raise_if_stopping()
         if not self.config.get('interaction.comment_monitor', False):
-            return {'status': 'replies_checked', 'replied': 0}
-        replied = await self.comment_manager.check_and_reply()
-        return {'status': 'replies_checked', 'replied': replied}
+            return {'status': 'replies_checked', 'replied': 0, 'mentions': []}
+        result = await self.comment_manager.check_and_reply()
+        return {
+            'status': 'replies_checked',
+            'replied': result.get('replied', 0),
+            'mentions': result.get('mentions', []),
+        }
 
     def request_stop(self):
         """请求在当前网络操作结束后停止本轮分析。"""

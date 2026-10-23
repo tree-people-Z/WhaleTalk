@@ -41,6 +41,27 @@ class CommentManagerFilteringTests(unittest.TestCase):
         mentions = asyncio.run(run())
         self.assertEqual([m['rpid'] for m in mentions], [202])
 
+    def test_check_and_reply_returns_mentions_when_auto_reply_is_off(self):
+        async def run():
+            config = Mock()
+            config.get = lambda key, default=None: {
+                'interaction.comment_monitor': True,
+                'interaction.auto_reply': False,
+            }.get(key, default)
+
+            manager = CommentManager(Mock(), Mock(), Mock(), config)
+            manager.check_mentions = AsyncMock(return_value=[
+                {'rpid': 7, 'user': 'viewer', 'content': '新回复'}
+            ])
+            manager.reply_to_mention = AsyncMock()
+            result = await manager.check_and_reply()
+            return result, manager
+
+        result, manager = asyncio.run(run())
+        self.assertEqual(result['replied'], 0)
+        self.assertEqual(result['mentions'][0]['rpid'], 7)
+        manager.reply_to_mention.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

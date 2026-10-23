@@ -1,4 +1,4 @@
-﻿"""
+"""
 主窗口GUI
 """
 
@@ -120,13 +120,21 @@ class MainWindow(QMainWindow):
         self._update_recheck_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_recheck_timer.start()
 
+        # 常驻回复检查：应用打开期间按设置频率检查回复并提醒，不依赖自动运营开关。
+        self._unread_reply_count = 0
+        self._notified_reply_rpids = set()
+        self._reply_poll_timer = QTimer(self)
+        self._reply_poll_timer.timeout.connect(self.scheduled_reply_check)
+        self._apply_reply_poll_interval()
+        self._reply_poll_timer.start()
+
     def init_ui(self):
         """初始化UI"""
         self.setWindowTitle("鲸语 · B站智能运营助手")
         icon_path = Path(__file__).resolve().parent.parent / 'assets' / 'whale-assistant.ico'
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1040, 760)
 
         # 应用现代化样式
         self.setStyleSheet(MODERN_STYLE)
@@ -135,8 +143,8 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
-        layout.setSpacing(14)
-        layout.setContentsMargins(22, 18, 22, 14)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 16)
 
         # 顶部状态栏
         status_group = self._create_status_section()
@@ -456,8 +464,10 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "错误", f"任务执行失败:\n{error}")
 
     def scheduled_reply_check(self):
-        """由调度器触发的评论回复检查。"""
-        if (not self.video_analyzer or not self.config.get('interaction.auto_reply', True)
+        """按间隔检查评论回复；自动回复是否执行由配置决定。"""
+        if (not self.video_analyzer
+                or not self.config.get('interaction.comment_monitor', False)
+                or not self.bili_api or not self.bili_api.credential
                 or (self.worker and self.worker.isRunning())
                 or (self.reply_worker and self.reply_worker.isRunning())):
             return False
@@ -472,6 +482,7 @@ class MainWindow(QMainWindow):
 
     def refresh_scheduler_settings(self):
         """保存调度设置后，让运行中的调度器立即应用新时段和间隔。"""
+        self._apply_reply_poll_interval()
         if not self.scheduler or not self.scheduler.is_running:
             return
         self.scheduler.stop()
@@ -529,7 +540,10 @@ class MainWindow(QMainWindow):
 
     def on_reply_check_finished(self, result: dict):
         QTimer.singleShot(0, self.refresh_ai_settings)
-        if result.get('status') == 'replies_checked' and result.get('replied', 0):
+        mentions = result.get('mentions') or []
+        if mentions:
+            self._publish_new_replies(mentions)
+        if result.get('replied', 0):
             self.log(f"💬 已自动回复 {result['replied']} 条新评论")
 
     def toggle_auto_run(self):
@@ -644,9 +658,54 @@ class MainWindow(QMainWindow):
         """切换到对话页时按需刷新数据。"""
         widget = self.tabs.widget(index)
         if widget is self.comments_tab:
-            self.comments_tab.refresh_if_stale()
+            self._clear_reply_badge()
+            self.comments_tab.refresh_if_stale(0)
         elif widget is self.messages_tab:
             self.messages_tab.refresh_if_stale()
+
+    def _apply_reply_poll_interval(self):
+        """应用设置中的回复检查间隔。"""
+        try:
+            minutes = int(self.config.get('schedule.reply_check_interval_minutes', 1))
+        except (TypeError, ValueError):
+            minutes = 1
+        self._reply_poll_timer.setInterval(max(1, minutes) * 60 * 1000)
+
+    def _publish_new_replies(self, mentions):
+        """Show newly detected comment replies in the UI."""
+        new_replies = []
+        for mention in mentions or []:
+            rpid = mention.get('rpid')
+            if rpid is None or rpid in self._notified_reply_rpids:
+                continue
+            self._notified_reply_rpids.add(rpid)
+            new_replies.append(mention)
+        if not new_replies:
+            return
+
+        self.comments_tab.show_reply_notice(new_replies)
+        latest = new_replies[-1]
+        content = (latest.get('content') or '').replace('\n', ' ')[:40]
+        self.statusBar.showMessage(
+            f"🔔 收到 {len(new_replies)} 条新回复：{latest.get('user')}：{content}", 12000
+        )
+        for mention in new_replies:
+            preview = (mention.get('content') or '').replace('\n', ' ')[:80]
+            self.log(f"🔔 {mention.get('user')} 回复了你：{preview}")
+
+        if self.tabs.currentWidget() is self.comments_tab:
+            self.comments_tab.refresh_if_stale(0)
+        else:
+            self._unread_reply_count += len(new_replies)
+            index = self.tabs.indexOf(self.comments_tab)
+            if index >= 0:
+                self.tabs.setTabText(index, f"评论 ({self._unread_reply_count})")
+
+    def _clear_reply_badge(self):
+        self._unread_reply_count = 0
+        index = self.tabs.indexOf(self.comments_tab)
+        if index >= 0:
+            self.tabs.setTabText(index, "评论")
 
     def check_updates_manually(self):
         """手动检查更新（来自设置页按钮）。"""
@@ -757,6 +816,7 @@ class MainWindow(QMainWindow):
         """关闭事件"""
         self._update_timer.stop()
         self._update_recheck_timer.stop()
+        self._reply_poll_timer.stop()
         self.comments_tab.shutdown()
         self.messages_tab.shutdown()
         if self._update_worker is not None and self._update_worker.isRunning():

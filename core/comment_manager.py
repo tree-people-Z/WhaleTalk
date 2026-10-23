@@ -195,17 +195,16 @@ class CommentManager:
             logger.error(f"回复评论异常: {e}")
             return False
 
-    async def check_and_reply(self) -> int:
-        """检查新回复并逐条生成和发送回复，返回成功数。"""
-        if not self.config.get('interaction.auto_reply', True):
-            return 0
+    async def check_and_reply(self) -> Dict[str, Any]:
+        """检查新回复；自动回复开启时逐条回复，并返回检测到的回复列表。"""
         mentions = await self.check_mentions()
         replied = 0
-        for mention in mentions:
-            if await self.reply_to_mention(mention):
-                replied += 1
-            await asyncio.sleep(2)
-        return replied
+        if self.config.get('interaction.auto_reply', True):
+            for mention in mentions:
+                if await self.reply_to_mention(mention):
+                    replied += 1
+                await asyncio.sleep(2)
+        return {'replied': replied, 'mentions': mentions}
 
     async def monitor_loop(self):
         """

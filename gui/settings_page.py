@@ -252,6 +252,18 @@ class SettingsPage(QWidget):
         layout.addLayout(btn_layout)
         layout.addStretch()
 
+        # 增加表单间距和标签对齐，降低界面文字拥挤感。
+        for box in content_widget.findChildren(QGroupBox):
+            box_layout = box.layout()
+            if box_layout is not None:
+                box_layout.setSpacing(10)
+        for form in content_widget.findChildren(QFormLayout):
+            form.setVerticalSpacing(12)
+            form.setHorizontalSpacing(18)
+            form.setLabelAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+
         # 设置滚动区域
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
