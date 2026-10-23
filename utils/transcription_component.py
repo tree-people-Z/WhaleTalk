@@ -1,4 +1,4 @@
-﻿"""On-demand local transcription component for the portable build.
+"""On-demand local transcription component for the portable build.
 
 The base portable package stays small; when the user asks for local
 transcription the app downloads a component ZIP containing faster-whisper and
@@ -87,6 +87,9 @@ def configure_hf_endpoint() -> str:
     current = os.environ.get("HF_ENDPOINT")
     if current:
         return current
+    # HuggingFace 的 Xet 大文件通道在部分网络会卡在 0 字节，改用普通 HTTP 下载。
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
     endpoint = "https://huggingface.co"
     try:
         import requests
