@@ -101,7 +101,7 @@ class CommentsTab(QWidget):
         if self._worker is not None and self._worker.isRunning():
             return
         try:
-            self.threads = self.db.get_recent_comments(limit=500)
+            self.threads = self.db.get_recent_comments(limit=500, include_replies=True)
             self.own_rpids = self.db.get_own_comment_rpids()
         except Exception as exc:  # noqa: BLE001
             self.status_label.setText(f"读取评论记录失败：{exc}")
@@ -117,15 +117,21 @@ class CommentsTab(QWidget):
             title = thread.get('video_title') or thread.get('bvid') or '视频'
             content = (thread.get('content') or '').replace('\n', ' ')[:50]
             prefix = "🔔 " if thread.get('aid') in self._notified_aids else ""
-            item = QListWidgetItem(f"{prefix}{title}\n{when} · {content}")
+            if thread.get('comment_type') == 'reply':
+                target = thread.get('target_user') or '评论'
+                head = f"💬 回复 {target}"
+            else:
+                head = title
+            item = QListWidgetItem(f"{prefix}{head}\n{when} · {content}")
+            item.setToolTip(f"{title}\n{thread.get('content') or ''}")
             item.setData(Qt.ItemDataRole.UserRole, thread)
             self.thread_list.addItem(item)
         if self.threads:
-            self.status_label.setText(f"共 {len(self.threads)} 条评论对话")
+            self.status_label.setText(f"共 {len(self.threads)} 条已发评论/回复")
             self.thread_list.setCurrentRow(0)
             self._on_thread_selected(self.thread_list.item(0))
         else:
-            self.status_label.setText("还没有发送过评论")
+            self.status_label.setText("还没有发送过评论或回复")
             self.transcript.setPlainText("")
 
     def show_reply_notice(self, replies: List[Dict[str, Any]]):
@@ -167,12 +173,13 @@ class CommentsTab(QWidget):
         if self.bili_api is None or not getattr(self.bili_api, 'credential', None):
             self.status_label.setText("登录B站后可加载网友回复")
             return
-        if not thread.get('aid') or not thread.get('rpid'):
+        root_rpid = thread.get('thread_root') or thread.get('rpid')
+        if not thread.get('aid') or not root_rpid:
             return
         if self._worker is not None and self._worker.isRunning():
             return
         self.status_label.setText("正在加载评论对话…")
-        worker = ThreadLoadWorker(self.bili_api, thread['aid'], thread['rpid'], self)
+        worker = ThreadLoadWorker(self.bili_api, thread['aid'], root_rpid, self)
         self._worker = worker
         worker.loaded.connect(lambda replies: self._render_thread(thread, replies))
         worker.failed.connect(self._on_failed)
@@ -193,7 +200,11 @@ class CommentsTab(QWidget):
             commented_at.strftime('%m-%d %H:%M')
             if hasattr(commented_at, 'strftime') else ''
         )
-        lines.append(f"[{when}] 我：{thread.get('content', '')}")
+        if thread.get('comment_type') == 'reply':
+            label = f"我（回复 {thread.get('target_user') or '评论'}）"
+        else:
+            label = "我"
+        lines.append(f"[{when}] {label}：{thread.get('content', '')}")
         count = 0
         for comment in replies or []:
             rpid = comment.get('rpid')

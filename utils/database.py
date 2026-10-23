@@ -160,7 +160,8 @@ class Database:
         success: bool = True,
         error_message: str = "",
         rpid: Optional[int] = None,
-        parent_rpid: Optional[int] = None
+        parent_rpid: Optional[int] = None,
+        target_user: str = ""
     ) -> CommentRecord:
         """添加评论记录"""
         record = CommentRecord(
@@ -170,6 +171,7 @@ class Database:
             parent_rpid=parent_rpid,
             comment_type=comment_type,
             content=content,
+            target_user=target_user,
             success=success,
             error_message=error_message
         )
@@ -229,21 +231,34 @@ class Database:
             .limit(limit)\
             .all()
 
-    def get_recent_comments(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """获取最近发送的评论记录"""
-        records = self.session.query(CommentRecord)\
-            .filter(CommentRecord.comment_type == 'post', CommentRecord.success == True)\
-            .order_by(CommentRecord.created_at.desc())\
+    def get_recent_comments(
+        self, limit: int = 20, include_replies: bool = False
+    ) -> List[Dict[str, Any]]:
+        """获取最近发送的评论记录（可包含回复）"""
+        query = self.session.query(CommentRecord)\
+            .filter(CommentRecord.success == True)
+        if not include_replies:
+            query = query.filter(CommentRecord.comment_type == 'post')
+        records = query.order_by(CommentRecord.created_at.desc())\
             .limit(limit)\
             .all()
 
         results = []
         for record in records:
             video = self.session.query(VideoRecord).filter_by(bvid=record.bvid).first()
+            thread_root = (
+                record.parent_rpid
+                if record.comment_type == 'reply' and record.parent_rpid
+                else record.rpid
+            )
             results.append({
                 'aid': record.aid,
                 'bvid': record.bvid,
                 'rpid': record.rpid,
+                'parent_rpid': record.parent_rpid,
+                'thread_root': thread_root,
+                'comment_type': record.comment_type,
+                'target_user': record.target_user or '',
                 'content': record.content or '',
                 'video_title': video.title if video else '',
                 'commented_at': record.created_at,

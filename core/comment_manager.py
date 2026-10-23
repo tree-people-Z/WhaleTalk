@@ -182,7 +182,8 @@ class CommentManager:
                     comment_type='reply',
                     success=True,
                     rpid=getattr(self.bili, 'last_comment_rpid', None),
-                    parent_rpid=rpid
+                    parent_rpid=rpid,
+                    target_user=user or '',
                 )
                 self.processed_rpids.add(rpid)
                 logger.info(f"✅ 回复成功: @{user}")
