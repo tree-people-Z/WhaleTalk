@@ -58,6 +58,25 @@ python main.py
 
 无法访问 `huggingface.co` 时，本地模型会自动改用 `hf-mirror.com` 镜像下载。源码版由 pip 安装 `faster-whisper`，但同样只在本地模式使用。
 
+### 手动放置模型（下载太慢时）
+
+如果自动下载 `medium` 模型很慢，可以自己下载 faster-whisper 的 CTranslate2 格式模型，放到：
+
+```
+WhaleTalk\data\models\faster-whisper\medium\
+```
+
+只需要这 4 个文件：
+
+| 文件 | 说明 |
+|---|---|
+| `config.json` | 约 2 KB |
+| `model.bin` | 约 1.5 GB |
+| `tokenizer.json` | 约 2 MB |
+| `vocabulary.txt` | 约 450 KB |
+
+程序会优先使用这个目录，不再联网下载模型；在线下载方式仍然可用。也可以从其他机器 HuggingFace 缓存中的 `models--Systran--faster-whisper-medium\snapshots\<hash>\` 里复制这 4 个文件。
+
 音频提取和画面抽帧需要 FFmpeg，并且 `ffmpeg -version` 可运行。每条视频最多抽取三张压缩画面。配置的 AI 服务需要支持视觉输入；DeepSeek `deepseek-flash` 支持图像输入。音频、抽帧等临时文件会在处理后删除。
 
 ## 默认行为

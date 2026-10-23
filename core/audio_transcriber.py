@@ -1,4 +1,4 @@
-﻿"""Local speech-to-text fallback using faster-whisper."""
+"""Local speech-to-text fallback using faster-whisper."""
 
 import asyncio
 import subprocess
@@ -19,9 +19,20 @@ class LocalAudioTranscriber:
     _model_name = None
     _model_lock = threading.Lock()
 
+    # Files required by a faster-whisper / CTranslate2 model directory.
+    MODEL_FILES = ('config.json', 'model.bin', 'tokenizer.json', 'vocabulary.txt')
+
     def __init__(self, model_name: str = 'medium', model_dir: str = 'data/models/faster-whisper'):
         self.model_name = model_name or 'medium'
         self.model_dir = Path(model_dir)
+
+    @classmethod
+    def local_model_path(cls, model_dir: Path, model_name: str = 'medium'):
+        """Return a manually placed model directory when all files exist."""
+        directory = Path(model_dir) / model_name
+        if all((directory / name).is_file() for name in cls.MODEL_FILES):
+            return str(directory)
+        return None
 
     @classmethod
     def _get_model(cls, model_name: str, model_dir: Path):
@@ -49,9 +60,14 @@ class LocalAudioTranscriber:
                     "本地语音识别依赖未安装，请执行 pip install faster-whisper"
                 ) from exc
             model_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"正在加载本地语音识别模型: {model_name}（首次使用会下载模型）")
+            manual_path = cls.local_model_path(model_dir, model_name)
+            model_argument = manual_path or model_name
+            if manual_path:
+                logger.info(f"使用手动放置的本地语音识别模型: {manual_path}")
+            else:
+                logger.info(f"正在加载本地语音识别模型: {model_name}（首次使用会下载模型）")
             cls._model = WhisperModel(
-                model_name,
+                model_argument,
                 device='cpu',
                 compute_type='int8',
                 download_root=str(model_dir),

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 鲸语 - B站智能运营助手
 主入口文件
@@ -59,10 +59,16 @@ def _transcription_self_check(argv) -> int:
             model_index = argv.index('--model')
             if model_index + 1 < len(argv) and not argv[model_index + 1].startswith('--'):
                 model_name = argv[model_index + 1]
+        from core.audio_transcriber import LocalAudioTranscriber
+        manual_model = LocalAudioTranscriber.local_model_path(
+            Path('data/models/faster-whisper'), model_name
+        )
+        lines.append(f'manual_model_path={manual_model}')
+        model_argument = manual_model or model_name
         if '--download-model' in argv:
             from faster_whisper import WhisperModel
             WhisperModel(
-                model_name,
+                model_argument,
                 device='cpu',
                 compute_type='int8',
                 download_root='data/models/faster-whisper',
@@ -78,7 +84,7 @@ def _transcription_self_check(argv) -> int:
             import numpy as np
             from faster_whisper import WhisperModel
             model = WhisperModel(
-                model_name,
+                model_argument,
                 device='cpu',
                 compute_type='int8',
                 download_root='data/models/faster-whisper',

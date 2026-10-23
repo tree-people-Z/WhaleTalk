@@ -97,10 +97,17 @@ class TranscriptionSetupWorker(QThread):
         configure_hf_endpoint()
         from faster_whisper import WhisperModel
 
-        self.status.emit(f"正在下载/加载 {self.model_name} 模型（首次使用需要一些时间）…")
+        from core.audio_transcriber import LocalAudioTranscriber
+
+        model_dir = Path('data/models/faster-whisper')
+        manual_path = LocalAudioTranscriber.local_model_path(model_dir, self.model_name)
+        if manual_path:
+            self.status.emit(f"已找到手动放置的模型，正在加载：{manual_path}")
+        else:
+            self.status.emit(f"正在下载/加载 {self.model_name} 模型（首次使用需要一些时间）…")
         WhisperModel(
-            self.model_name, device='cpu', compute_type='int8',
-            download_root=str(Path('data/models/faster-whisper')),
+            manual_path or self.model_name, device='cpu', compute_type='int8',
+            download_root=str(model_dir),
         )
 
 
@@ -457,6 +464,9 @@ class SettingsPage(QWidget):
         self.transcription_setup_btn = QPushButton("下载本地识别组件和模型")
         self.transcription_setup_btn.clicked.connect(self.setup_local_transcription)
         transcription_layout.addWidget(self.transcription_setup_btn)
+        self.open_model_dir_btn = QPushButton("打开模型目录")
+        self.open_model_dir_btn.clicked.connect(self.open_local_model_dir)
+        transcription_layout.addWidget(self.open_model_dir_btn)
         transcription_layout.addStretch()
         layout.addLayout(transcription_layout)
 
@@ -474,7 +484,8 @@ class SettingsPage(QWidget):
         layout.addLayout(cloud_form)
 
         self.transcription_status_label = QLabel(
-            "关闭时不转写；本地识别需先下载 medium 模型（约 1.5 GB），音频不出本机；"
+            "关闭时不转写；本地识别可在线下载 medium 模型（约 1.5 GB），"
+            "也可手动放入 data\\models\\faster-whisper\\medium\\（4 个文件）后优先使用，音频不出本机；"
             "云端识别会把音频上传到上面配置的服务（接口需兼容 /audio/transcriptions）。"
         )
         self.transcription_status_label.setWordWrap(True)
@@ -745,6 +756,12 @@ class SettingsPage(QWidget):
         ):
             widget.setEnabled(is_cloud)
         self.transcription_setup_btn.setEnabled(is_local)
+
+    def open_local_model_dir(self):
+        """Create and open the folder for manually downloaded model files."""
+        target = Path('data/models/faster-whisper/medium')
+        target.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.resolve())))
 
     def setup_local_transcription(self):
         """Install faster-whisper and download the chosen model on demand."""
