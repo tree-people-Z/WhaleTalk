@@ -1,9 +1,10 @@
-"""
+﻿"""
 视频分析器
 负责搜索、筛选、分析视频
 """
 
 import asyncio
+import re
 import threading
 import tempfile
 from typing import List, Dict, Any, Optional
@@ -21,6 +22,19 @@ from utils.database import Database
 from utils.config_manager import ConfigManager
 
 
+# 视频标题/字幕中明确要求“把这个视频 @ 给主人”时，优先遵从这条指令。
+_OWNER_DIRECTIVE_PATTERNS = (
+    re.compile(r'@\s*[^，。！？\n]{0,12}主人'),
+    re.compile(r'艾特[^，。！？\n]{0,12}主人'),
+    re.compile(
+        r'把[^，。！？\n]{0,12}视频[^，。！？\n]{0,16}(?:@|艾特)[^，。！？\n]{0,12}主人'
+    ),
+    re.compile(
+        r'(?:叫|让|通知|转告|提醒)[^，。！？\n]{0,10}主人[^，。！？\n]{0,10}(?:看|来|知道)'
+    ),
+)
+
+
 class VideoAnalyzer:
     """视频分析器"""
 
@@ -36,6 +50,7 @@ class VideoAnalyzer:
         self.db = database
         self.config = config
         self._stop_requested = threading.Event()
+        self._greetings_sent_this_run = 0
 
         # 初始化双日记系统
         self.diary = DiarySystem()
@@ -65,6 +80,134 @@ class VideoAnalyzer:
             api_key=self.config.get('analysis.cloud_transcription.api_key', ''),
             model=self.config.get('analysis.cloud_transcription.model', 'whisper-1'),
         )
+
+    @staticmethod
+    def _has_owner_directive(*texts: Optional[str]) -> bool:
+        """Detect explicit instructions such as '把这个视频@给主人'."""
+        combined = ' '.join(text for text in texts if text)
+        return any(pattern.search(combined) for pattern in _OWNER_DIRECTIVE_PATTERNS)
+
+    _WHALE_NAME_KEYWORDS = ('鲸鱼娘', '大肥鱼', 'DeepSeek娘', '鲸语娘')
+    _WHALE_CONTENT_KEYWORDS = ('大肥鱼', '软乎乎', '女仆')
+
+    @classmethod
+    def _looks_like_whale(cls, comment: Dict[str, Any]) -> bool:
+        """Heuristically detect comments from another 鲸鱼娘-style bot."""
+        name = str(comment.get('user') or '')
+        content = str(comment.get('content') or '')
+        if any(keyword in name for keyword in cls._WHALE_NAME_KEYWORDS):
+            return True
+        return (
+            '鲸鱼娘' in content
+            and any(keyword in content for keyword in cls._WHALE_CONTENT_KEYWORDS)
+        )
+
+    async def _find_greeting_candidates(self, comments) -> List[Dict[str, Any]]:
+        """Collect a few other-whale comments to greet on this video."""
+        if not self.config.get('interaction.greet_other_whales', True):
+            return []
+        try:
+            self_info = await self.bili.get_self_info()
+        except Exception:  # noqa: BLE001
+            self_info = {}
+        if not isinstance(self_info, dict):
+            self_info = {}
+        self_uid = self_info.get('uid')
+        self_name = self_info.get('name') or ''
+        owner_name = self.config.get('bilibili.owner_name', '')
+        try:
+            already_replied = set(self.db.get_replied_comment_ids())
+        except Exception:  # noqa: BLE001
+            already_replied = set()
+        try:
+            max_candidates = int(self.config.get('limits.max_greetings_per_video', 2))
+        except (TypeError, ValueError):
+            max_candidates = 2
+        if max_candidates <= 0:
+            return []
+
+        candidates = []
+        for comment in comments or []:
+            rpid = comment.get('rpid')
+            if not rpid or rpid in already_replied:
+                continue
+            if self_uid is not None and comment.get('mid') == self_uid:
+                continue
+            user = comment.get('user') or ''
+            if self_name and user == self_name:
+                continue
+            if owner_name and user == owner_name:
+                continue
+            if not self._looks_like_whale(comment):
+                continue
+            candidates.append({
+                'rpid': rpid,
+                'user': user,
+                'content': comment.get('content') or '',
+                'root': comment.get('root') or rpid,
+                'parent': comment.get('parent') or rpid,
+            })
+            if len(candidates) >= max_candidates:
+                break
+        if candidates:
+            logger.info(f"发现 {len(candidates)} 个其他鲸鱼娘评论，可打招呼")
+        return candidates
+
+    async def _greet_other_whales(
+        self, video: Dict[str, Any], analysis: Dict[str, Any]
+    ) -> int:
+        """Reply briefly to other 鲸鱼娘 comments, with per-run limits."""
+        if not self.config.get('interaction.greet_other_whales', True):
+            return 0
+        if not self.config.get('interaction.auto_comment', False):
+            return 0
+        candidates = analysis.get('greeting_candidates') or []
+        if not candidates:
+            return 0
+        try:
+            per_run = int(self.config.get('limits.max_greetings_per_run', 5))
+        except (TypeError, ValueError):
+            per_run = 5
+        remaining = max(0, per_run - self._greetings_sent_this_run)
+        if remaining <= 0:
+            return 0
+
+        persona = self._load_persona()
+        sent = 0
+        for target in candidates[:remaining]:
+            try:
+                reply = await self.ai.generate_reply(
+                    original_comment=(
+                        f"另一位鲸鱼娘/同好说：{target.get('content', '')}"
+                    ),
+                    video_context=f"视频: {video.get('title', '')}",
+                    persona=persona,
+                )
+                if not reply:
+                    continue
+                success = await self.bili.post_comment(
+                    aid=video['aid'],
+                    text=reply,
+                    root_rpid=target.get('root') or target.get('rpid'),
+                    parent_rpid=target.get('rpid'),
+                )
+                if success:
+                    self.db.add_comment_record(
+                        bvid=video.get('bvid', ''),
+                        aid=video.get('aid'),
+                        content=reply,
+                        comment_type='reply',
+                        success=True,
+                        rpid=getattr(self.bili, 'last_comment_rpid', None),
+                        parent_rpid=target.get('rpid'),
+                    )
+                    self._greetings_sent_this_run += 1
+                    sent += 1
+                    logger.info(f"👋 已向其他鲸鱼娘打招呼: {target.get('user')}")
+                await asyncio.sleep(2)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"向其他鲸鱼娘打招呼失败: {exc}")
+        return sent
 
     async def check_replies(self) -> Dict[str, Any]:
         """单独检查并回复评论，供高频调度使用。"""
@@ -96,6 +239,7 @@ class VideoAnalyzer:
         logger.info("=" * 60)
         logger.info("开始新一轮视频分析")
         logger.info("=" * 60)
+        self._greetings_sent_this_run = 0
         self._raise_if_stopping()
 
         # 检查今日配额
@@ -157,8 +301,8 @@ class VideoAnalyzer:
                 )
                 self.db.increment_videos()
 
-                # 评论候选由「评论最低评分」设置控制；AI 的 worthy 仅用于记录展示。
-                if analysis['score'] >= min_comment_score:
+                # 评论候选由「评论最低评分」设置控制；明确 @主人 指令的视频不参与再筛选。
+                if analysis['score'] >= min_comment_score or analysis.get('owner_directive'):
                     worthy_videos.append({
                         'video': video,
                         'analysis': analysis
@@ -319,8 +463,9 @@ class VideoAnalyzer:
                 logger.warning(f"视频 {bvid} 缺少字幕、转写和画面证据，仅以标题和评论低置信度分析")
 
             # 获取热门评论
-            comments = await self.bili.get_comments(video['aid'], count=10)
+            comments = await self.bili.get_comments(video['aid'], count=20)
             comment_texts = [c['content'] for c in comments if c['content']]
+            greeting_candidates = await self._find_greeting_candidates(comments)
 
             # 加载人设
             persona = self._load_persona()
@@ -355,9 +500,22 @@ class VideoAnalyzer:
             if not subtitle:
                 analysis['confidence'] = 'low'
 
+            # 标题/字幕里明确要求 @主人 的视频优先遵从指令。
+            analysis['owner_directive'] = self._has_owner_directive(
+                title, subtitle or ''
+            )
+            # “值得”改为表示“达到评论门槛或含明确指令”，与评论行为保持一致。
+            min_comment_score = self.config.get('limits.min_score_to_comment', 10)
+            analysis['worthy'] = bool(
+                analysis.get('score', 0) >= min_comment_score
+                or analysis['owner_directive']
+            )
+            analysis['greeting_candidates'] = greeting_candidates
+
             logger.info(
                 f"分析结果: 评分={analysis['score']}, 值得={analysis['worthy']}, "
                 f"置信度={analysis.get('confidence', 'medium')}"
+                + ("，含@主人指令" if analysis['owner_directive'] else "")
             )
             return analysis
 
@@ -382,30 +540,44 @@ class VideoAnalyzer:
             logger.info(f"自动评论未启用，跳过评论: {bvid}")
             return False
 
-        # 检查评分是否达标
-        min_score = self.config.get('limits.min_score_to_comment', 13)
-        if analysis['score'] < min_score:
+        # 检查评分是否达标；明确要求 @主人 的视频按指令执行，不再参与评分筛选。
+        directive = bool(analysis.get('owner_directive'))
+        min_score = self.config.get('limits.min_score_to_comment', 10)
+        if analysis['score'] < min_score and not directive:
             logger.info(f"评分不足，跳过评论: {analysis['score']} < {min_score}")
             return False
-        if analysis.get('confidence') == 'low':
+        if analysis.get('confidence') == 'low' and not directive:
             logger.info(f"分析置信度低，跳过自动评论: {bvid}")
             return False
+        if directive:
+            logger.info(f"视频含明确 @主人 指令，按指令评论: {bvid}")
 
         try:
             # 加载人设
             persona = self._load_persona()
 
-            # 获取要@的用户
+            # 获取要@的用户；指令性视频跳过评分门槛，但仍尊重 @主人 开关。
             mention_threshold = self.config.get('limits.min_score_to_mention_owner', 13)
             owner_name = self.config.get('bilibili.owner_name', '')
+            mention_enabled = self.config.get(
+                'interaction.mention_owner_on_interesting', False
+            )
             should_mention_owner = (
-                self.config.get('interaction.mention_owner_on_interesting', False)
+                mention_enabled
                 and bool(owner_name)
-                and analysis.get('score', 0) >= mention_threshold
+                and (
+                    directive
+                    or analysis.get('score', 0) >= mention_threshold
+                )
             )
             mention_user = owner_name if should_mention_owner else None
             if mention_user:
-                logger.info(f"评分 {analysis.get('score', 0)} 达到 @主人 阈值，评论将提及 {mention_user}")
+                reason = "含明确 @主人 指令" if directive else (
+                    f"评分 {analysis.get('score', 0)} 达到 @主人 阈值"
+                )
+                logger.info(f"{reason}，评论将提及 {mention_user}")
+            elif directive and not mention_enabled:
+                logger.info("视频含 @主人 指令，但“在评论中 @我”开关关闭，不提及主人")
 
             # 生成评论
             comment_text = await self.ai.generate_comment(
@@ -438,6 +610,7 @@ class VideoAnalyzer:
             if success:
                 self.db.mark_commented(bvid, comment_text, comment_rpid)
                 logger.info(f"✅ 评论成功: {title}")
+                await self._greet_other_whales(video, analysis)
             else:
                 logger.error(f"❌ 评论失败: {title}")
 

@@ -145,6 +145,8 @@ class SettingsPage(QWidget):
         self.persona_enabled_check.stateChanged.connect(self.auto_save)
         self.comment_monitor_check.stateChanged.connect(self.auto_save)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
+        self.greet_whales_check.stateChanged.connect(self.auto_save)
+        self.greet_whales_spin.valueChanged.connect(self.auto_save)
         self.reply_interesting_check.stateChanged.connect(self.auto_save)
         self.reply_only_owner_check.stateChanged.connect(self.auto_save)
         self.reply_to_others_check.stateChanged.connect(self.auto_save)
@@ -171,6 +173,7 @@ class SettingsPage(QWidget):
         self.disable_wheel_event(self.min_score_spin)
         self.disable_wheel_event(self.max_results_spin)
         self.disable_wheel_event(self.mention_threshold_spin)
+        self.disable_wheel_event(self.greet_whales_spin)
 
         # 禁用所有下拉框的鼠标滚轮
         self.disable_wheel_event(self.ai_provider_combo)
@@ -435,6 +438,18 @@ class SettingsPage(QWidget):
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
 
+        # 遇到其他鲸鱼娘时打招呼
+        greet_layout = QHBoxLayout()
+        self.greet_whales_check = QCheckBox("遇到其他鲸鱼娘时打招呼")
+        greet_layout.addWidget(self.greet_whales_check)
+        greet_layout.addWidget(QLabel("每视频最多:"))
+        self.greet_whales_spin = QSpinBox()
+        self.greet_whales_spin.setRange(0, 10)
+        greet_layout.addWidget(self.greet_whales_spin)
+        greet_layout.addWidget(QLabel("个（每轮上限 5 个）"))
+        greet_layout.addStretch()
+        layout.addLayout(greet_layout)
+
         # 回复有趣评论
         self.reply_interesting_check = QCheckBox("回复别人的有趣评论")
         layout.addWidget(self.reply_interesting_check)
@@ -606,6 +621,12 @@ class SettingsPage(QWidget):
         # 高级功能设置
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
+        self.greet_whales_check.setChecked(
+            self.config.get('interaction.greet_other_whales', True)
+        )
+        self.greet_whales_spin.setValue(
+            self.config.get('limits.max_greetings_per_video', 2)
+        )
         self.reply_interesting_check.setChecked(self.config.get('interaction.reply_interesting_comments', False))
         self.reply_only_owner_check.setChecked(self.config.get('interaction.reply_only_owner', True))
         self.reply_to_others_check.setChecked(self.config.get('interaction.reply_to_others', False))
@@ -696,6 +717,12 @@ class SettingsPage(QWidget):
             # 高级功能设置
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
+            self.config.set(
+                'interaction.greet_other_whales', self.greet_whales_check.isChecked()
+            )
+            self.config.set(
+                'limits.max_greetings_per_video', self.greet_whales_spin.value()
+            )
             self.config.set('interaction.reply_interesting_comments', self.reply_interesting_check.isChecked())
             self.config.set('interaction.reply_only_owner', self.reply_only_owner_check.isChecked())
             self.config.set('interaction.reply_to_others', self.reply_to_others_check.isChecked())

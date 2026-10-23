@@ -150,6 +150,8 @@ class ConfigManager:
             "limits": {
                 "max_comments_per_day": 999,
                 "max_videos_per_run": 20,
+                "max_greetings_per_video": 2,
+                "max_greetings_per_run": 5,
                 "same_video_cooldown_days": 7,
                 "min_score_to_comment": 10,
                 "min_score_to_mention_owner": 13,
@@ -159,6 +161,7 @@ class ConfigManager:
                 "auto_comment": True,
                 "comment_monitor": True,
                 "auto_reply": True,
+                "greet_other_whales": True,
                 "monitor_interval_minutes": 1,
                 "reply_to_others": True,
                 "reply_only_owner": False,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 AI客户端模块
 支持多种AI模型：OpenAI、Claude、各类国产大模型等
 """
@@ -360,7 +360,7 @@ class AIClient:
             prompt_parts.append("\n[该视频没有字幕]\n")
 
         if comments:
-            comments_text = "\n".join([f"- {c}" for c in comments[:10]])
+            comments_text = "\n".join([f"- {c}" for c in comments[:20]])
             prompt_parts.append(f"\n热门评论：\n{comments_text}\n")
 
         prompt_parts.append("""
