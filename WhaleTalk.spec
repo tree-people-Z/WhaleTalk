@@ -12,9 +12,10 @@ hiddenimports = ["bilibili_api"]
 # Python's DLL imports the MSVC runtime. Some Windows PCs lack the redistributable,
 # so ship the Python installation's matching runtime beside the bundled interpreter.
 binaries = [
-    (str(Path(sys.prefix) / name), ".")
+    (str(Path(sys.prefix) / name), destination)
     for name in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
     if (Path(sys.prefix) / name).exists()
+    for destination in (".", "PyQt6/Qt6/bin")
 ]
 
 analysis = Analysis(

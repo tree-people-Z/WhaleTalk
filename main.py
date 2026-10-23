@@ -13,6 +13,15 @@ PROJECT_ROOT = Path(__file__).parent
 if getattr(sys, 'frozen', False):
     # Keep user data beside the downloaded executable, outside PyInstaller's temp extraction.
     os.chdir(Path(sys.executable).resolve().parent)
+    if os.name == 'nt':
+        # PyQt's DLLs are nested below _internal; retain directory handles for Windows DLL lookup.
+        _DLL_DIRECTORY_HANDLES = []
+        for dll_dir in (
+            Path(getattr(sys, '_MEIPASS', PROJECT_ROOT)) / 'PyQt6' / 'Qt6' / 'bin',
+            Path(getattr(sys, '_MEIPASS', PROJECT_ROOT)),
+        ):
+            if dll_dir.is_dir():
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(dll_dir)))
 sys.path.insert(0, str(PROJECT_ROOT))
 from utils.dependency_bootstrap import ensure_required_dependencies
 
