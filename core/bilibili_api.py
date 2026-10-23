@@ -35,13 +35,14 @@ class BilibiliAPI:
         self.credential: Optional[Credential] = None
         self._load_credential()
 
-        # 开启 bili_ticket 和自动 buvid，降低触发 B 站 412 风控的概率。
+        # 自动 buvid 保持开启；bili_ticket 在当前 B 站接口下会返回缺少 data
+        # 的响应并导致所有 API 调用 KeyError('data')，因此显式关闭。
         try:
             from bilibili_api import request_settings
             request_settings.set_enable_auto_buvid(True)
-            request_settings.set_enable_bili_ticket(True)
+            request_settings.set_enable_bili_ticket(False)
         except Exception as exc:  # noqa: BLE001
-            logger.debug(f"配置 B 站请求风控参数失败: {exc}")
+            logger.debug(f"配置 B 站请求参数失败: {exc}")
 
         # 风控状态
         self.blocked_until: Optional[datetime] = None

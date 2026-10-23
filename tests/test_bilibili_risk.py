@@ -1,11 +1,25 @@
 import asyncio
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+from bilibili_api import request_settings
 
 from core.bilibili_api import BilibiliAPI
 
 
 class BilibiliRiskControlTests(unittest.TestCase):
+    def test_init_disables_bili_ticket(self):
+        previous = request_settings.get_enable_bili_ticket()
+        try:
+            request_settings.set_enable_bili_ticket(True)
+            with tempfile.TemporaryDirectory() as directory:
+                BilibiliAPI(credential_path=Path(directory) / 'cookies.json')
+            self.assertFalse(request_settings.get_enable_bili_ticket())
+        finally:
+            request_settings.set_enable_bili_ticket(previous)
+
     def _bare_api(self):
         api = BilibiliAPI.__new__(BilibiliAPI)
         api.blocked_until = None
