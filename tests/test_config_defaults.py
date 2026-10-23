@@ -22,6 +22,7 @@ class ConfigDefaultTests(unittest.TestCase):
         self.assertEqual(config.get('limits.max_comments_per_day'), 999)
         self.assertEqual(config.get('limits.max_videos_per_run'), 20)
         self.assertEqual(config.get('limits.min_score_to_comment'), 10)
+        self.assertEqual(config.get('limits.min_score_to_mention_owner'), 13)
         self.assertTrue(config.get('interaction.auto_comment'))
         self.assertTrue(config.get('interaction.comment_monitor'))
         self.assertTrue(config.get('interaction.auto_reply'))

@@ -113,6 +113,7 @@ class VideoAnalyzer:
         worthy_videos = []
 
         max_videos = self.config.get('limits.max_videos_per_run', 10)
+        min_comment_score = self.config.get('limits.min_score_to_comment', 10)
 
         for video in videos[:max_videos]:
             self._raise_if_stopping()
@@ -141,8 +142,8 @@ class VideoAnalyzer:
                 )
                 self.db.increment_videos()
 
-                # 收集值得的视频
-                if analysis['worthy']:
+                # 评论候选由「评论最低评分」设置控制；AI 的 worthy 仅用于记录展示。
+                if analysis['score'] >= min_comment_score:
                     worthy_videos.append({
                         'video': video,
                         'analysis': analysis
@@ -151,7 +152,7 @@ class VideoAnalyzer:
             # 避免请求过快
             await asyncio.sleep(2)
 
-        logger.info(f"分析完成: {len(analyzed_videos)} 个视频, {len(worthy_videos)} 个值得关注")
+        logger.info(f"分析完成: {len(analyzed_videos)} 个视频, {len(worthy_videos)} 个达到评论评分门槛")
 
         # 3. 从值得的视频中挑选评论
         comments_sent = 0
@@ -369,18 +370,16 @@ class VideoAnalyzer:
             persona = self._load_persona()
 
             # 获取要@的用户
-            mention_threshold = self.config.get('limits.min_score_to_mention_owner', 17)
+            mention_threshold = self.config.get('limits.min_score_to_mention_owner', 13)
+            owner_name = self.config.get('bilibili.owner_name', '')
             should_mention_owner = (
                 self.config.get('interaction.mention_owner_on_interesting', False)
-                and
-                analysis.get('interesting', False)
-                and analysis.get('notify_owner', False)
+                and bool(owner_name)
                 and analysis.get('score', 0) >= mention_threshold
             )
-            mention_user = (
-                self.config.get('bilibili.owner_name', '')
-                if should_mention_owner else None
-            )
+            mention_user = owner_name if should_mention_owner else None
+            if mention_user:
+                logger.info(f"评分 {analysis.get('score', 0)} 达到 @主人 阈值，评论将提及 {mention_user}")
 
             # 生成评论
             comment_text = await self.ai.generate_comment(

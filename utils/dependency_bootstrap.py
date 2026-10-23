@@ -51,10 +51,13 @@ def ensure_required_dependencies():
     if sys.stdout is not None:
         print(f"缺少运行依赖: {', '.join(missing)}", flush=True)
         print("正在自动安装项目依赖，请保持网络连接...", flush=True)
+    from utils.subprocess_helpers import hidden_window_kwargs
+
     result = subprocess.run(
         [sys.executable, '-m', 'pip', 'install', '-r', str(REQUIREMENTS)],
         cwd=PROJECT_ROOT,
         check=False,
+        **hidden_window_kwargs(),
     )
     if result.returncode:
         raise RuntimeError(

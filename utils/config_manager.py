@@ -95,7 +95,7 @@ class ConfigManager:
                 "base_url": "https://api.deepseek.com"
             },
             "persona": {
-                "name": "DeepSeek娘",
+                "name": "鲸鱼娘",
                 "self_reference": "我",
                 "user_reference": "主人",
                 "persona_file": "data/persona.md",
@@ -131,7 +131,7 @@ class ConfigManager:
                 "max_videos_per_run": 20,
                 "same_video_cooldown_days": 7,
                 "min_score_to_comment": 10,
-                "min_score_to_mention_owner": 17,
+                "min_score_to_mention_owner": 13,
                 "mention_owner_on_interesting": False
             },
             "interaction": {

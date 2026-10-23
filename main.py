@@ -39,6 +39,7 @@ from PyQt6.QtCore import Qt
 from gui.main_window import MainWindow
 from utils.logger import setup_logger
 from utils.config_manager import ConfigManager
+from utils.persona_defaults import ensure_default_persona
 
 
 def main():
@@ -54,6 +55,9 @@ def main():
     if not config_manager.config_file.exists():
         logger.info("首次运行，创建默认配置文件")
         config_manager.create_default_config()
+
+    # 首次启动释放打包的默认人设；已有 data/persona.md 时不会覆盖。
+    ensure_default_persona(config_manager.get('persona.persona_file', 'data/persona.md'))
 
     # 创建应用
     app = QApplication(sys.argv)

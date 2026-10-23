@@ -7,6 +7,8 @@ from typing import List, Optional
 
 from loguru import logger
 
+from utils.subprocess_helpers import hidden_window_kwargs
+
 
 class FrameAnalyzer:
     """Use ffmpeg to sample frames without saving the source video."""
@@ -18,7 +20,8 @@ class FrameAnalyzer:
     def _find_ffmpeg() -> Optional[str]:
         try:
             result = subprocess.run(
-                ['ffmpeg', '-version'], capture_output=True, timeout=5, check=False
+                ['ffmpeg', '-version'], capture_output=True, timeout=5, check=False,
+                **hidden_window_kwargs(),
             )
             return 'ffmpeg' if result.returncode == 0 else None
         except (OSError, subprocess.TimeoutExpired):
@@ -74,13 +77,14 @@ class FrameAnalyzer:
         for index, position in enumerate(positions, 1):
             target = output_path / f"frame-{index}.jpg"
             command = [
-                self.ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-y',
+                self.ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
                 '-headers', headers, '-ss', str(position), '-i', video_url,
                 '-frames:v', '1', '-vf', 'scale=960:-2', '-q:v', '5', str(target)
             ]
             try:
                 result = subprocess.run(
-                    command, capture_output=True, timeout=45, check=False
+                    command, capture_output=True, timeout=45, check=False,
+                    **hidden_window_kwargs(),
                 )
                 if result.returncode == 0 and target.exists() and target.stat().st_size:
                     frames.append(str(target))

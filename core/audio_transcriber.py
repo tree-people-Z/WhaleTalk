@@ -8,6 +8,8 @@ from typing import Optional
 
 from loguru import logger
 
+from utils.subprocess_helpers import hidden_window_kwargs
+
 
 class LocalAudioTranscriber:
     """Convert a Bilibili audio stream to text locally (no audio API upload)."""
@@ -60,12 +62,15 @@ class LocalAudioTranscriber:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         headers = "Referer: https://www.bilibili.com/\r\nUser-Agent: Mozilla/5.0\r\n"
         command = [
-            ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-y', '-headers', headers,
+            ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-headers', headers,
             '-i', audio_url, '-vn', '-t', str(max_seconds), '-ac', '1', '-ar', '16000',
             '-c:a', 'pcm_s16le', str(output_path),
         ]
         try:
-            result = subprocess.run(command, capture_output=True, timeout=max_seconds + 60, check=False)
+            result = subprocess.run(
+                command, capture_output=True, timeout=max_seconds + 60, check=False,
+                **hidden_window_kwargs(),
+            )
             if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
                 detail = result.stderr.decode(errors='replace')[-500:]
                 raise RuntimeError(f"ffmpeg音频解码失败: {detail}")

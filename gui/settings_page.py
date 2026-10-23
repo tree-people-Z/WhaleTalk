@@ -14,9 +14,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal, QThread
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QUrl
 from loguru import logger
 
 from utils.config_manager import ConfigManager
+from utils.subprocess_helpers import hidden_window_kwargs
+from utils.updater import APP_VERSION, REPOSITORY_URL
 
 
 class TranscriptionSetupWorker(QThread):
@@ -28,11 +32,18 @@ class TranscriptionSetupWorker(QThread):
         self.model_name = model_name
 
     def run(self):
+        if getattr(sys, 'frozen', False):
+            self.setup_complete.emit(
+                False,
+                "便携版无法自动安装本地识别组件；如需本地转写，请使用源码版（python main.py）安装 faster-whisper。",
+            )
+            return
         project_root = Path(__file__).resolve().parent.parent
         requirements = project_root / 'requirements-transcription.txt'
         install = subprocess.run(
             [sys.executable, '-m', 'pip', 'install', '-r', str(requirements)],
             cwd=project_root, capture_output=True, text=True,
+            **hidden_window_kwargs(),
         )
         if install.returncode:
             self.setup_complete.emit(False, (install.stderr or install.stdout)[-1800:])
@@ -54,6 +65,7 @@ class SettingsPage(QWidget):
     schedule_settings_saved = pyqtSignal()
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
+    check_update_requested = pyqtSignal()
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -74,6 +86,7 @@ class SettingsPage(QWidget):
         self.browse_interval_min_spin.valueChanged.connect(self.auto_save)
         self.browse_interval_max_spin.valueChanged.connect(self.auto_save)
         self.reply_check_interval_spin.valueChanged.connect(self.auto_save)
+        self.mention_threshold_spin.valueChanged.connect(self.auto_save)
 
         # 复选框
         self.auto_comment_check.stateChanged.connect(self.auto_save)
@@ -100,6 +113,7 @@ class SettingsPage(QWidget):
         self.disable_wheel_event(self.cooldown_spin)
         self.disable_wheel_event(self.min_score_spin)
         self.disable_wheel_event(self.max_results_spin)
+        self.disable_wheel_event(self.mention_threshold_spin)
 
         # 禁用所有下拉框的鼠标滚轮
         self.disable_wheel_event(self.ai_provider_combo)
@@ -161,6 +175,9 @@ class SettingsPage(QWidget):
 
         schedule_group = self._create_schedule_section()
         layout.addWidget(schedule_group)
+
+        about_group = self._create_about_section()
+        layout.addWidget(about_group)
 
         self.auto_run_btn = QPushButton("⏰ 启动自动运营")
         self.auto_run_btn.setMinimumHeight(40)
@@ -290,8 +307,46 @@ class SettingsPage(QWidget):
         self.auto_comment_check = QCheckBox("启用自动评论")
         layout.addRow("", self.auto_comment_check)
 
-        self.mention_owner_check = QCheckBox("特别有趣时在评论中 @我（默认关闭）")
+        self.mention_owner_check = QCheckBox("在评论中 @我（默认关闭）")
         layout.addRow("", self.mention_owner_check)
+
+        self.mention_threshold_spin = QSpinBox()
+        self.mention_threshold_spin.setRange(0, 20)
+        layout.addRow("评论 @我 的最低评分:", self.mention_threshold_spin)
+        layout.addRow("", QLabel(
+            "评分达到该值时在评论中 @主人；调低可提高 @ 的概率，调高可减少打扰。"
+        ))
+
+        group.setLayout(layout)
+        return group
+
+    def _create_about_section(self) -> QGroupBox:
+        """创建关于与更新区域"""
+        group = QGroupBox("关于与更新")
+        layout = QVBoxLayout()
+        layout.setSpacing(8)
+
+        version_label = QLabel(f"鲸语 · B站智能运营助手  v{APP_VERSION}")
+        version_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(version_label)
+
+        hint = QLabel("从 GitHub Releases 检查新版本；便携版下载完成后会自动替换文件并重启。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(hint)
+
+        button_layout = QHBoxLayout()
+        self.check_update_btn = QPushButton("🔃 检查更新")
+        self.check_update_btn.setMinimumHeight(36)
+        self.check_update_btn.clicked.connect(self.check_update_requested.emit)
+        button_layout.addWidget(self.check_update_btn)
+
+        repo_button = QPushButton("🌐 GitHub 仓库")
+        repo_button.setMinimumHeight(36)
+        repo_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPOSITORY_URL)))
+        button_layout.addWidget(repo_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
 
         group.setLayout(layout)
         return group
@@ -445,6 +500,9 @@ class SettingsPage(QWidget):
         self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 999))
         self.cooldown_spin.setValue(self.config.get('limits.same_video_cooldown_days', 7))
         self.min_score_spin.setValue(self.config.get('limits.min_score_to_comment', 13))
+        self.mention_threshold_spin.setValue(
+            self.config.get('limits.min_score_to_mention_owner', 13)
+        )
         self.auto_comment_check.setChecked(self.config.get('interaction.auto_comment', False))
         self.mention_owner_check.setChecked(
             self.config.get('interaction.mention_owner_on_interesting', False)
@@ -523,6 +581,9 @@ class SettingsPage(QWidget):
             self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
             self.config.set('limits.same_video_cooldown_days', self.cooldown_spin.value())
             self.config.set('limits.min_score_to_comment', self.min_score_spin.value())
+            self.config.set(
+                'limits.min_score_to_mention_owner', self.mention_threshold_spin.value()
+            )
             self.config.set('interaction.auto_comment', self.auto_comment_check.isChecked())
             self.config.set(
                 'interaction.mention_owner_on_interesting', self.mention_owner_check.isChecked()

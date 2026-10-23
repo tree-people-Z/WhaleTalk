@@ -474,7 +474,9 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
 """)
 
         if mention_user:
-            prompt_parts.append(f"6. 仅在确实适合通知主人时自然提及 @{mention_user}，不要生硬插入。\n")
+            prompt_parts.append(
+                f"6. 请在评论中自然地提及 @{mention_user}（放在结尾或合适的句子里），不要省略。\n"
+            )
         else:
             prompt_parts.append("6. 不要@主人或其他用户，也不要添加任何用户标签；像普通观众一样围绕视频内容自然聊天。\n")
 
@@ -490,7 +492,11 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         if response:
             # 清理可能的引号等
             response = response.strip().strip('"\'')
-            if not mention_user:
+            if mention_user:
+                # 阈值通过时确保模型不会随机省略 @主人。
+                if '@' not in response:
+                    response = f"{response.rstrip()} @{mention_user}"
+            else:
                 # Enforce the opt-out even if the model ignores its prompt.
                 import re
                 response = re.sub(r'@[一-鿿A-Za-z0-9_\-]+', '', response)

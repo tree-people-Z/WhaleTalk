@@ -2,13 +2,14 @@
 主窗口GUI
 """
 
+import os
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTabWidget, QTextEdit,
     QGroupBox, QMessageBox, QStatusBar, QTableWidget,
-    QTableWidgetItem, QHeaderView
+    QTableWidgetItem, QHeaderView, QProgressDialog, QApplication
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices
@@ -18,12 +19,14 @@ from loguru import logger
 from gui.login_dialog import LoginDialog
 from gui.settings_page import SettingsPage
 from gui.styles import MODERN_STYLE
+from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
 from core.video_analyzer import VideoAnalyzer
 from core.scheduler import TaskScheduler
 from utils.database import Database
 from utils.config_manager import ConfigManager
+from utils.updater import launch_update_installer
 
 
 class AnalysisWorker(QThread):
@@ -97,6 +100,17 @@ class MainWindow(QMainWindow):
         )
         self.init_components()
         self.load_status()
+
+        # 后台检查更新（不阻塞启动），设置页也可手动触发。
+        self._update_worker = None
+        self._update_download = None
+        self._update_progress = None
+        self.settings_page.check_update_requested.connect(self.check_updates_manually)
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(5000)
+        self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
+        self._update_timer.start()
 
     def init_ui(self):
         """初始化UI"""
@@ -605,8 +619,111 @@ class MainWindow(QMainWindow):
         """Append structured runtime logs safely from workers to the GUI."""
         self.log_text.append(message)
 
+    def check_updates_manually(self):
+        """手动检查更新（来自设置页按钮）。"""
+        self.check_updates(silent=False)
+
+    def check_updates(self, silent: bool = False):
+        """在后台线程检查 GitHub Releases，避免阻塞界面。"""
+        if self._update_worker is not None and self._update_worker.isRunning():
+            return
+        if not silent:
+            self.settings_page.check_update_btn.setEnabled(False)
+            self.statusBar.showMessage("正在检查更新…")
+        worker = UpdateCheckWorker(self)
+        self._update_worker = worker
+        worker.checked.connect(lambda result: self._handle_update_result(result, silent))
+        worker.finished.connect(lambda: self._update_check_finished(worker))
+        worker.start()
+
+    def _update_check_finished(self, worker):
+        worker.deleteLater()
+        if self._update_worker is worker:
+            self._update_worker = None
+        self.settings_page.check_update_btn.setEnabled(True)
+        if self.statusBar.currentMessage() == "正在检查更新…":
+            self.statusBar.clearMessage()
+
+    def _handle_update_result(self, result, silent):
+        action = prompt_update(self, result, silent)
+        if action == "install":
+            self._start_update_download(result)
+
+    def _start_update_download(self, result):
+        if not getattr(sys, 'frozen', False):
+            QMessageBox.information(self, "更新", "源码运行模式请直接 git pull 更新。")
+            return
+        dialog = QProgressDialog("正在下载更新包…", "取消", 0, 100, self)
+        dialog.setWindowTitle("正在更新")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        worker = UpdateDownloadWorker(
+            result.get("asset_url", ""), result.get("asset_digest", ""), self
+        )
+        self._update_download = worker
+        self._update_progress = dialog
+
+        def on_progress(done, total):
+            if total > 0:
+                dialog.setMaximum(100)
+                dialog.setValue(min(100, int(done * 100 / total)))
+                dialog.setLabelText(
+                    f"正在下载更新包… {done / 1048576:.1f} / {total / 1048576:.1f} MB"
+                )
+            else:
+                dialog.setMaximum(0)
+
+        worker.progress.connect(on_progress)
+        worker.ready.connect(lambda source: self._apply_update(source, dialog))
+        worker.failed.connect(lambda message: self._update_failed(message, dialog))
+        worker.cancelled.connect(lambda: self._update_cancelled(dialog))
+        dialog.canceled.connect(worker.cancel)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _apply_update(self, source, dialog):
+        dialog.setLabelText("正在准备安装…")
+        dialog.setMaximum(0)
+        try:
+            install_dir = Path(sys.executable).resolve().parent
+            launch_update_installer(Path(source), install_dir, os.getpid())
+        except Exception as exc:
+            dialog.close()
+            QMessageBox.critical(self, "更新失败", f"无法启动更新程序：{exc}")
+            return
+        dialog.close()
+        self._update_progress = None
+        QMessageBox.information(
+            self,
+            "更新准备完成",
+            "程序将关闭并自动完成更新，随后会重新启动，请稍候…",
+        )
+        self.close()
+        QApplication.instance().quit()
+
+    def _update_failed(self, message, dialog):
+        dialog.close()
+        self._update_progress = None
+        self._update_download = None
+        QMessageBox.warning(self, "更新失败", f"下载或解压更新包失败：{message}\n\n也可以打开发布页手动下载。")
+
+    def _update_cancelled(self, dialog):
+        dialog.close()
+        self._update_progress = None
+        self._update_download = None
+        self.statusBar.showMessage("已取消更新", 3000)
+
     def closeEvent(self, event):
         """关闭事件"""
+        self._update_timer.stop()
+        if self._update_worker is not None and self._update_worker.isRunning():
+            self._update_worker.wait(3000)
+        if self._update_download is not None and self._update_download.isRunning():
+            self._update_download.cancel()
+            self._update_download.wait(3000)
+
         if self.scheduler and self.scheduler.is_running:
             self.scheduler.stop()
 

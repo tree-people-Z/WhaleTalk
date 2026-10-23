@@ -87,6 +87,40 @@ class InterestDecisionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(analyzer.ai.generate_comment.await_args.kwargs['mention_user'])
 
+    async def test_owner_mention_uses_configured_score_threshold(self):
+        config = Mock()
+        config.get = lambda key, default=None: {
+            'interaction.auto_comment': True,
+            'limits.min_score_to_comment': 10,
+            'limits.min_score_to_mention_owner': 13,
+            'interaction.mention_owner_on_interesting': True,
+            'bilibili.owner_name': '主人昵称',
+            'persona.enabled': False,
+        }.get(key, default)
+        analyzer = VideoAnalyzer.__new__(VideoAnalyzer)
+        analyzer.config = config
+        analyzer.ai = Mock()
+        analyzer.ai.generate_comment = AsyncMock(return_value='测试评论 @主人昵称')
+        analyzer.bili = Mock()
+        analyzer.bili.post_comment = AsyncMock(return_value=True)
+        analyzer.db = Mock()
+
+        await analyzer._post_comment_for_video(
+            {'bvid': 'BVtest', 'aid': 1, 'title': '测试视频'},
+            {'score': 14, 'interesting': False, 'notify_owner': False, 'summary': '还不错的内容'}
+        )
+        self.assertEqual(
+            analyzer.ai.generate_comment.await_args.kwargs['mention_user'], '主人昵称'
+        )
+
+    async def test_generate_comment_includes_requested_mention(self):
+        client = AIClient.__new__(AIClient)
+        client.provider = None
+        client.chat = AsyncMock(return_value='这个视频讲得不错。')
+
+        result = await client.generate_comment('视频', '摘要', mention_user='主人昵称')
+        self.assertIn('@主人昵称', result)
+
     async def test_generate_comment_removes_unrequested_mentions(self):
         client = AIClient.__new__(AIClient)
         client.provider = None
