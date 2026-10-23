@@ -5,6 +5,7 @@ B站API封装模块
 
 import asyncio
 import json
+import random
 import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -34,8 +35,22 @@ class BilibiliAPI:
         self.credential: Optional[Credential] = None
         self._load_credential()
 
+        # 开启 bili_ticket 和自动 buvid，降低触发 B 站 412 风控的概率。
+        try:
+            from bilibili_api import request_settings
+            request_settings.set_enable_auto_buvid(True)
+            request_settings.set_enable_bili_ticket(True)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"配置 B 站请求风控参数失败: {exc}")
+
         # 风控状态
         self.blocked_until: Optional[datetime] = None
+        # 评论请求限速，避免短时间内大量请求触发 B 站风控
+        self._comment_min_interval = 2.0
+        self._last_comment_request_at = 0.0
+        self._comment_request_lock: Optional[asyncio.Lock] = None
+        # 只缓存“分析用”的评论页，回复检查必须拿最新数据
+        self._comments_cache: Dict[tuple, tuple] = {}
         # 当前登录账号（用于过滤自己发出的评论，避免自问自答）
         self._self_info: Optional[Dict[str, Any]] = None
 
@@ -48,20 +63,34 @@ class BilibiliAPI:
                     self.credential = Credential(
                         sessdata=data.get('SESSDATA'),
                         bili_jct=data.get('bili_jct'),
-                        buvid3=data.get('buvid3')
+                        buvid3=data.get('buvid3'),
+                        buvid4=data.get('buvid4'),
+                        dedeuserid=data.get('dedeuserid') or data.get('DedeUserID'),
+                        ac_time_value=data.get('ac_time_value'),
                     )
                 logger.info("已加载B站登录凭证")
             except Exception as e:
                 logger.warning(f"加载凭证失败: {e}")
                 self.credential = None
 
-    def _save_credential(self, sessdata: str, bili_jct: str, buvid3: str):
+    def _save_credential(
+        self,
+        sessdata: str,
+        bili_jct: str,
+        buvid3: str,
+        buvid4: str = '',
+        dedeuserid: str = '',
+        ac_time_value: str = '',
+    ):
         """保存凭证到文件"""
         self.credential_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             'SESSDATA': sessdata,
             'bili_jct': bili_jct,
             'buvid3': buvid3,
+            'buvid4': buvid4,
+            'dedeuserid': dedeuserid,
+            'ac_time_value': ac_time_value,
             'saved_at': datetime.now().isoformat()
         }
         with open(self.credential_path, 'w', encoding='utf-8') as f:
@@ -70,7 +99,10 @@ class BilibiliAPI:
         self.credential = Credential(
             sessdata=sessdata,
             bili_jct=bili_jct,
-            buvid3=buvid3
+            buvid3=buvid3,
+            buvid4=buvid4 or None,
+            dedeuserid=dedeuserid or None,
+            ac_time_value=ac_time_value or None,
         )
         self._self_info = None
         logger.info("凭证已保存")
@@ -152,6 +184,9 @@ class BilibiliAPI:
                         sessdata = ""
                         bili_jct = ""
                         buvid3 = ""
+                        buvid4 = ""
+                        dedeuserid = ""
+                        ac_time_value = ""
 
                         for cookie in session.cookie_jar:
                             if cookie.key == 'SESSDATA' and not sessdata:
@@ -160,6 +195,12 @@ class BilibiliAPI:
                                 bili_jct = cookie.value
                             elif cookie.key == 'buvid3' and not buvid3:
                                 buvid3 = cookie.value
+                            elif cookie.key == 'buvid4' and not buvid4:
+                                buvid4 = cookie.value
+                            elif cookie.key == 'DedeUserID' and not dedeuserid:
+                                dedeuserid = cookie.value
+                            elif cookie.key == 'ac_time_value' and not ac_time_value:
+                                ac_time_value = cookie.value
 
                         if sessdata and bili_jct:
                             # URL解码
@@ -167,17 +208,28 @@ class BilibiliAPI:
                             sessdata = unquote(sessdata)
                             bili_jct = unquote(bili_jct)
                             buvid3 = unquote(buvid3) if buvid3 else ""
+                            buvid4 = unquote(buvid4) if buvid4 else ""
+                            dedeuserid = unquote(dedeuserid) if dedeuserid else ""
+                            ac_time_value = (
+                                unquote(ac_time_value) if ac_time_value else ""
+                            )
 
                             logger.info(f"成功获取凭证")
 
                             # 保存凭证
-                            self._save_credential(sessdata, bili_jct, buvid3)
+                            self._save_credential(
+                                sessdata, bili_jct, buvid3,
+                                buvid4, dedeuserid, ac_time_value,
+                            )
 
                             # 创建Credential对象
                             self.credential = Credential(
                                 sessdata=sessdata,
                                 bili_jct=bili_jct,
-                                buvid3=buvid3
+                                buvid3=buvid3,
+                                buvid4=buvid4 or None,
+                                dedeuserid=dedeuserid or None,
+                                ac_time_value=ac_time_value or None,
                             )
 
                             return {
@@ -305,6 +357,24 @@ class BilibiliAPI:
             return False
 
         try:
+            # 老版本 cookies 可能没有 buvid4，补一个可降低 412 概率。
+            if self.credential and not getattr(self.credential, 'buvid4', None):
+                try:
+                    from bilibili_api.utils.network import get_buvid
+                    _, buvid4 = await get_buvid()
+                    if buvid4:
+                        self.credential.buvid4 = buvid4
+                        self._save_credential(
+                            self.credential.sessdata or '',
+                            self.credential.bili_jct or '',
+                            self.credential.buvid3 or '',
+                            buvid4,
+                            self.credential.dedeuserid or '',
+                            self.credential.ac_time_value or '',
+                        )
+                        logger.info("已补充 buvid4 风控参数")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"补充 buvid4 失败: {exc}")
             u = user.User(self.credential.sessdata.split('=')[0], credential=self.credential)
             info = await u.get_user_info()
             logger.info(f"登录有效，用户: {info.get('name')}")
@@ -315,8 +385,9 @@ class BilibiliAPI:
 
     def is_blocked(self) -> bool:
         """检查是否处于风控状态"""
-        if self.blocked_until:
-            if datetime.now() < self.blocked_until:
+        blocked_until = getattr(self, 'blocked_until', None)
+        if blocked_until:
+            if datetime.now() < blocked_until:
                 return True
             else:
                 self.blocked_until = None
@@ -326,6 +397,30 @@ class BilibiliAPI:
         """设置风控状态"""
         self.blocked_until = datetime.now() + timedelta(minutes=duration_minutes)
         logger.warning(f"触发风控，将暂停 {duration_minutes} 分钟")
+
+    @staticmethod
+    def _short_error(message: str, limit: int = 160) -> str:
+        """Collapse B站 HTML error bodies so logs stay readable."""
+        text = re.sub(r'<[^>]+>', ' ', message or '')
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:limit] + ('…' if len(text) > limit else '')
+
+    async def _pace_comment_request(self) -> None:
+        """Serialize comment requests with a minimum interval."""
+        if getattr(self, '_comment_request_lock', None) is None:
+            self._comment_request_lock = asyncio.Lock()
+        async with self._comment_request_lock:
+            loop = asyncio.get_running_loop()
+            # 固定间隔之外再加随机抖动，避免形成规律的机器请求节奏。
+            target = (
+                getattr(self, '_last_comment_request_at', 0.0)
+                + getattr(self, '_comment_min_interval', 2.0)
+                + random.uniform(0, 1.5)
+            )
+            wait = target - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_comment_request_at = loop.time()
 
     async def search_videos(
         self,
@@ -532,6 +627,20 @@ class BilibiliAPI:
         root_rpids: Optional[set] = None
     ) -> List[Dict[str, Any]]:
         """获取视频评论"""
+        if self.is_blocked():
+            logger.debug(f"风控冷却中，跳过获取评论 aid={aid}")
+            return []
+        cache_key = None
+        comments_cache = getattr(self, '_comments_cache', None)
+        if comments_cache is None:
+            comments_cache = {}
+            self._comments_cache = comments_cache
+        if not include_replies:
+            cache_key = (aid, sort, count)
+            cached = comments_cache.get(cache_key)
+            if cached and (datetime.now() - cached[0]).total_seconds() < 120:
+                return list(cached[1])
+        await self._pace_comment_request()
         try:
             # 转换排序参数为枚举
             order_type = OrderType.LIKE if sort == 2 else OrderType.TIME
@@ -617,14 +726,24 @@ class BilibiliAPI:
                     except Exception as exc:
                         logger.debug(f"按评论ID获取楼中楼失败 aid={aid}, root={root_rpid}: {exc}")
 
+            if cache_key is not None:
+                comments_cache[cache_key] = (datetime.now(), list(comments))
             logger.info(f"获取评论成功, aid={aid}, 数量: {len(comments)}")
             return comments
 
         except Exception as e:
-            logger.error(f"获取评论失败 aid={aid}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return []
+            message = str(e)
+            if "412" in message or any(
+                keyword in message for keyword in ("风控", "频繁", "验证码")
+            ):
+                self.set_blocked(30)
+                logger.warning(
+                    f"获取评论触发 B 站 412 风控，暂停评论请求 30 分钟: aid={aid}"
+                )
+            else:
+                logger.error(
+                    f"获取评论失败 aid={aid}: {self._short_error(message)}"
+                )
             return []
 
     async def get_comment_thread(

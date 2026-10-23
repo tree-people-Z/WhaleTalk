@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 APP_NAME = "鲸语"
-APP_VERSION = "1.6.4"
+APP_VERSION = "1.6.5"
 
 GITHUB_REPOSITORY = "tree-people-Z/WhaleTalk"
 RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
