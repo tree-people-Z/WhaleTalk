@@ -41,7 +41,6 @@ exe = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    [],
     name="WhaleTalk",
     debug=False,
     bootloader_ignore_signals=False,
