@@ -1,7 +1,9 @@
 """Extract a small set of representative video frames for visual analysis."""
 
 import asyncio
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,14 +20,55 @@ class FrameAnalyzer:
 
     @staticmethod
     def _find_ffmpeg() -> Optional[str]:
+        candidates = []
+        found = shutil.which('ffmpeg')
+        if found:
+            candidates.append(Path(found).resolve())
+        if getattr(sys, 'frozen', False):
+            base = Path(sys.executable).resolve().parent
+            candidates.extend([
+                base / 'ffmpeg.exe',
+                base / 'ffmpeg' / 'bin' / 'ffmpeg.exe',
+                base / '_internal' / 'ffmpeg.exe',
+                base / 'data' / 'ffmpeg' / 'ffmpeg.exe',
+            ])
+        candidates.extend([
+            Path(r'C:\ffmpeg\bin\ffmpeg.exe'),
+            Path(r'C:\Program Files\ffmpeg\bin\ffmpeg.exe'),
+        ])
+
+        seen = set()
+        for candidate in candidates:
+            path = str(candidate)
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                if not candidate.is_file():
+                    continue
+                result = subprocess.run(
+                    [path, '-version'], capture_output=True, timeout=5,
+                    check=False, **hidden_window_kwargs(),
+                )
+                if result.returncode == 0:
+                    logger.info(f"使用 ffmpeg: {path}")
+                    return path
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+
+        # 最后再让系统 PATH 解析一次（部分启动器会重置 PATH）。
         try:
             result = subprocess.run(
                 ['ffmpeg', '-version'], capture_output=True, timeout=5, check=False,
                 **hidden_window_kwargs(),
             )
-            return 'ffmpeg' if result.returncode == 0 else None
+            if result.returncode == 0:
+                logger.info("使用 PATH 中的 ffmpeg")
+                return 'ffmpeg'
         except (OSError, subprocess.TimeoutExpired):
-            return None
+            pass
+        logger.warning("未找到 ffmpeg，可把 ffmpeg.exe 放到程序目录或安装到 C:\\ffmpeg\\bin")
+        return None
 
     @property
     def ffmpeg_available(self) -> bool:

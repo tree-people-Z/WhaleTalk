@@ -117,3 +117,31 @@ collection = COLLECT(
     upx_exclude=[],
     name="WhaleTalk",
 )
+
+# ffmpeg is the only external command-line tool the app requires. Copy it into
+# the portable output after PyInstaller has finished so a machine without a
+# system ffmpeg can still extract frames and decode audio. (Adding a 200 MB
+# executable to datas/binaries makes PyInstaller's onedir collection unreliable.)
+import shutil
+
+_bundled_ffmpeg_candidates = []
+_ffmpeg_env = os.environ.get("FFMPEG_PATH")
+if _ffmpeg_env:
+    _bundled_ffmpeg_candidates.append(Path(_ffmpeg_env))
+_bundled_ffmpeg_candidates.extend([
+    project_root / "assets" / "ffmpeg.exe",
+    Path(r"C:\ffmpeg\bin\ffmpeg.exe"),
+])
+for _ffmpeg_candidate in _bundled_ffmpeg_candidates:
+    if _ffmpeg_candidate and _ffmpeg_candidate.is_file():
+        _dist_dir = Path(DISTPATH) / "WhaleTalk"
+        _dist_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_ffmpeg_candidate, _dist_dir / "ffmpeg.exe")
+        _license = _ffmpeg_candidate.parent.parent / "LICENSE"
+        if _license.is_file():
+            shutil.copy2(_license, _dist_dir / "FFMPEG_LICENSE.txt")
+        print(f"[spec] bundled ffmpeg: {_ffmpeg_candidate}")
+        break
+else:
+    print("[spec] ffmpeg not found at build time; portable build relies on system ffmpeg")
+

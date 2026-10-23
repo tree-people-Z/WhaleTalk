@@ -1,4 +1,4 @@
-﻿# 鲸语 · B站智能运营助手
+# 鲸语 · B站智能运营助手
 
 鲸语是一个桌面端 AI 角色运营助手，可搜索和分析 B 站视频、生成评论、监听并回复评论。它支持手动巡视和可选自动巡视；自动运行默认关闭。
 
@@ -94,7 +94,7 @@ C:\Users\<你的用户名>\Desktop\WhaleTalk-Windows-x64\WhaleTalk\data\models\f
 
 在线下载方式仍然保留；`data/` 目录在程序升级时会保留。也可以从其他机器 HuggingFace 缓存中的 `models--Systran--faster-whisper-medium\snapshots\<hash>\` 里复制这 4 个文件。
 
-音频提取和画面抽帧需要 FFmpeg，并且 `ffmpeg -version` 可运行。每条视频最多抽取三张压缩画面。配置的 AI 服务需要支持视觉输入；DeepSeek `deepseek-flash` 支持图像输入。音频、抽帧等临时文件会在处理后删除。
+音频提取和画面抽帧需要 FFmpeg。程序会按顺序查找：系统 PATH → 程序目录 `ffmpeg.exe` / `ffmpeg\bin\ffmpeg.exe` → `data\ffmpeg\ffmpeg.exe` → `C:\ffmpeg\bin\ffmpeg.exe`；也可以直接把 ffmpeg.exe 放到程序目录。每条视频最多抽取三张压缩画面。配置的 AI 服务需要支持视觉输入；DeepSeek `deepseek-flash` 支持图像输入。音频、抽帧等临时文件会在处理后删除。
 
 ## 默认行为
 
@@ -151,6 +151,8 @@ python -m PyInstaller --clean --noconfirm WhaleTalk.spec
 ```
 
 产物在 `dist/WhaleTalk/`，将整个文件夹压缩为 ZIP 后即可发布到 GitHub Releases。构建机不需要在 PATH 中保留其他 SDK 的 `bin` 目录：`WhaleTalk.spec` 会丢弃 Python 安装目录之外收集到的 DLL，避免本机其他软件（如 poppler、libheif）的同名动态库混入并覆盖系统组件。
+
+发布便携包时把 `ffmpeg.exe` 和 `FFMPEG_LICENSE.txt` 复制到 `dist/WhaleTalk/`，程序会优先使用这个本地 ffmpeg；这样用户机器没有安装 ffmpeg 也能直接抽帧和转写。官方便携包已内置 `ffmpeg.exe`。
 
 ## 本地数据与隐私
 
