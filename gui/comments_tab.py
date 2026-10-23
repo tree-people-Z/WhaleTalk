@@ -101,7 +101,7 @@ class CommentsTab(QWidget):
         if self._worker is not None and self._worker.isRunning():
             return
         try:
-            self.threads = self.db.get_recent_comments(limit=30)
+            self.threads = self.db.get_recent_comments(limit=500)
             self.own_rpids = self.db.get_own_comment_rpids()
         except Exception as exc:  # noqa: BLE001
             self.status_label.setText(f"读取评论记录失败：{exc}")

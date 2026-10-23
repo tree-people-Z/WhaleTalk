@@ -595,7 +595,7 @@ class MainWindow(QMainWindow):
 
     def load_history(self):
         """加载历史记录"""
-        records = self.db.get_recent_videos(limit=50)
+        records = self.db.get_recent_videos(limit=500)
 
         self.history_table.setRowCount(len(records))
 
@@ -662,6 +662,8 @@ class MainWindow(QMainWindow):
             self.comments_tab.refresh_if_stale(0)
         elif widget is self.messages_tab:
             self.messages_tab.refresh_if_stale()
+        elif widget is self.history_tab:
+            self.load_history()
 
     def _apply_reply_poll_interval(self):
         """应用设置中的回复检查间隔。"""

@@ -1,4 +1,4 @@
-"""
+﻿"""
 视频分析器
 负责搜索、筛选、分析视频
 """
@@ -475,7 +475,7 @@ class VideoAnalyzer:
                 logger.warning(f"视频 {bvid} 缺少字幕、转写和画面证据，仅以标题和评论低置信度分析")
 
             # 获取热门评论
-            comments = await self.bili.get_comments(video['aid'], count=20)
+            comments = await self.bili.get_comments(video['aid'], count=15)
             comment_texts = [c['content'] for c in comments if c['content']]
             greeting_candidates = await self._find_greeting_candidates(comments)
 

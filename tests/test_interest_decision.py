@@ -32,12 +32,12 @@ class InterestDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('评论量：5000', prompt)
         self.assertIn('不能因为题材不符合人设偏好', prompt)
 
-    def test_analysis_prompt_uses_up_to_twenty_comments(self):
+    def test_analysis_prompt_uses_up_to_fifteen_comments(self):
         prompt = AIClient.__new__(AIClient)._build_analyze_prompt(
             '标题', '字幕', [f'评论{i}' for i in range(25)], ''
         )
-        self.assertIn('评论19', prompt)
-        self.assertNotIn('评论20', prompt)
+        self.assertIn('评论14', prompt)
+        self.assertNotIn('评论15', prompt)
 
     async def test_owner_is_mentioned_only_for_interesting_video(self):
         config = Mock()
