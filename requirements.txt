@@ -4,7 +4,6 @@ aiohttp>=3.9.0
 
 # GUI框架
 PyQt6>=6.6.0
-PyQt6-WebEngine>=6.6.0
 
 # AI模型调用
 openai>=1.0.0

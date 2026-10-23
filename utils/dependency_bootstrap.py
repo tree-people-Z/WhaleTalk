@@ -14,7 +14,6 @@ REQUIRED_IMPORTS = {
     'bilibili-api-python': 'bilibili_api',
     'aiohttp': 'aiohttp',
     'PyQt6': 'PyQt6',
-    'PyQt6-WebEngine': 'PyQt6.QtWebEngineWidgets',
     'openai': 'openai',
     'anthropic': 'anthropic',
     'APScheduler': 'apscheduler',

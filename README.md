@@ -13,7 +13,9 @@
 
 ## 安装和启动
 
-需要 Python 3.10+。Windows 双击 `start.bat`；其他系统运行 `./start.sh`。首次启动会检查并安装 `requirements.txt` 中缺少的程序依赖。也可以手动运行：
+Windows 用户可从 GitHub Releases 下载便携版 ZIP，解压后双击 `WhaleTalk.exe` 即可启动，无需另行安装 Python。请保留同目录的 `_internal/` 运行文件夹。首次启动会在 EXE 同目录创建 `data/`，用于保存设置、登录凭证、数据库和日志。首次使用仍需在应用中配置 AI 服务并扫码登录 B 站。
+
+从源码运行需要 Python 3.10+。Windows 双击 `start.bat`；其他系统运行 `./start.sh`。首次启动会检查并安装 `requirements.txt` 中缺少的程序依赖。也可以手动运行：
 
 ```bash
 python main.py

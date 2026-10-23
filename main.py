@@ -10,6 +10,9 @@ from pathlib import Path
 
 # The bootstrap uses only the standard library and runs before PyQt/app imports.
 PROJECT_ROOT = Path(__file__).parent
+if getattr(sys, 'frozen', False):
+    # Keep user data beside the downloaded executable, outside PyInstaller's temp extraction.
+    os.chdir(Path(sys.executable).resolve().parent)
 sys.path.insert(0, str(PROJECT_ROOT))
 from utils.dependency_bootstrap import ensure_required_dependencies
 
