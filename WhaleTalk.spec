@@ -26,7 +26,11 @@ analysis = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["pytest", "tests"],
+    excludes=[
+        "pytest", "tests", "torch", "torchaudio", "torchvision", "torchmetrics",
+        "scipy", "pandas", "gradio", "transformers", "librosa", "lightning",
+        "sklearn", "tensorflow", "onnxruntime", "cv2", "numba", "sympy",
+    ],
     noarchive=False,
     optimize=0,
 )
