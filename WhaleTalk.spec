@@ -1,4 +1,4 @@
-# Build with: python -m PyInstaller --clean --noconfirm WhaleTalk.spec
+﻿# Build with: python -m PyInstaller --clean --noconfirm WhaleTalk.spec
 from pathlib import Path
 import os
 import site
@@ -7,6 +7,8 @@ import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_root = Path(SPECPATH)
+ONEFILE = os.environ.get("WHALETALK_ONEFILE") == "1"
+CONSOLE = os.environ.get("WHALETALK_CONSOLE") == "1"
 
 datas = [
     (str(project_root / "assets"), "assets"),
@@ -18,6 +20,10 @@ datas = [
 # The package also ships JSON tables under bilibili_api/data.
 hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
 datas += collect_data_files("bilibili_api")
+if ONEFILE:
+    ffmpeg_payload = project_root / "build" / "ffmpeg.zip"
+    if ffmpeg_payload.is_file():
+        datas.append((str(ffmpeg_payload), "assets"))
 
 runtime_names = {
     "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll",
@@ -89,34 +95,55 @@ for name, source in runtime_sources.items():
         analysis.binaries.append((name, str(source), "BINARY"))
         analysis.binaries.append((f"PyQt6/Qt6/bin/{name}", str(source), "BINARY"))
 pyz = PYZ(analysis.pure)
-exe = EXE(
-    pyz,
-    analysis.scripts,
-    [],
-    exclude_binaries=True,
-    name="WhaleTalk",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    # UPX on Qt DLLs is a known source of "DLL load failed" reports; keep the bundle unpacked.
-    upx=False,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=str(project_root / "assets" / "whale-assistant.ico"),
-)
-collection = COLLECT(
-    exe,
-    analysis.binaries,
-    analysis.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="WhaleTalk",
-)
+if ONEFILE:
+    exe = EXE(
+        pyz,
+        analysis.scripts,
+        analysis.binaries,
+        analysis.datas,
+        [],
+        name="WhaleTalk",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=CONSOLE,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=str(project_root / "assets" / "whale-assistant.ico"),
+    )
+else:
+    exe = EXE(
+        pyz,
+        analysis.scripts,
+        [],
+        exclude_binaries=True,
+        name="WhaleTalk",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        # UPX on Qt DLLs is a known source of "DLL load failed" reports; keep the bundle unpacked.
+        upx=False,
+        console=CONSOLE,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=str(project_root / "assets" / "whale-assistant.ico"),
+    )
+    collection = COLLECT(
+        exe,
+        analysis.binaries,
+        analysis.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name="WhaleTalk",
+    )
 
 # ffmpeg is the only external command-line tool the app requires. Copy it into
 # the portable output after PyInstaller has finished so a machine without a

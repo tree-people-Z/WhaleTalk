@@ -1,4 +1,4 @@
-﻿# 鲸语 · B站智能运营助手
+# 鲸语 · B站智能运营助手
 
 鲸语是一个桌面端 AI 角色运营助手，可搜索和分析 B 站视频、生成评论、监听并回复评论。它支持手动巡视和可选自动巡视；自动运行默认关闭。
 
@@ -14,9 +14,20 @@
 - 评论自动回复会跳过自己发出的评论，避免自问自答。
 - 历史记录包含视频链接；运行设置和个人数据保存在本地 `data/` 目录。
 
+## 下载哪个版本
+
+GitHub Releases 里提供两种包，功能相同，按需选一个：
+
+| 文件 | 适合 | 使用方法 |
+|---|---|---|
+| `WhaleTalk-Windows-x64-single.exe` | 想最简单，直接双击运行 | 下载后双击；首次启动会解压内置 ffmpeg，可能稍慢；Windows SmartScreen 提示时点“更多信息 → 仍要运行” |
+| `WhaleTalk-Windows-x64.zip` | 单文件被拦截、启动失败，或想方便备份/更新 | 下载后**完整解压**，运行 `WhaleTalk\WhaleTalk.exe`；不要直接在压缩包里运行 |
+
+两个版本都已内置 ffmpeg，无需安装 Python 或 FFmpeg。单文件版会在 exe 旁边生成 `data\`；zip 版的数据在解压目录里。
+
 ## 安装和启动
 
-Windows 用户可从 GitHub Releases 下载便携版 ZIP，解压后双击 `WhaleTalk.exe` 即可启动，无需另行安装 Python 或 VC++ 运行库。请保留同目录的 `_internal/` 运行文件夹。首次启动会在 EXE 同目录创建 `data/`，用于保存设置、登录凭证、数据库、日志和默认人设 `data/persona.md`；已存在的 `persona.md` 不会被升级覆盖。首次使用仍需在应用中配置 AI 服务并扫码登录 B 站。
+Windows 用户从 GitHub Releases 下载上面的单文件 exe 或便携 ZIP。ZIP 解压后双击 `WhaleTalk.exe` 即可启动，无需另行安装 Python 或 VC++ 运行库。请保留同目录的 `_internal/` 运行文件夹。首次启动会在 EXE 同目录创建 `data/`，用于保存设置、登录凭证、数据库、日志和默认人设 `data/persona.md`；已存在的 `persona.md` 不会被升级覆盖。首次使用仍需在应用中配置 AI 服务并扫码登录 B 站。
 
 便携版要求 64 位 Windows 10（1903 或更高版本）或 Windows 11：Qt 6 依赖系统自带的 ICU 组件，便携包不再附带 ICU 动态库，以免与系统组件冲突。
 

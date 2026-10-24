@@ -121,6 +121,7 @@ from PyQt6.QtCore import Qt
 from gui.main_window import MainWindow
 from utils.logger import setup_logger
 from utils.config_manager import ConfigManager
+from utils.ffmpeg_bootstrap import ensure_ffmpeg
 from utils.persona_defaults import ensure_default_persona
 
 
@@ -131,6 +132,9 @@ def main():
     logger.info("=" * 60)
     logger.info("鲸语 · B站智能运营助手启动")
     logger.info("=" * 60)
+
+    # 单文件版：首次启动解压内置 ffmpeg
+    ensure_ffmpeg()
 
     # 初始化配置
     config_manager = ConfigManager()
