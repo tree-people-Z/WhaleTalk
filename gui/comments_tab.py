@@ -231,73 +231,155 @@ class CommentsTab(QWidget):
             self._worker = None
 
     # --------------------------------------------------------------- rendering
-    def _render_thread(self, thread: Dict[str, Any], replies: List[Dict[str, Any]]):
-        commented_at = thread.get('commented_at')
-        when = (
-            commented_at.strftime('%Y-%m-%d %H:%M')
-            if hasattr(commented_at, 'strftime') else ''
+    @staticmethod
+    def _fmt_time(value) -> str:
+        if hasattr(value, 'strftime'):
+            return value.strftime('%Y-%m-%d %H:%M')
+        try:
+            timestamp = int(value or 0)
+            return (
+                datetime.datetime.fromtimestamp(timestamp).strftime('%m-%d %H:%M')
+                if timestamp else ''
+            )
+        except (TypeError, ValueError, OSError):
+            return ''
+
+    @staticmethod
+    def _avatar(name: str, color: str = '#2563eb', size: int = 28) -> str:
+        initial = html.escape((name or '?')[:1])
+        return (
+            f'<div style="width:{size}px; height:{size}px; border-radius:{size // 2}px;'
+            f' background:#e8f0ff; color:{color}; text-align:center;'
+            f' line-height:{size}px; font-weight:700;">{initial}</div>'
         )
+
+    @staticmethod
+    def _reply_html(comment: Dict[str, Any], own_rpids: set, depth: int) -> str:
+        rpid = comment.get('rpid')
+        is_own = rpid in own_rpids
+        user = html.escape(comment.get('user') or '未知用户')
+        body = html.escape(comment.get('content') or '').replace('\n', '<br>')
+        timestamp = CommentsTab._fmt_time(comment.get('ctime'))
+        color = '#2563eb' if is_own else '#374151'
+        badge = (
+            '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
+            ' border-radius:4px; padding:1px 5px; margin-left:4px;">我</span>'
+            if is_own else ''
+        )
+        return (
+            f'<div style="border-left:2px solid #eef1f6; margin-left:'
+            f'{6 + depth * 18}px; padding:0 0 10px 10px; display:flex; gap:8px;">'
+            f'{CommentsTab._avatar(comment.get("user") or "?", color, 24)}'
+            '<div style="flex:1; min-width:0;">'
+            f'<div><span style="color:{color}; font-weight:700;">{user}</span>'
+            f'{badge}'
+            f'<span style="color:#9aa3b2; font-size:12px; margin-left:8px;">'
+            f'{timestamp}</span></div>'
+            f'<div style="margin-top:3px; color:#1f2937;">{body}</div>'
+            '</div></div>'
+        )
+
+    def _render_thread(self, thread: Dict[str, Any], replies: List[Dict[str, Any]]):
+        root_rpid = thread.get('thread_root') or thread.get('rpid')
+        comments = list(replies or [])
+        by_rpid = {
+            comment.get('rpid'): comment
+            for comment in comments
+            if comment.get('rpid')
+        }
+        root = by_rpid.get(root_rpid)
+        root_is_me = root_rpid in self.own_rpids
+        if root is None:
+            if thread.get('comment_type') == 'reply':
+                root = {
+                    'rpid': root_rpid,
+                    'user': thread.get('target_user') or '原评论',
+                    'content': (
+                        thread.get('parent_content')
+                        or '（原评论内容未缓存，可在 B 站查看）'
+                    ),
+                    'ctime': None,
+                }
+            else:
+                root = {
+                    'rpid': thread.get('rpid'),
+                    'user': '我',
+                    'content': thread.get('content') or '',
+                    'ctime': None,
+                }
+                root_is_me = True
+        root_user = '我' if root_is_me else (root.get('user') or '未知用户')
+        root_time = self._fmt_time(root.get('ctime')) or self._fmt_time(
+            thread.get('commented_at')
+        )
+        root_content = html.escape(root.get('content') or '').replace('\n', '<br>')
+        root_color = '#2563eb' if root_is_me else '#374151'
         title = html.escape(thread.get('video_title') or '评论对话')
-        content = html.escape(thread.get('content') or '').replace('\n', '<br>')
-        if thread.get('comment_type') == 'reply':
-            target = html.escape(thread.get('target_user') or '评论')
-            mine_label = f'我 · 回复 @{target}'
-        else:
-            mine_label = '我 · 评论'
+        meta = (
+            f'<div style="color:#8a94a6; font-size:12px; margin-bottom:10px;">'
+            f'{title}{(" · " + root_time) if root_time else ""}</div>'
+        )
 
         parts = [
             '<div style="font-family:\'Microsoft YaHei\',sans-serif;'
             ' font-size:13px; color:#1f2937; line-height:1.65;">',
-            '<div style="background:#f5f8ff; border:1px solid #dbe7ff;'
-            ' border-radius:10px; padding:10px 12px; margin-bottom:14px;">',
-            f'<div style="color:#8a94a6; font-size:12px;">{title}'
-            f' · {when}</div>',
-            f'<div style="color:#2563eb; font-weight:700; margin-top:2px;">'
-            f'{mine_label}</div>',
-            f'<div style="margin-top:4px;">{content}</div>',
+            meta,
+            '<div style="background:#ffffff; border:1px solid #e5e7eb;'
+            ' border-radius:10px; padding:12px 14px;">',
+            '<div style="display:flex; align-items:center; gap:8px;">',
+            self._avatar(root_user, root_color, 30),
+            f'<span style="color:{root_color}; font-weight:700;">{html.escape(root_user)}</span>',
+            '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
+            ' border-radius:4px; padding:1px 5px;">楼主</span>',
+            f'<span style="margin-left:auto; color:#9aa3b2; font-size:12px;">'
+            f'{root_time}</span>',
+            '</div>',
+            f'<div style="margin-top:8px; color:#1f2937;">{root_content}</div>',
             '</div>',
         ]
 
-        count = 0
-        for comment in replies or []:
-            rpid = comment.get('rpid')
-            if rpid == thread.get('rpid'):
-                continue
-            count += 1
-            ctime = comment.get('ctime') or 0
-            timestamp = (
-                datetime.datetime.fromtimestamp(ctime).strftime('%m-%d %H:%M')
-                if ctime else '--'
-            )
-            who = html.escape(comment.get('user') or '未知用户')
-            is_own = rpid in self.own_rpids
-            who_color = '#2563eb' if is_own else '#374151'
-            suffix = '（我）' if is_own else ''
-            body = html.escape(comment.get('content') or '').replace('\n', '<br>')
-            parts.extend([
-                '<div style="border-left:3px solid #e5e7eb;'
-                ' padding:2px 0 2px 10px; margin:0 0 11px 2px;">',
-                f'<div><span style="color:#9aa3b2; font-size:12px;">'
-                f'{timestamp}</span> '
-                f'<span style="color:{who_color}; font-weight:700;">'
-                f'{who}{suffix}</span></div>',
-                f'<div style="margin-top:2px;">{body}</div>',
-                '</div>',
-            ])
-
-        if count == 0:
+        items = [
+            comment for comment in comments
+            if comment.get('rpid') != root_rpid
+        ]
+        if (
+            thread.get('comment_type') == 'reply'
+            and thread.get('rpid') not in by_rpid
+            and thread.get('content')
+        ):
+            items.append({
+                'rpid': thread.get('rpid'),
+                'user': '我',
+                'content': thread.get('content'),
+                'ctime': thread.get('commented_at'),
+                'parent': root_rpid,
+            })
+        items.sort(key=lambda item: item.get('ctime') or 0)
+        if items:
             parts.append(
-                '<div style="color:#9aa3b2; font-size:12px; padding:6px 2px;">'
+                f'<div style="margin:14px 2px 8px; color:#8a94a6; font-size:12px;">'
+                f'{len(items)} 条回复</div>'
+            )
+            for comment in items:
+                parent = comment.get('parent') or 0
+                depth = 1 if parent and parent != root_rpid else 0
+                parts.append(self._reply_html(comment, self.own_rpids, depth))
+        else:
+            parts.append(
+                '<div style="color:#9aa3b2; font-size:12px; padding:14px 4px;">'
                 '暂无网友回复</div>'
             )
         parts.append('</div>')
         self.transcript.setHtml(''.join(parts))
+        count = len(items)
         if count:
-            self.status_label.setText(f"{thread.get('video_title') or '评论对话'}"
-                                      f" · {count} 条回复")
+            self.status_label.setText(
+                f"{thread.get('video_title') or '评论对话'} · {count} 条回复"
+            )
         else:
-            self.status_label.setText(f"{thread.get('video_title') or '评论对话'}"
-                                      f" · 暂无网友回复")
+            self.status_label.setText(
+                f"{thread.get('video_title') or '评论对话'} · 暂无网友回复"
+            )
 
     def _on_failed(self, message: str):
         self.status_label.setText(f"加载评论对话失败：{message}")

@@ -55,6 +55,11 @@ class BilibiliAPI:
         self._comment_request_lock: Optional[asyncio.Lock] = None
         # 只缓存“分析用”的评论页，回复检查必须拿最新数据
         self._comments_cache: Dict[tuple, tuple] = {}
+        # 评论区关闭（12002）的短期缓存，避免反复请求
+        self._closed_comment_aids: Dict[int, datetime] = {}
+        # 12014 冷却状态持久化，重启后继续暂停
+        self._posting_state_path = self.credential_path.parent / 'posting_blocked.json'
+        self._load_posting_state()
         # 当前登录账号（用于过滤自己发出的评论，避免自问自答）
         self._self_info: Optional[Dict[str, Any]] = None
 
@@ -404,6 +409,47 @@ class BilibiliAPI:
         self.blocked_until = datetime.now() + timedelta(minutes=duration_minutes)
         logger.warning(f"触发风控，将暂停 {duration_minutes} 分钟")
 
+    def _load_posting_state(self):
+        path = getattr(self, '_posting_state_path', None)
+        if not path or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            until = datetime.fromisoformat(data.get('until', ''))
+        except Exception:  # noqa: BLE001
+            return
+        if until and datetime.now() < until:
+            self.posting_blocked_until = until
+            self.posting_block_reason = data.get('reason', '')
+            logger.info(f"恢复评论发送冷却至 {until:%Y-%m-%d %H:%M}")
+        else:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def _save_posting_state(self):
+        path = getattr(self, '_posting_state_path', None)
+        if not path:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({
+                'until': self.posting_blocked_until.isoformat()
+                if self.posting_blocked_until else '',
+                'reason': self.posting_block_reason,
+            }, ensure_ascii=False), encoding='utf-8')
+        except OSError:
+            pass
+
+    def _clear_posting_state(self):
+        path = getattr(self, '_posting_state_path', None)
+        if path:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
     def is_posting_blocked(self) -> bool:
         """B站评论发送额度是否已用完（错误码 12014）。"""
         until = getattr(self, 'posting_blocked_until', None)
@@ -411,6 +457,7 @@ class BilibiliAPI:
             if datetime.now() < until:
                 return True
             self.posting_blocked_until = None
+            self._clear_posting_state()
         return False
 
     def set_posting_blocked(self, reason: str = ''):
@@ -420,6 +467,7 @@ class BilibiliAPI:
         )
         self.posting_blocked_until = reset
         self.posting_block_reason = reason
+        self._save_posting_state()
         logger.warning(
             f"B站评论发送已达上限（12014），暂停发评论至 "
             f"{reset:%Y-%m-%d %H:%M}"
@@ -657,6 +705,14 @@ class BilibiliAPI:
         if self.is_blocked():
             logger.debug(f"风控冷却中，跳过获取评论 aid={aid}")
             return []
+        closed_cache = getattr(self, '_closed_comment_aids', None)
+        if closed_cache is None:
+            closed_cache = {}
+            self._closed_comment_aids = closed_cache
+        closed_at = closed_cache.get(aid)
+        if closed_at and (datetime.now() - closed_at).total_seconds() < 600:
+            logger.debug(f"评论区已关闭（缓存），跳过 aid={aid}")
+            return []
         cache_key = None
         comments_cache = getattr(self, '_comments_cache', None)
         if comments_cache is None:
@@ -762,6 +818,7 @@ class BilibiliAPI:
             message = str(e)
 
             if '12002' in message or '评论功能已关闭' in message:
+                closed_cache[aid] = datetime.now()
                 logger.info(f"视频 aid={aid} 评论区已关闭，跳过")
                 return []
 

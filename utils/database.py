@@ -54,6 +54,7 @@ class CommentRecord(Base):
     comment_type = Column(String(20))  # 'post'=发出, 'reply'=回复
     content = Column(Text)
     target_user = Column(String(100))  # 回复的用户
+    parent_content = Column(Text)  # 被回复评论的原文，用于按楼展示
 
     success = Column(Boolean)
     error_message = Column(Text)
@@ -91,6 +92,12 @@ class Database:
         if 'parent_rpid' not in columns:
             with self.engine.begin() as connection:
                 connection.execute(text('ALTER TABLE comments ADD COLUMN parent_rpid INTEGER'))
+        if 'parent_content' not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(text('ALTER TABLE comments ADD COLUMN parent_content TEXT'))
+        if 'target_user' not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(text('ALTER TABLE comments ADD COLUMN target_user VARCHAR(100)'))
 
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
@@ -161,7 +168,8 @@ class Database:
         error_message: str = "",
         rpid: Optional[int] = None,
         parent_rpid: Optional[int] = None,
-        target_user: str = ""
+        target_user: str = "",
+        parent_content: str = ""
     ) -> CommentRecord:
         """添加评论记录"""
         record = CommentRecord(
@@ -172,6 +180,7 @@ class Database:
             comment_type=comment_type,
             content=content,
             target_user=target_user,
+            parent_content=parent_content,
             success=success,
             error_message=error_message
         )
@@ -279,6 +288,7 @@ class Database:
                 'thread_root': thread_root,
                 'comment_type': record.comment_type,
                 'target_user': record.target_user or '',
+                'parent_content': record.parent_content or '',
                 'content': record.content or '',
                 'video_title': video.title if video else '',
                 'commented_at': record.created_at,

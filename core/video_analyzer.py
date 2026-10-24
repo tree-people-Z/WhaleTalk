@@ -211,6 +211,7 @@ class VideoAnalyzer:
                         rpid=getattr(self.bili, 'last_comment_rpid', None),
                         parent_rpid=target.get('rpid'),
                         target_user=target.get('user') or '',
+                        parent_content=target.get('content') or '',
                     )
                     self._greetings_sent_this_run += 1
                     sent += 1
@@ -353,6 +354,7 @@ class VideoAnalyzer:
                         rpid=getattr(self.bili, 'last_comment_rpid', None),
                         parent_rpid=target.get('rpid'),
                         target_user=target.get('user') or '',
+                        parent_content=target.get('content') or '',
                     )
                     self._interactions_sent_this_run += 1
                     sent += 1

@@ -1,4 +1,4 @@
-﻿"""
+"""
 配置管理模块
 """
 
@@ -28,6 +28,7 @@ class ConfigManager:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
+                self._merge_defaults()
                 self._normalize_secrets()
                 self._normalize_transcription()
                 logger.info(f"配置已加载: {self.config_path}")
@@ -37,6 +38,24 @@ class ConfigManager:
         else:
             logger.info("配置文件不存在，使用默认配置")
             self.config = self.get_default_config()
+
+    def _merge_defaults(self):
+        """把新增默认配置项补进旧配置文件，避免设置缺失。"""
+        defaults = self.get_default_config()
+        if self._merge_missing(self.config, defaults):
+            logger.info("配置已补充新增默认项")
+            self.save()
+
+    @classmethod
+    def _merge_missing(cls, target: Dict[str, Any], defaults: Dict[str, Any]) -> bool:
+        changed = False
+        for key, value in defaults.items():
+            if key not in target:
+                target[key] = value
+                changed = True
+            elif isinstance(value, dict) and isinstance(target.get(key), dict):
+                changed = cls._merge_missing(target[key], value) or changed
+        return changed
 
     def save(self):
         """保存配置"""
