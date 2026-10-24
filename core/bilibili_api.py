@@ -771,6 +771,48 @@ class BilibiliAPI:
                 )
             return []
 
+    async def _load_all_subcomments(
+        self, aid: int, root_rpid: int, page_size: int = 20, max_pages: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Load every page of a comment thread, not just the first page."""
+        entries: List[Dict[str, Any]] = []
+        seen = set()
+        page_index = 1
+        while page_index <= max_pages:
+            try:
+                sub_data = await comment.Comment(
+                    oid=aid,
+                    type_=comment.CommentResourceType.VIDEO,
+                    rpid=root_rpid,
+                    credential=self.credential,
+                ).get_sub_comments(page_index=page_index, page_size=page_size)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"获取楼中楼第 {page_index} 页失败 aid={aid}, root={root_rpid}: {exc}")
+                break
+            replies = (sub_data.get('replies') or []) if isinstance(sub_data, dict) else []
+            new_entries = [
+                entry for entry in replies
+                if entry and entry.get('rpid') not in seen
+            ]
+            if not new_entries:
+                break
+            for entry in new_entries:
+                seen.add(entry.get('rpid'))
+                entries.append(entry)
+
+            page_info = sub_data.get('page') or {}
+            try:
+                total = int(page_info.get('count') or page_info.get('acount') or 0)
+            except (TypeError, ValueError):
+                total = 0
+            if total and len(entries) >= total:
+                break
+            if not total and len(replies) < page_size:
+                break
+            page_index += 1
+            await asyncio.sleep(0.4)
+        return entries
+
     async def get_comment_thread(
         self, aid: int, root_rpid: int, count: int = 50
     ) -> List[Dict[str, Any]]:
@@ -782,19 +824,39 @@ class BilibiliAPI:
         comments = await self.get_comments(
             aid, count=count, include_replies=True, root_rpids={root_rpid}
         )
+        by_rpid = {}
+        for item in comments:
+            rpid = item.get('rpid')
+            if rpid and rpid not in by_rpid:
+                by_rpid[rpid] = item
+        # get_comments only returns the first sub-comment page; fetch all pages
+        # so the whole thread is visible.
+        for entry in await self._load_all_subcomments(aid, root_rpid):
+            rpid = entry.get('rpid')
+            if rpid and rpid not in by_rpid:
+                by_rpid[rpid] = {
+                    'rpid': rpid,
+                    'user': entry.get('member', {}).get('uname', '未知用户'),
+                    'mid': entry.get('member', {}).get('mid'),
+                    'content': entry.get('content', {}).get('message', ''),
+                    'like': entry.get('like', 0),
+                    'ctime': entry.get('ctime', 0),
+                    'root': entry.get('root') or root_rpid,
+                    'parent': entry.get('parent', 0),
+                }
         thread = [
-            comment for comment in comments
-            if comment.get('root') == root_rpid or comment.get('rpid') == root_rpid
+            item for item in by_rpid.values()
+            if item.get('root') == root_rpid or item.get('rpid') == root_rpid
         ]
-        thread.sort(key=lambda comment: comment.get('ctime') or 0)
+        thread.sort(key=lambda item: item.get('ctime') or 0)
         seen = set()
         result = []
-        for comment in thread:
-            rpid = comment.get('rpid')
+        for item in thread:
+            rpid = item.get('rpid')
             if rpid in seen:
                 continue
             seen.add(rpid)
-            result.append(comment)
+            result.append(item)
         return result
 
     async def post_comment(
