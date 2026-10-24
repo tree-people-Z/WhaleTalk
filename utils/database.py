@@ -180,6 +180,17 @@ class Database:
         self.session.commit()
         return record
 
+    def get_today_comment_count(self, include_replies: bool = False) -> int:
+        """统计今天实际成功发出的顶层评论；可选包含回复。"""
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        query = self.session.query(CommentRecord).filter(
+            CommentRecord.success == True,  # noqa: E712
+            CommentRecord.created_at >= start,
+        )
+        if not include_replies:
+            query = query.filter(CommentRecord.comment_type == 'post')
+        return query.count()
+
     def get_today_quota(self) -> DailyQuota:
         """获取今日配额"""
         today = datetime.now().strftime('%Y-%m-%d')

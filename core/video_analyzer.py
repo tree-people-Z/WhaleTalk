@@ -411,12 +411,19 @@ class VideoAnalyzer:
                 'comments_sent': 0
             }
 
-        # 检查今日配额
+        # 检查今日配额（按数据库里今天所有成功的评论/回复统计）
         quota = self.db.get_today_quota()
         max_comments = self.config.get('limits.max_comments_per_day', 999)
+        today_comments = quota.comments_sent
+        get_today_count = getattr(self.db, 'get_today_comment_count', None)
+        if callable(get_today_count):
+            try:
+                today_comments = max(today_comments, int(get_today_count()))
+            except (TypeError, ValueError):
+                pass
 
-        if quota.comments_sent >= max_comments:
-            logger.warning(f"今日评论配额已用完 ({quota.comments_sent}/{max_comments})")
+        if today_comments >= max_comments:
+            logger.warning(f"今日评论配额已用完 ({today_comments}/{max_comments})")
             return {
                 'status': 'quota_exhausted',
                 'videos_found': 0,
@@ -459,7 +466,7 @@ class VideoAnalyzer:
             max_videos = 2
         min_comment_score = self.config.get('limits.min_score_to_comment', 10)
         auto_comment = self.config.get('interaction.auto_comment', False)
-        remaining_quota = max(0, max_comments - quota.comments_sent)
+        remaining_quota = max(0, max_comments - today_comments)
         logger.info(f"本轮最多分析 {max_videos} 条视频（不强制每轮发评论）")
 
         for video in videos:

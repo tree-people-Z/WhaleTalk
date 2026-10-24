@@ -379,8 +379,10 @@ class BilibiliAPI:
                         logger.info("已补充 buvid4 风控参数")
                 except Exception as exc:  # noqa: BLE001
                     logger.debug(f"补充 buvid4 失败: {exc}")
-            u = user.User(self.credential.sessdata.split('=')[0], credential=self.credential)
-            info = await u.get_user_info()
+            info = await user.get_self_info(credential=self.credential)
+            if not isinstance(info, dict) or not info.get('name'):
+                logger.warning("登录状态检查失败: 未获取到用户信息")
+                return False
             logger.info(f"登录有效，用户: {info.get('name')}")
             return True
         except Exception as e:
@@ -758,6 +760,11 @@ class BilibiliAPI:
 
         except Exception as e:
             message = str(e)
+
+            if '12002' in message or '评论功能已关闭' in message:
+                logger.info(f"视频 aid={aid} 评论区已关闭，跳过")
+                return []
+
             if "412" in message or any(
                 keyword in message for keyword in ("风控", "频繁", "验证码")
             ):

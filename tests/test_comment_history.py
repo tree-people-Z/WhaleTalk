@@ -19,6 +19,21 @@ class CommentHistoryTests(unittest.TestCase):
                 db.session.close()
                 db.engine.dispose()
 
+    def test_today_comment_count_includes_replies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'history.db'))
+            try:
+                db.add_comment_record('BV1', 1, '评论', comment_type='post', rpid=1)
+                db.add_comment_record(
+                    'BV1', 1, '回复', comment_type='reply', rpid=2,
+                    parent_rpid=1, target_user='viewer'
+                )
+                self.assertEqual(db.get_today_comment_count(), 1)
+                self.assertEqual(db.get_today_comment_count(include_replies=True), 2)
+            finally:
+                db.session.close()
+                db.engine.dispose()
+
     def test_recent_comments_can_include_replies(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'history.db'))
