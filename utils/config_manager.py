@@ -168,6 +168,7 @@ class ConfigManager:
             },
             "limits": {
                 "max_comments_per_day": 96,
+                "max_likes_per_day": 50,
                 "max_videos_per_run": 20,
                 "skip_analyzed_within_hours": 2,
                 "max_greetings_per_video": 2,
@@ -181,6 +182,7 @@ class ConfigManager:
             },
             "interaction": {
                 "auto_comment": True,
+                "auto_like_commented_video": False,
                 "comment_monitor": True,
                 "auto_reply": True,
                 "greet_other_whales": True,

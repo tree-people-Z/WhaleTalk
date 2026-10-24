@@ -34,6 +34,19 @@ class CommentHistoryTests(unittest.TestCase):
                 db.session.close()
                 db.engine.dispose()
 
+    def test_like_records_are_counted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'history.db'))
+            try:
+                db.add_like_record('BV1', 1, True)
+                db.add_like_record('BV2', 2, False)
+                self.assertEqual(db.get_today_like_count(), 1)
+                self.assertTrue(db.has_liked_video('BV1'))
+                self.assertFalse(db.has_liked_video('BV2'))
+            finally:
+                db.session.close()
+                db.engine.dispose()
+
     def test_recent_comments_can_include_replies(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'history.db'))

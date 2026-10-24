@@ -131,6 +131,7 @@ class SettingsPage(QWidget):
         """连接信号实现实时保存"""
         # 数字输入框
         self.max_comments_spin.valueChanged.connect(self.auto_save)
+        self.max_likes_spin.valueChanged.connect(self.auto_save)
         self.cooldown_spin.valueChanged.connect(self.auto_save)
         self.max_videos_spin.valueChanged.connect(self.auto_save)
         self.min_score_spin.valueChanged.connect(self.auto_save)
@@ -142,6 +143,7 @@ class SettingsPage(QWidget):
 
         # 复选框
         self.auto_comment_check.stateChanged.connect(self.auto_save)
+        self.auto_like_check.stateChanged.connect(self.auto_save)
         self.mention_owner_check.stateChanged.connect(self.auto_save)
         self.persona_enabled_check.stateChanged.connect(self.auto_save)
         self.comment_monitor_check.stateChanged.connect(self.auto_save)
@@ -170,6 +172,7 @@ class SettingsPage(QWidget):
 
         # 禁用所有数字输入框的鼠标滚轮
         self.disable_wheel_event(self.max_comments_spin)
+        self.disable_wheel_event(self.max_likes_spin)
         self.disable_wheel_event(self.cooldown_spin)
         self.disable_wheel_event(self.max_videos_spin)
         self.disable_wheel_event(self.min_score_spin)
@@ -365,6 +368,11 @@ class SettingsPage(QWidget):
         self.max_comments_spin.setRange(0, 9999)
         layout.addRow("每日最大评论数:", self.max_comments_spin)
 
+        # 每日最大点赞数
+        self.max_likes_spin = QSpinBox()
+        self.max_likes_spin.setRange(0, 500)
+        layout.addRow("每日最大点赞数:", self.max_likes_spin)
+
         # 同视频冷却天数
         self.cooldown_spin = QSpinBox()
         self.cooldown_spin.setRange(1, 30)
@@ -389,6 +397,9 @@ class SettingsPage(QWidget):
         # 自动评论开关
         self.auto_comment_check = QCheckBox("启用自动评论")
         layout.addRow("", self.auto_comment_check)
+
+        self.auto_like_check = QCheckBox("评论成功后给视频点赞（可选）")
+        layout.addRow("", self.auto_like_check)
 
         self.mention_owner_check = QCheckBox("在评论中 @我（默认关闭）")
         layout.addRow("", self.mention_owner_check)
@@ -617,7 +628,8 @@ class SettingsPage(QWidget):
         self.order_combo.setCurrentIndex(order_map.get(order, 0))
 
         # 限制设置
-        self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 999))
+        self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 96))
+        self.max_likes_spin.setValue(self.config.get('limits.max_likes_per_day', 50))
         self.cooldown_spin.setValue(self.config.get('limits.same_video_cooldown_days', 7))
         self.max_videos_spin.setValue(self.config.get('limits.max_videos_per_run', 20))
         self.min_score_spin.setValue(self.config.get('limits.min_score_to_comment', 13))
@@ -625,6 +637,9 @@ class SettingsPage(QWidget):
             self.config.get('limits.min_score_to_mention_owner', 13)
         )
         self.auto_comment_check.setChecked(self.config.get('interaction.auto_comment', False))
+        self.auto_like_check.setChecked(
+            self.config.get('interaction.auto_like_commented_video', False)
+        )
         self.mention_owner_check.setChecked(
             self.config.get('interaction.mention_owner_on_interesting', False)
         )
@@ -715,6 +730,7 @@ class SettingsPage(QWidget):
 
             # 限制设置
             self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
+            self.config.set('limits.max_likes_per_day', self.max_likes_spin.value())
             self.config.set('limits.same_video_cooldown_days', self.cooldown_spin.value())
             self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
             self.config.set('limits.min_score_to_comment', self.min_score_spin.value())
@@ -722,6 +738,10 @@ class SettingsPage(QWidget):
                 'limits.min_score_to_mention_owner', self.mention_threshold_spin.value()
             )
             self.config.set('interaction.auto_comment', self.auto_comment_check.isChecked())
+            self.config.set(
+                'interaction.auto_like_commented_video',
+                self.auto_like_check.isChecked(),
+            )
             self.config.set(
                 'interaction.mention_owner_on_interesting', self.mention_owner_check.isChecked()
             )

@@ -744,6 +744,46 @@ class VideoAnalyzer:
             logger.error(f"分析视频失败 {bvid}: {e}")
             return None
 
+    async def _like_commented_video(
+        self, video: Dict[str, Any], analysis: Dict[str, Any]
+    ) -> bool:
+        """给刚评论过的视频点赞（可选、带每日上限）。"""
+        if not self.config.get('interaction.auto_like_commented_video', False):
+            return False
+        if getattr(self.bili, 'is_blocked', lambda: False)():
+            return False
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            return False
+        bvid = video.get('bvid')
+        aid = video.get('aid')
+        if not bvid or not aid:
+            return False
+        try:
+            max_likes = int(self.config.get('limits.max_likes_per_day', 50))
+        except (TypeError, ValueError):
+            max_likes = 50
+        if max_likes <= 0:
+            return False
+        try:
+            if self.db.get_today_like_count() >= max_likes:
+                logger.info(f"今日点赞数已达上限 {max_likes}，跳过点赞")
+                return False
+            if self.db.has_liked_video(bvid):
+                logger.debug(f"视频已点过赞，跳过: {bvid}")
+                return False
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"检查点赞记录失败: {exc}")
+
+        success = await self.bili.like_video(aid)
+        try:
+            self.db.add_like_record(bvid, aid, success)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"记录点赞失败: {exc}")
+        if success:
+            logger.info(f"👍 已给视频点赞: {video.get('title', '')}")
+        await asyncio.sleep(1)
+        return success
+
     async def _post_comment_for_video(
         self,
         video: Dict[str, Any],
@@ -832,6 +872,7 @@ class VideoAnalyzer:
             if success:
                 self.db.mark_commented(bvid, comment_text, comment_rpid)
                 logger.info(f"✅ 评论成功: {title}")
+                await self._like_commented_video(video, analysis)
                 await self._greet_other_whales(video, analysis)
             else:
                 logger.error(f"❌ 评论失败: {title}")

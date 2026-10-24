@@ -62,6 +62,18 @@ class CommentRecord(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class LikeRecord(Base):
+    """视频点赞记录"""
+    __tablename__ = 'likes'
+
+    id = Column(Integer, primary_key=True)
+    bvid = Column(String(20), nullable=False, index=True)
+    aid = Column(Integer)
+    success = Column(Boolean)
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+
+
 class DailyQuota(Base):
     """每日配额表"""
     __tablename__ = 'daily_quota'
@@ -188,6 +200,29 @@ class Database:
         self.session.add(record)
         self.session.commit()
         return record
+
+    def add_like_record(
+        self, bvid: str, aid: int, success: bool = True, error_message: str = ""
+    ) -> LikeRecord:
+        record = LikeRecord(
+            bvid=bvid, aid=aid, success=success, error_message=error_message
+        )
+        self.session.add(record)
+        self.session.commit()
+        return record
+
+    def get_today_like_count(self) -> int:
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.session.query(LikeRecord).filter(
+            LikeRecord.success == True,  # noqa: E712
+            LikeRecord.created_at >= start,
+        ).count()
+
+    def has_liked_video(self, bvid: str) -> bool:
+        return self.session.query(LikeRecord).filter(
+            LikeRecord.bvid == bvid,
+            LikeRecord.success == True,  # noqa: E712
+        ).first() is not None
 
     def get_today_comment_count(self, include_replies: bool = False) -> int:
         """统计今天实际成功发出的顶层评论；可选包含回复。"""

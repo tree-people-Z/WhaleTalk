@@ -987,6 +987,26 @@ class BilibiliAPI:
 
             return False
 
+    async def like_video(self, aid: int) -> bool:
+        """给视频点赞；已经赞过按成功处理。"""
+        if not self.credential:
+            logger.error("未登录，无法点赞")
+            return False
+        if self.is_blocked():
+            logger.warning("当前处于风控状态，跳过点赞")
+            return False
+        try:
+            await video.Video(aid=aid, credential=self.credential).like(True)
+            logger.info(f"点赞视频成功: aid={aid}")
+            return True
+        except Exception as e:  # noqa: BLE001
+            message = str(e)
+            if any(keyword in message for keyword in ('65006', '已经赞', '已点赞')):
+                logger.debug(f"视频已经点过赞: aid={aid}")
+                return True
+            logger.warning(f"点赞视频失败 aid={aid}: {self._short_error(message)}")
+            return False
+
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""
         if not self.credential:
