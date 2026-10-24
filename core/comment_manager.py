@@ -58,8 +58,9 @@ class CommentManager:
             except Exception as exc:
                 logger.debug(f"获取当前账号信息失败: {exc}")
 
-            # 1. 检查我发送的评论是否有回复
-            my_comments = self.db.get_recent_comments(limit=20)
+            # 1. 检查我发送的评论和回复是否有回复
+            my_comments = self.db.get_recent_comments(limit=20, include_replies=True)
+            found_rpids = set()
 
             for my_comment in my_comments:
                 if not my_comment.get('aid'):
@@ -67,6 +68,7 @@ class CommentManager:
 
                 aid = my_comment['aid']
                 my_rpid = my_comment.get('rpid')
+                thread_root = my_comment.get('thread_root') or my_rpid
 
                 if not my_rpid:
                     continue
@@ -74,17 +76,18 @@ class CommentManager:
                 # 获取该视频的评论
                 try:
                     comments = await self.bili.get_comments(
-                        aid, count=50, include_replies=True, root_rpids={my_rpid}
+                        aid, count=50, include_replies=True,
+                        root_rpids={thread_root}
                     )
 
                     for comment in comments:
-                        # 检查是否是回复我的评论
+                        # 检查是否是回复我的评论/回复
                         root = comment.get('root', 0)
                         parent = comment.get('parent', 0)
                         rpid = comment.get('rpid')
 
                         # 跳过自己发出的评论（含自动回复产生的楼层），避免自问自答。
-                        if rpid in self.processed_rpids:
+                        if rpid in self.processed_rpids or rpid in found_rpids:
                             continue
                         if self_uid is not None and comment.get('mid') == self_uid:
                             logger.debug(f"跳过自己发出的评论: {rpid}")
@@ -93,12 +96,11 @@ class CommentManager:
                             logger.debug(f"跳过自己账号的评论: {rpid}")
                             continue
 
-                        # 如果root或parent是我的评论ID，说明是回复我的
+                        # root 命中顶层评论，或 parent 命中我的回复，都算回复我。
                         if root == my_rpid or parent == my_rpid:
-                            thread_root = root or my_rpid
                             mentions.append({
                                 'rpid': rpid,
-                                'root_rpid': thread_root,
+                                'root_rpid': root or my_rpid,
                                 'user': comment.get('user'),
                                 'content': comment.get('content'),
                                 'aid': aid,
@@ -106,6 +108,7 @@ class CommentManager:
                                 'type': 'reply',
                                 'video_title': my_comment.get('video_title', '')
                             })
+                            found_rpids.add(rpid)
                             logger.info(f"发现回复: {comment.get('user')} -> {comment.get('content')[:30]}")
 
                 except Exception as e:
@@ -156,7 +159,11 @@ class CommentManager:
             reply_text = await self.ai.generate_reply(
                 original_comment=content,
                 video_context=f"视频: {video_title}",
-                persona=persona
+                persona=persona,
+                user_name=user or '',
+                is_owner=bool(
+                    user and user == self.config.get('bilibili.owner_name', '')
+                ),
             )
 
             if not reply_text:

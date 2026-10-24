@@ -1,4 +1,4 @@
-"""
+﻿"""
 配置管理模块
 """
 
@@ -148,9 +148,8 @@ class ConfigManager:
                 "order": "totalrank"  # 综合排序
             },
             "limits": {
-                "max_comments_per_day": 999,
+                "max_comments_per_day": 96,
                 "max_videos_per_run": 20,
-                "max_search_rounds_per_run": 3,
                 "skip_analyzed_within_hours": 2,
                 "max_greetings_per_video": 2,
                 "max_greetings_per_run": 5,

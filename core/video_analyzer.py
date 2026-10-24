@@ -185,6 +185,13 @@ class VideoAnalyzer:
                     ),
                     video_context=f"视频: {video.get('title', '')}",
                     persona=persona,
+                    user_name=target.get('user') or '',
+                    is_owner=bool(
+                        target.get('user')
+                        and target.get('user') == self.config.get(
+                            'bilibili.owner_name', ''
+                        )
+                    ),
                 )
                 if not reply:
                     continue
@@ -320,6 +327,13 @@ class VideoAnalyzer:
                     original_comment=target.get('content', ''),
                     video_context=f"视频: {video.get('title', '')}",
                     persona=persona,
+                    user_name=target.get('user') or '',
+                    is_owner=bool(
+                        target.get('user')
+                        and target.get('user') == self.config.get(
+                            'bilibili.owner_name', ''
+                        )
+                    ),
                 )
                 if not reply:
                     continue
@@ -420,10 +434,10 @@ class VideoAnalyzer:
             }
 
         # 1. 搜索视频
-        initial_videos = await self._search_videos()
-        logger.info(f"搜索到 {len(initial_videos)} 个视频")
+        videos = await self._search_videos()
+        logger.info(f"搜索到 {len(videos)} 个视频")
 
-        if not initial_videos:
+        if not videos:
             return {
                 'status': 'no_videos_found',
                 'videos_found': 0,
@@ -431,134 +445,88 @@ class VideoAnalyzer:
                 'comments_sent': 0
             }
 
-        # 2. 分析视频；每轮目标是给 1-2 条视频发出评论
+        # 2. 每轮最多分析 N 条；符合条件才评论，不强制每轮必须回复
         analyzed_videos = []
         worthy_videos = []
         comments_sent = 0
         known_bvids = set()
-        current_videos = initial_videos
 
-        max_videos = self.config.get('limits.max_videos_per_run', 10)
+        try:
+            max_videos = max(
+                1, int(self.config.get('limits.max_videos_per_run', 2))
+            )
+        except (TypeError, ValueError):
+            max_videos = 2
         min_comment_score = self.config.get('limits.min_score_to_comment', 10)
         auto_comment = self.config.get('interaction.auto_comment', False)
-        try:
-            target_comments = max(1, int(max_videos)) if auto_comment else 0
-        except (TypeError, ValueError):
-            target_comments = 2
-        # 为凑够目标，允许比目标多分析几条候选。
-        max_attempts = (
-            max(target_comments * 3, target_comments + 3)
-            if auto_comment else max_videos
-        )
-        try:
-            max_search_rounds = max(
-                1, int(self.config.get('limits.max_search_rounds_per_run', 3))
-            )
-        except (TypeError, ValueError):
-            max_search_rounds = 3
         remaining_quota = max(0, max_comments - quota.comments_sent)
-        if target_comments:
-            logger.info(
-                f"本轮目标: 给 {target_comments} 条视频发评论"
-                f"（最多分析 {max_attempts} 条候选，最多搜索 {max_search_rounds} 页）"
-            )
+        logger.info(f"本轮最多分析 {max_videos} 条视频（不强制每轮发评论）")
 
-        for search_round in range(1, max_search_rounds + 1):
-            if search_round > 1:
-                more_videos = await self._search_videos()
-                current_videos = [
-                    video for video in more_videos
-                    if video.get('bvid') and video['bvid'] not in known_bvids
-                ]
-                logger.info(
-                    f"候选不足，补充搜索第 {search_round} 页，"
-                    f"新增 {len(current_videos)} 个视频"
+        for video in videos:
+            self._raise_if_stopping()
+            bvid = video.get('bvid')
+            if not bvid or bvid in known_bvids:
+                continue
+            known_bvids.add(bvid)
+            if len(analyzed_videos) >= max_videos:
+                break
+            # 持续巡视时跳过最近分析过的视频，避免反复分析同一批内容。
+            if self.db.is_video_analyzed_recently(
+                bvid,
+                hours=self.config.get('limits.skip_analyzed_within_hours', 2),
+            ):
+                logger.info(f"跳过最近已分析的视频: {bvid}")
+                continue
+            # 检查是否最近评论过
+            if self.db.check_video_commented_recently(
+                bvid,
+                days=self.config.get('limits.same_video_cooldown_days', 7)
+            ):
+                logger.info(f"跳过最近已评论的视频: {bvid}")
+                continue
+
+            # 分析视频
+            analysis = await self._analyze_video(video)
+
+            if analysis:
+                analyzed_videos.append({
+                    'video': video,
+                    'analysis': analysis
+                })
+
+                # 保存到数据库
+                self.db.add_video_record(
+                    bvid=bvid,
+                    video_info=video,
+                    analysis=analysis
                 )
-                if not current_videos:
-                    break
+                self.db.increment_videos()
 
-            for video in current_videos:
-                self._raise_if_stopping()
-                bvid = video.get('bvid')
-                if not bvid or bvid in known_bvids:
-                    continue
-                known_bvids.add(bvid)
-                if target_comments and (
-                    comments_sent >= target_comments or remaining_quota <= 0
-                ):
-                    break
-                if len(analyzed_videos) >= max_attempts:
-                    break
-                # 持续巡视时跳过最近分析过的视频，避免反复分析同一批内容。
-                if self.db.is_video_analyzed_recently(
-                    bvid,
-                    hours=self.config.get('limits.skip_analyzed_within_hours', 2),
-                ):
-                    logger.info(f"跳过最近已分析的视频: {bvid}")
-                    continue
-                # 检查是否最近评论过
-                if self.db.check_video_commented_recently(
-                    bvid,
-                    days=self.config.get('limits.same_video_cooldown_days', 7)
-                ):
-                    logger.info(f"跳过最近已评论的视频: {bvid}")
-                    continue
+                await self._reply_to_invitations(video, analysis)
 
-                # 分析视频
-                analysis = await self._analyze_video(video)
-
-                if analysis:
-                    analyzed_videos.append({
+                # 符合评分/置信度且当天配额未用完才评论；没有合适视频就少发或不发。
+                if analysis['score'] >= min_comment_score or analysis.get('owner_directive'):
+                    worthy_videos.append({
                         'video': video,
                         'analysis': analysis
                     })
+                    if auto_comment and remaining_quota > 0:
+                        success = await self._post_comment_for_video(video, analysis)
+                        if success:
+                            comments_sent += 1
+                            remaining_quota -= 1
+                            self.db.increment_comments()
+                            logger.info(
+                                f"   视频链接: https://www.bilibili.com/video/{bvid}"
+                            )
 
-                    # 保存到数据库
-                    self.db.add_video_record(
-                        bvid=bvid,
-                        video_info=video,
-                        analysis=analysis
-                    )
-                    self.db.increment_videos()
-
-                    await self._reply_to_invitations(video, analysis)
-
-                    # 评论候选由「评论最低评分」设置控制；明确 @主人 指令的视频不参与再筛选。
-                    if analysis['score'] >= min_comment_score or analysis.get('owner_directive'):
-                        worthy_videos.append({
-                            'video': video,
-                            'analysis': analysis
-                        })
-                        can_comment = (
-                            auto_comment
-                            and comments_sent < target_comments
-                            and remaining_quota > 0
-                        )
-                        if can_comment:
-                            success = await self._post_comment_for_video(video, analysis)
-                            if success:
-                                comments_sent += 1
-                                remaining_quota -= 1
-                                self.db.increment_comments()
-                                logger.info(
-                                    f"   视频链接: https://www.bilibili.com/video/{bvid}"
-                                )
-
-                # 避免请求过快
-                await asyncio.sleep(2)
-
-            if target_comments and (
-                comments_sent >= target_comments or remaining_quota <= 0
-            ):
-                break
-            if len(analyzed_videos) >= max_attempts:
-                break
+            # 避免请求过快
+            await asyncio.sleep(2)
 
         logger.info(
             f"分析完成: {len(analyzed_videos)} 个视频, "
             f"{len(worthy_videos)} 个达到评论评分门槛, "
-            f"目标评论视频 {target_comments} 个, 实际发送 {comments_sent} 条, "
-            f"共检查候选 {len(known_bvids)} 个"
+            f"实际发送 {comments_sent} 条（每轮不强制评论）"
         )
         self.db.increment_runs()
 

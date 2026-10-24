@@ -1,4 +1,4 @@
-﻿"""
+"""
 AI客户端模块
 支持多种AI模型：OpenAI、Claude、各类国产大模型等
 """
@@ -476,9 +476,13 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         if mention_user:
             prompt_parts.append(
                 f"6. 请在评论中自然地提及 @{mention_user}（放在结尾或合适的句子里），不要省略。\n"
+                f"7. @{mention_user} 是账号主人；不要称呼其他任何人为“主人”。\n"
             )
         else:
-            prompt_parts.append("6. 不要@主人或其他用户，也不要添加任何用户标签；像普通观众一样围绕视频内容自然聊天。\n")
+            prompt_parts.append(
+                "6. 不要@主人或其他用户，也不要添加任何用户标签；像普通观众一样围绕视频内容自然聊天。\n"
+                "7. 只有账号主人可以称呼“主人”；如果不能确定对方身份，一律用“你/网友”。\n"
+            )
 
         prompt_parts.append("\n直接输出评论内容，不要其他解释。")
 
@@ -509,7 +513,9 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         self,
         original_comment: str,
         video_context: str,
-        persona: str = ""
+        persona: str = "",
+        user_name: str = "",
+        is_owner: bool = False,
     ) -> Optional[str]:
         """
         生成对评论的回复
@@ -518,6 +524,8 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
             original_comment: 原始评论内容
             video_context: 视频相关上下文
             persona: 角色人设
+            user_name: 被回复的用户名
+            is_owner: 对方是否账号主人
 
         Returns:
             回复内容
@@ -526,6 +534,19 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
 
         if persona:
             prompt_parts.append(f"# 你的身份\n{persona}\n")
+
+        if user_name:
+            relationship = (
+                "账号主人，可以称呼“主人”"
+                if is_owner else "普通网友，不是主人"
+            )
+            prompt_parts.append(
+                f"# 回复对象\n{user_name}（{relationship}）\n"
+            )
+        else:
+            prompt_parts.append(
+                "# 回复对象\n身份不确定，不要称呼对方“主人”，用“你/网友”即可。\n"
+            )
 
         prompt_parts.append(f"""# 任务
 回复以下评论。
@@ -543,6 +564,7 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
 4. 如果是批评，理性回应
 5. 10-30字，简洁明了
 6. 不与人争吵，保持礼貌
+7. 只有账号主人可以称呼“主人”；其他网友一律叫“你”或“网友”，不要叫主人
 
 直接输出回复内容。
 """)
