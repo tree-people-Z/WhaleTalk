@@ -62,6 +62,7 @@ class BilibiliAPI:
         self._load_posting_state()
         # 当前登录账号（用于过滤自己发出的评论，避免自问自答）
         self._self_info: Optional[Dict[str, Any]] = None
+        self._own_videos_cache: Optional[tuple] = None
 
     def _load_credential(self):
         """从文件加载凭证"""
@@ -280,6 +281,39 @@ class BilibiliAPI:
             logger.debug(f"获取登录账号信息失败: {exc}")
             self._self_info = {}
         return self._self_info
+
+    async def get_own_videos(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """获取当前账号最近投稿的视频，用于回复自己视频下的评论。"""
+        cache = getattr(self, '_own_videos_cache', None)
+        if cache and (datetime.now() - cache[0]).total_seconds() < 300:
+            return list(cache[1])
+        info = await self.get_self_info()
+        uid = info.get('uid')
+        if not uid:
+            return []
+        try:
+            data = await user.User(uid, credential=self.credential).get_videos(
+                pn=1, ps=max(1, min(int(limit), 30))
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"获取自己投稿视频失败: {exc}")
+            return []
+        payload = data.get('list') if isinstance(data, dict) else None
+        items = (payload or {}).get('vlist') if isinstance(payload, dict) else None
+        if not items and isinstance(data, dict):
+            items = data.get('vlist') or []
+        videos = []
+        for item in items or []:
+            bvid = item.get('bvid')
+            aid = item.get('aid')
+            if bvid and aid:
+                videos.append({
+                    'bvid': bvid,
+                    'aid': aid,
+                    'title': item.get('title') or bvid,
+                })
+        self._own_videos_cache = (datetime.now(), videos)
+        return videos
 
     @staticmethod
     def _message_text(message: Dict[str, Any]) -> str:

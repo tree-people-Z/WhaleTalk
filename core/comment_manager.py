@@ -117,6 +117,13 @@ class CommentManager:
 
                 await asyncio.sleep(0.5)  # 避免请求过快
 
+            # 2. 自己投稿视频下的评论（必回）
+            if self.config.get('interaction.reply_own_video_comments', True):
+                own_mentions = await self._check_own_video_comments(
+                    self_uid, self_name, found_rpids
+                )
+                mentions = own_mentions + mentions
+
             logger.info(f"检查完成，发现 {len(mentions)} 条新回复")
             return mentions
 
@@ -125,6 +132,73 @@ class CommentManager:
             import traceback
             logger.error(traceback.format_exc())
             return []
+
+    async def _check_own_video_comments(
+        self, self_uid, self_name, found_rpids: set
+    ) -> List[Dict[str, Any]]:
+        """检查自己投稿视频下的新评论，按时间优先返回。"""
+        try:
+            video_limit = int(
+                self.config.get('interaction.own_video_count', 10)
+            )
+        except (TypeError, ValueError):
+            video_limit = 10
+        try:
+            max_replies = int(
+                self.config.get('interaction.max_own_video_replies_per_check', 10)
+            )
+        except (TypeError, ValueError):
+            max_replies = 10
+        if max_replies <= 0:
+            return []
+        try:
+            videos = await self.bili.get_own_videos(limit=video_limit)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"获取自己投稿视频失败: {exc}")
+            return []
+
+        results = []
+        for video in videos or []:
+            if len(results) >= max_replies:
+                break
+            aid = video.get('aid')
+            if not aid:
+                continue
+            try:
+                comments = await self.bili.get_comments(
+                    aid, sort=0, count=20
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"获取自己视频评论失败 aid={aid}: {exc}")
+                continue
+            for comment in comments or []:
+                rpid = comment.get('rpid')
+                if not rpid or rpid in self.processed_rpids or rpid in found_rpids:
+                    continue
+                # 只处理顶层评论，楼中楼由“回复我的评论”路径处理。
+                if comment.get('root') not in (0, None):
+                    continue
+                if self_uid is not None and comment.get('mid') == self_uid:
+                    continue
+                if self_name and comment.get('user') == self_name:
+                    continue
+                results.append({
+                    'rpid': rpid,
+                    'root_rpid': rpid,
+                    'user': comment.get('user'),
+                    'content': comment.get('content'),
+                    'aid': aid,
+                    'bvid': video.get('bvid'),
+                    'type': 'own_video',
+                    'video_title': video.get('title', ''),
+                })
+                found_rpids.add(rpid)
+                if len(results) >= max_replies:
+                    break
+            await asyncio.sleep(0.5)
+        if results:
+            logger.info(f"自己视频下发现 {len(results)} 条待回复评论")
+        return results
 
     async def reply_to_mention(
         self,
@@ -210,6 +284,9 @@ class CommentManager:
         replied = 0
         if self.config.get('interaction.auto_reply', True):
             for mention in mentions:
+                if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+                    logger.warning("评论发送冷却中，停止本轮回复")
+                    break
                 if await self.reply_to_mention(mention):
                     replied += 1
                 await asyncio.sleep(2)
