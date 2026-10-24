@@ -2,7 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from bilibili_api import request_settings
 
@@ -23,6 +23,8 @@ class BilibiliRiskControlTests(unittest.TestCase):
     def _bare_api(self):
         api = BilibiliAPI.__new__(BilibiliAPI)
         api.blocked_until = None
+        api.posting_blocked_until = None
+        api.posting_block_reason = ''
         api._comment_min_interval = 2.0
         api._last_comment_request_at = 0.0
         api._comment_request_lock = None
@@ -30,6 +32,35 @@ class BilibiliRiskControlTests(unittest.TestCase):
         api.credential = None
         api._self_info = None
         return api
+
+    def test_12014_blocks_posting(self):
+        api = self._bare_api()
+        api.credential = Mock()
+
+        async def scenario():
+            with patch(
+                'core.bilibili_api.comment.send_comment',
+                AsyncMock(side_effect=Exception(
+                    '接口返回错误代码：12014，信息：发送失败，已达到当前评论发送上限'
+                )),
+            ):
+                self.assertFalse(await api.post_comment(1, '测试'))
+            self.assertTrue(api.is_posting_blocked())
+
+            calls = []
+
+            async def fake_send(*args, **kwargs):
+                calls.append(args)
+                return {'data': {}}
+
+            with patch(
+                'core.bilibili_api.comment.send_comment',
+                side_effect=fake_send,
+            ):
+                self.assertFalse(await api.post_comment(1, '测试2'))
+            self.assertEqual(calls, [])
+
+        asyncio.run(scenario())
 
     def test_short_error_strips_html_and_truncates(self):
         text = BilibiliAPI._short_error(

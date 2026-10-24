@@ -451,6 +451,8 @@ class MainWindow(QMainWindow):
             self.log("⚠️ 今日评论配额已用完")
         elif status == 'no_videos_found':
             self.log("ℹ️ 未找到符合条件的视频")
+        elif status == 'posting_limited':
+            self.log("⏸️ B站评论发送上限冷却中，本轮已跳过")
 
         self.update_stats()
         self.load_history()

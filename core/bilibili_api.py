@@ -46,6 +46,9 @@ class BilibiliAPI:
 
         # 风控状态
         self.blocked_until: Optional[datetime] = None
+        # 评论发送上限（B站 12014）状态：冷却到次日 00:05
+        self.posting_blocked_until: Optional[datetime] = None
+        self.posting_block_reason = ''
         # 评论请求限速，避免短时间内大量请求触发 B 站风控
         self._comment_min_interval = 2.0
         self._last_comment_request_at = 0.0
@@ -398,6 +401,27 @@ class BilibiliAPI:
         """设置风控状态"""
         self.blocked_until = datetime.now() + timedelta(minutes=duration_minutes)
         logger.warning(f"触发风控，将暂停 {duration_minutes} 分钟")
+
+    def is_posting_blocked(self) -> bool:
+        """B站评论发送额度是否已用完（错误码 12014）。"""
+        until = getattr(self, 'posting_blocked_until', None)
+        if until:
+            if datetime.now() < until:
+                return True
+            self.posting_blocked_until = None
+        return False
+
+    def set_posting_blocked(self, reason: str = ''):
+        """暂停发评论到次日凌晨，避免反复触发 12014。"""
+        reset = (datetime.now() + timedelta(days=1)).replace(
+            hour=0, minute=5, second=0, microsecond=0
+        )
+        self.posting_blocked_until = reset
+        self.posting_block_reason = reason
+        logger.warning(
+            f"B站评论发送已达上限（12014），暂停发评论至 "
+            f"{reset:%Y-%m-%d %H:%M}"
+        )
 
     @staticmethod
     def _short_error(message: str, limit: int = 160) -> str:
@@ -795,6 +819,10 @@ class BilibiliAPI:
             logger.warning("当前处于风控状态，跳过评论")
             return False
 
+        if self.is_posting_blocked():
+            logger.info("评论发送限额冷却中，跳过本次发送")
+            return False
+
         if not self.credential:
             logger.error("未登录，无法发送评论")
             return False
@@ -819,10 +847,16 @@ class BilibiliAPI:
             return True
 
         except Exception as e:
-            logger.error(f"发送评论失败: {e}")
+            message = str(e)
+
+            if any(keyword in message for keyword in ('12014', '已达到当前评论发送上限')):
+                self.set_posting_blocked(message[:120])
+                return False
+
+            logger.error(f"发送评论失败: {self._short_error(message)}")
 
             # 检测风控
-            if any(keyword in str(e) for keyword in ["412", "风控", "频繁", "验证码"]):
+            if any(keyword in message for keyword in ["412", "风控", "频繁", "验证码"]):
                 self.set_blocked(30)
 
             return False

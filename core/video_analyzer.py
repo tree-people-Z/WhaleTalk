@@ -356,6 +356,9 @@ class VideoAnalyzer:
         if self.bili.is_blocked():
             logger.warning("B站风控冷却中，跳过回复检查")
             return {'status': 'replies_checked', 'replied': 0, 'mentions': []}
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            logger.warning("B站评论发送限额冷却中，跳过回复检查")
+            return {'status': 'replies_checked', 'replied': 0, 'mentions': []}
         result = await self.comment_manager.check_and_reply()
         return {
             'status': 'replies_checked',
@@ -384,6 +387,15 @@ class VideoAnalyzer:
         self._greetings_sent_this_run = 0
         self._interactions_sent_this_run = 0
         self._raise_if_stopping()
+
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            logger.warning("B站评论发送限额冷却中，跳过本轮分析与评论")
+            return {
+                'status': 'posting_limited',
+                'videos_found': 0,
+                'videos_analyzed': 0,
+                'comments_sent': 0
+            }
 
         # 检查今日配额
         quota = self.db.get_today_quota()
@@ -768,6 +780,9 @@ class VideoAnalyzer:
         # 检查是否启用自动评论
         if not self.config.get('interaction.auto_comment', False):
             logger.info(f"自动评论未启用，跳过评论: {bvid}")
+            return False
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            logger.info("B站评论发送限额冷却中，跳过评论")
             return False
 
         # 检查评分是否达标；明确要求 @主人 的视频按指令执行，不再参与评分筛选。
