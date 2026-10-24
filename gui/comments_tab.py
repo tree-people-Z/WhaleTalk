@@ -234,7 +234,7 @@ class CommentsTab(QWidget):
     @staticmethod
     def _fmt_time(value) -> str:
         if hasattr(value, 'strftime'):
-            return value.strftime('%Y-%m-%d %H:%M')
+            return value.strftime('%m-%d %H:%M')
         try:
             timestamp = int(value or 0)
             return (
@@ -245,8 +245,9 @@ class CommentsTab(QWidget):
             return ''
 
     @staticmethod
-    def _avatar(name: str, color: str = '#2563eb', size: int = 28) -> str:
-        initial = html.escape((name or '?')[:1])
+    def _avatar(name: str, color: str = '#2563eb', size: int = 28,
+                text: str = '') -> str:
+        initial = html.escape(text or (name or '?')[:1])
         return (
             f'<div style="width:{size}px; height:{size}px; border-radius:{size // 2}px;'
             f' background:#e8f0ff; color:{color}; text-align:center;'
@@ -263,20 +264,23 @@ class CommentsTab(QWidget):
         color = '#2563eb' if is_own else '#374151'
         badge = (
             '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
-            ' border-radius:4px; padding:1px 5px; margin-left:4px;">我</span>'
+            ' border-radius:4px; padding:1px 5px;">我</span>'
             if is_own else ''
+        )
+        avatar = CommentsTab._avatar(
+            comment.get('user') or '?', color, 24,
+            '鱼' if is_own else (comment.get('user') or '?')[:1],
         )
         return (
             f'<div style="border-left:2px solid #eef1f6; margin-left:'
-            f'{6 + depth * 18}px; padding:0 0 10px 10px; display:flex; gap:8px;">'
-            f'{CommentsTab._avatar(comment.get("user") or "?", color, 24)}'
-            '<div style="flex:1; min-width:0;">'
-            f'<div><span style="color:{color}; font-weight:700;">{user}</span>'
-            f'{badge}'
-            f'<span style="color:#9aa3b2; font-size:12px; margin-left:8px;">'
-            f'{timestamp}</span></div>'
+            f'{6 + depth * 16}px; padding:2px 0 2px 10px;">'
+            '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+            f'<td width="30" valign="top">{avatar}</td>'
+            '<td valign="top" style="padding-left:6px;">'
+            f'<div><b style="color:{color};">{user}</b> {badge}'
+            f'<span style="color:#9aa3b2; font-size:12px;"> {timestamp}</span></div>'
             f'<div style="margin-top:3px; color:#1f2937;">{body}</div>'
-            '</div></div>'
+            '</td></tr></table></div>'
         )
 
     def _render_thread(self, thread: Dict[str, Any], replies: List[Dict[str, Any]]):
@@ -308,35 +312,17 @@ class CommentsTab(QWidget):
                     'ctime': None,
                 }
                 root_is_me = True
-        root_user = '我' if root_is_me else (root.get('user') or '未知用户')
+
+        root_name = '我' if root_is_me else (root.get('user') or '未知用户')
         root_time = self._fmt_time(root.get('ctime')) or self._fmt_time(
             thread.get('commented_at')
         )
         root_content = html.escape(root.get('content') or '').replace('\n', '<br>')
         root_color = '#2563eb' if root_is_me else '#374151'
-        title = html.escape(thread.get('video_title') or '评论对话')
-        meta = (
-            f'<div style="color:#8a94a6; font-size:12px; margin-bottom:10px;">'
-            f'{title}{(" · " + root_time) if root_time else ""}</div>'
+        root_avatar = self._avatar(
+            root_name, root_color, 32, '鱼' if root_is_me else root_name[:1]
         )
-
-        parts = [
-            '<div style="font-family:\'Microsoft YaHei\',sans-serif;'
-            ' font-size:13px; color:#1f2937; line-height:1.65;">',
-            meta,
-            '<div style="background:#ffffff; border:1px solid #e5e7eb;'
-            ' border-radius:10px; padding:12px 14px;">',
-            '<div style="display:flex; align-items:center; gap:8px;">',
-            self._avatar(root_user, root_color, 30),
-            f'<span style="color:{root_color}; font-weight:700;">{html.escape(root_user)}</span>',
-            '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
-            ' border-radius:4px; padding:1px 5px;">楼主</span>',
-            f'<span style="margin-left:auto; color:#9aa3b2; font-size:12px;">'
-            f'{root_time}</span>',
-            '</div>',
-            f'<div style="margin-top:8px; color:#1f2937;">{root_content}</div>',
-            '</div>',
-        ]
+        title = html.escape(thread.get('video_title') or '评论对话')
 
         items = [
             comment for comment in comments
@@ -355,10 +341,27 @@ class CommentsTab(QWidget):
                 'parent': root_rpid,
             })
         items.sort(key=lambda item: item.get('ctime') or 0)
+
+        parts = [
+            '<div style="font-family:\'Microsoft YaHei\',sans-serif;'
+            ' font-size:13px; color:#1f2937; line-height:1.65;">',
+            f'<div style="color:#8a94a6; font-size:12px;">{title}</div>',
+            '<table width="100%" cellspacing="0" cellpadding="0"><tr>',
+            f'<td width="38" valign="top" style="padding:10px 0 10px 8px;">'
+            f'{root_avatar}</td>',
+            '<td valign="top" style="padding:10px 10px 10px 6px;">',
+            f'<div><b style="color:{root_color};">{html.escape(root_name)}</b> '
+            '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
+            ' border-radius:4px; padding:1px 5px;">楼主</span></div>',
+            f'<div style="color:#9aa3b2; font-size:12px;">{root_time}</div>',
+            f'<div style="margin-top:5px;">{root_content}</div>',
+            '</td></tr></table>',
+        ]
+
         if items:
             parts.append(
-                f'<div style="margin:14px 2px 8px; color:#8a94a6; font-size:12px;">'
-                f'{len(items)} 条回复</div>'
+                f'<div style="margin-top:14px; margin-bottom:8px; color:#8a94a6;'
+                f' font-size:12px;">{len(items)} 条回复</div>'
             )
             for comment in items:
                 parent = comment.get('parent') or 0
@@ -366,7 +369,7 @@ class CommentsTab(QWidget):
                 parts.append(self._reply_html(comment, self.own_rpids, depth))
         else:
             parts.append(
-                '<div style="color:#9aa3b2; font-size:12px; padding:14px 4px;">'
+                '<div style="color:#9aa3b2; font-size:12px; padding:12px 4px;">'
                 '暂无网友回复</div>'
             )
         parts.append('</div>')
