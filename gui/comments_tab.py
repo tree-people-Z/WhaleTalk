@@ -513,7 +513,41 @@ class CommentsTab(QWidget):
                 'ctime': thread.get('commented_at'),
                 'parent': root_rpid,
             })
-        items.sort(key=lambda item: item.get('ctime') or 0)
+        # A merged legacy row can contain records from several roots. Add all of
+        # our own records that the current B站 thread did not return, otherwise
+        # selecting a 视频楼·N row would only show one of the N conversations.
+        seen_item_rpids = {item.get('rpid') for item in items}
+        for record in thread.get('records') or []:
+            record_rpid = record.get('rpid')
+            if (
+                not record_rpid
+                or record_rpid == root_rpid
+                or record_rpid in by_rpid
+                or record_rpid in seen_item_rpids
+            ):
+                continue
+            items.append({
+                'rpid': record_rpid,
+                'user': '我',
+                'content': record.get('content') or '',
+                'ctime': record.get('commented_at'),
+                'parent': root_rpid,
+            })
+            seen_item_rpids.add(record_rpid)
+
+        def item_time(item):
+            value = item.get('ctime')
+            if hasattr(value, 'timestamp'):
+                try:
+                    return value.timestamp()
+                except (ValueError, OSError):
+                    return 0
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        items.sort(key=item_time)
 
         parts = [
             '<div style="font-family:\'Microsoft YaHei\',sans-serif;'
