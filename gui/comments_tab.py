@@ -183,27 +183,12 @@ class CommentsTab(QWidget):
 
     @staticmethod
     def _group_threads(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge records into one row per thread, falling back per video for old rows."""
-        post_roots = {}
-        for record in records:
-            if record.get('comment_type') == 'post' and record.get('rpid'):
-                post_roots.setdefault(record.get('aid'), set()).add(record.get('rpid'))
-
+        """Merge records by their known/parent thread root; never merge whole videos."""
         grouped: Dict[tuple, List[Dict[str, Any]]] = {}
         for record in records:
             aid = record.get('aid') or 0
-            comment_type = record.get('comment_type')
-            known = bool(record.get('thread_root_known')) or comment_type == 'post'
-            if known:
-                root = record.get('rpid') if comment_type == 'post' else record.get('thread_root')
-                key = (aid, 'thread', root)
-            else:
-                roots = post_roots.get(aid) or set()
-                if len(roots) == 1:
-                    key = (aid, 'thread', next(iter(roots)))
-                else:
-                    key = (aid, 'video', None)
-            grouped.setdefault(key, []).append(record)
+            root = record.get('thread_root') or record.get('rpid')
+            grouped.setdefault((aid, 'thread', root), []).append(record)
 
         merged = []
         for (aid, _kind, _root), items in grouped.items():
@@ -224,10 +209,7 @@ class CommentsTab(QWidget):
             group['last_content'] = items[-1].get('content') or ''
             group['content'] = root_record.get('content') or ''
             group['commented_at'] = root_record.get('commented_at')
-            group['merged_by_video'] = not any(
-                item.get('thread_root_known') or item.get('comment_type') == 'post'
-                for item in items
-            )
+            group['merged_by_video'] = False
             merged.append(group)
         merged.sort(
             key=lambda group: group.get('last_at') or datetime.datetime.min,
@@ -316,8 +298,7 @@ class CommentsTab(QWidget):
         is_reply = thread.get('comment_type') == 'reply'
         notified = thread.get('aid') in self._notified_aids
         if count > 1:
-            label = '视频楼' if thread.get('merged_by_video') else '楼'
-            type_text = ('🔔 ' if notified else '') + f'{label}·{count}'
+            type_text = ('🔔 ' if notified else '') + f'楼·{count}'
         else:
             type_text = ('🔔 ' if notified else '') + ('回复' if is_reply else '评论')
         object_text = title
