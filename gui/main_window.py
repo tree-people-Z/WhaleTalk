@@ -9,10 +9,11 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTabWidget, QTextEdit,
     QGroupBox, QMessageBox, QStatusBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QProgressDialog, QApplication
+    QTableWidgetItem, QHeaderView, QProgressDialog, QApplication,
+    QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
@@ -94,6 +95,10 @@ class MainWindow(QMainWindow):
         self.scheduled_reply_check_requested.connect(self.scheduled_reply_check)
 
         self.init_ui()
+        self._force_quit = False
+        self._tray_hint_shown = False
+        self.tray_icon = None
+        self._setup_tray()
         self.log_message_received.connect(self._append_runtime_log)
         self._gui_log_sink_id = logger.add(
             lambda message: self.log_message_received.emit(str(message).rstrip()),
@@ -801,6 +806,7 @@ class MainWindow(QMainWindow):
             "更新准备完成",
             "程序将关闭并自动完成更新，随后会重新启动，请稍候…",
         )
+        self._force_quit = True
         self.close()
         QApplication.instance().quit()
 
@@ -816,8 +822,65 @@ class MainWindow(QMainWindow):
         self._update_download = None
         self.statusBar.showMessage("已取消更新", 3000)
 
+    def _setup_tray(self):
+        """关闭窗口时留在系统托盘，后台继续运行。"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon = self.windowIcon()
+        if icon.isNull():
+            icon = QApplication.style().standardIcon(
+                QApplication.style().StandardPixmap.SP_ComputerIcon
+            )
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip("鲸语 · B站智能运营助手")
+
+        menu = QMenu(self)
+        show_action = QAction("显示主窗口", self)
+        show_action.triggered.connect(self._show_from_tray)
+        quit_action = QAction("退出鲸语", self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason):
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self._show_from_tray()
+
+    def _show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self):
+        self._force_quit = True
+        self.close()
+        QApplication.instance().quit()
+
     def closeEvent(self, event):
-        """关闭事件"""
+        """关闭窗口：默认隐藏到托盘继续运行；托盘菜单“退出”才真正结束。"""
+        if (
+            not self._force_quit
+            and self.tray_icon is not None
+            and self.tray_icon.isVisible()
+        ):
+            self.hide()
+            if not self._tray_hint_shown:
+                self.tray_icon.showMessage(
+                    "鲸语仍在后台运行",
+                    "点击托盘图标可重新打开，右键托盘图标可退出。",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000,
+                )
+                self._tray_hint_shown = True
+            event.ignore()
+            return
         self._update_timer.stop()
         self._update_recheck_timer.stop()
         self._reply_poll_timer.stop()
