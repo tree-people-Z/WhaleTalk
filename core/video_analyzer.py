@@ -406,16 +406,16 @@ class VideoAnalyzer:
         self._interactions_sent_this_run = 0
         self._raise_if_stopping()
 
-        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
-            logger.warning("B站评论发送限额冷却中，跳过本轮分析与评论")
+        if self.bili.is_blocked():
+            logger.warning("B站风控冷却中，跳过本轮分析")
             return {
-                'status': 'posting_limited',
+                'status': 'risk_control',
                 'videos_found': 0,
                 'videos_analyzed': 0,
                 'comments_sent': 0
             }
 
-        # 检查今日配额（按数据库里今天所有成功的评论/回复统计）
+        # 评论上限/12014 只限制发送，不再阻止分析和记录。
         quota = self.db.get_today_quota()
         max_comments = self.config.get('limits.max_comments_per_day', 999)
         today_comments = quota.comments_sent
@@ -425,24 +425,12 @@ class VideoAnalyzer:
                 today_comments = max(today_comments, int(get_today_count()))
             except (TypeError, ValueError):
                 pass
-
         if today_comments >= max_comments:
-            logger.warning(f"今日评论配额已用完 ({today_comments}/{max_comments})")
-            return {
-                'status': 'quota_exhausted',
-                'videos_found': 0,
-                'videos_analyzed': 0,
-                'comments_sent': 0
-            }
-
-        if self.bili.is_blocked():
-            logger.warning("B站风控冷却中，跳过本轮分析")
-            return {
-                'status': 'risk_control',
-                'videos_found': 0,
-                'videos_analyzed': 0,
-                'comments_sent': 0
-            }
+            logger.warning(
+                f"今日评论配额已用完 ({today_comments}/{max_comments})，本轮只分析不评论"
+            )
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            logger.warning("B站评论发送限额冷却中，本轮只分析不评论")
 
         # 1. 搜索视频
         videos = await self._search_videos()
