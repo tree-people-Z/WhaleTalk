@@ -7,6 +7,7 @@ import asyncio
 import json
 import random
 import re
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -522,21 +523,29 @@ class BilibiliAPI:
         return text[:limit] + ('…' if len(text) > limit else '')
 
     async def _pace_comment_request(self) -> None:
-        """Serialize comment requests with a minimum interval."""
-        if getattr(self, '_comment_request_lock', None) is None:
-            self._comment_request_lock = asyncio.Lock()
-        async with self._comment_request_lock:
-            loop = asyncio.get_running_loop()
+        """Serialize comment requests with a minimum interval.
+
+        The API object is shared by several workers, each of which runs its own
+        event loop. asyncio.Lock is bound to the loop that first uses it, so the
+        lock must be recreated when the running loop changes.
+        """
+        loop = asyncio.get_running_loop()
+        lock = getattr(self, '_comment_request_lock', None)
+        if lock is None or getattr(self, '_comment_request_lock_loop', None) is not loop:
+            lock = asyncio.Lock()
+            self._comment_request_lock = lock
+            self._comment_request_lock_loop = loop
+        async with lock:
             # 固定间隔之外再加随机抖动，避免形成规律的机器请求节奏。
             target = (
                 getattr(self, '_last_comment_request_at', 0.0)
                 + getattr(self, '_comment_min_interval', 2.0)
                 + random.uniform(0, 1.5)
             )
-            wait = target - loop.time()
+            wait = target - time.monotonic()
             if wait > 0:
                 await asyncio.sleep(wait)
-            self._last_comment_request_at = loop.time()
+            self._last_comment_request_at = time.monotonic()
 
     async def search_videos(
         self,
