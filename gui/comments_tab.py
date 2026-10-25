@@ -173,22 +173,65 @@ class CommentsTab(QWidget):
             self.refresh_threads()
 
     # ------------------------------------------------------------------ data
+    @staticmethod
+    def _group_threads(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge all records that belong to the same comment thread."""
+        grouped: Dict[tuple, List[Dict[str, Any]]] = {}
+        for record in records:
+            aid = record.get('aid') or 0
+            root = record.get('thread_root') or record.get('rpid')
+            grouped.setdefault((aid, root), []).append(record)
+
+        merged = []
+        for (aid, root), items in grouped.items():
+            items.sort(key=lambda item: item.get('commented_at') or datetime.datetime.min)
+            root_record = next(
+                (
+                    item for item in items
+                    if item.get('comment_type') == 'post'
+                    and item.get('rpid') == root
+                ),
+                None,
+            )
+            if root_record is None:
+                root_record = next(
+                    (item for item in items if item.get('rpid') == root),
+                    items[-1],
+                )
+            group = dict(root_record)
+            group['thread_root'] = root
+            group['records'] = items
+            group['my_count'] = len(items)
+            group['last_at'] = items[-1].get('commented_at')
+            group['last_content'] = items[-1].get('content') or ''
+            group['content'] = root_record.get('content') or ''
+            group['commented_at'] = root_record.get('commented_at')
+            merged.append(group)
+        merged.sort(
+            key=lambda group: group.get('last_at') or datetime.datetime.min,
+            reverse=True,
+        )
+        return merged
+
     def refresh_threads(self):
         if self._worker is not None and self._worker.isRunning():
             return
         try:
-            self.threads = self.db.get_recent_comments(limit=500, include_replies=True)
+            records = self.db.get_recent_comments(limit=500, include_replies=True)
             self.own_rpids = self.db.get_own_comment_rpids()
         except Exception as exc:  # noqa: BLE001
             self.status_label.setText(f"读取评论记录失败：{exc}")
             return
+        self.threads = self._group_threads(records)
         self._loaded_at = time.time()
         self.thread_table.setRowCount(0)
         self.thread_table.setRowCount(len(self.threads))
         for row, thread in enumerate(self.threads):
             self._fill_row(row, thread)
         if self.threads:
-            self.status_label.setText(f"共 {len(self.threads)} 条已发评论/回复")
+            self.status_label.setText(
+                f"共 {len(self.threads)} 个评论楼（{len(records)} 条已发评论/回复）"
+            )
             self.thread_table.selectRow(0)
             self._load_thread(self.threads[0])
         else:
@@ -196,25 +239,25 @@ class CommentsTab(QWidget):
             self.transcript.setHtml("")
 
     def _fill_row(self, row: int, thread: Dict[str, Any]):
-        commented_at = thread.get('commented_at')
+        commented_at = thread.get('last_at') or thread.get('commented_at')
         when = (
             commented_at.strftime('%m-%d %H:%M')
             if hasattr(commented_at, 'strftime') else ''
         )
         title = thread.get('video_title') or thread.get('bvid') or '视频'
-        content = (thread.get('content') or '').replace('\n', ' ')
-        target = thread.get('target_user') or ''
+        content = (thread.get('last_content') or thread.get('content') or '').replace('\n', ' ')
+        count = int(thread.get('my_count') or 1)
         is_reply = thread.get('comment_type') == 'reply'
         notified = thread.get('aid') in self._notified_aids
-        type_text = ('🔔 ' if notified else '') + ('回复' if is_reply else '评论')
-        if is_reply:
-            object_text = f'回复 @{target}' if target else '回复评论'
+        if count > 1:
+            type_text = ('🔔 ' if notified else '') + f'楼·{count}'
         else:
-            object_text = title
+            type_text = ('🔔 ' if notified else '') + ('回复' if is_reply else '评论')
+        object_text = title
 
         type_item = QTableWidgetItem(type_text)
         type_item.setData(Qt.ItemDataRole.UserRole, thread)
-        type_item.setToolTip(title)
+        type_item.setToolTip(f"{title}（本楼共 {count} 条记录）")
         if is_reply:
             type_item.setForeground(QColor('#1d4ed8'))
         else:
@@ -224,7 +267,9 @@ class CommentsTab(QWidget):
         object_item = QTableWidgetItem(object_text)
         object_item.setToolTip(title)
         content_item = QTableWidgetItem(content)
-        content_item.setToolTip(content)
+        content_item.setToolTip(
+            content + (f"\n本楼共 {count} 条，这里显示最新一条" if count > 1 else '')
+        )
 
         for column, item in enumerate(
             (type_item, when_item, object_item, content_item)
