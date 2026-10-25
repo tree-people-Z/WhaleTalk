@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, List, Optional
@@ -29,6 +30,7 @@ MARKER_NAME = "component.json"
 
 _PATH_READY = False
 _DLL_HANDLES: List[Any] = []
+_COMPONENT_LOCK = threading.Lock()
 
 
 def component_dir() -> Path:
@@ -139,8 +141,17 @@ def download_component(
     progress: Optional[Callable[[int, int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> Path:
+    """Download the component once; concurrent callers reuse the same result."""
+    with _COMPONENT_LOCK:
+        return _download_component_locked(progress, should_cancel)
+
+
+def _download_component_locked(
+    progress: Optional[Callable[[int, int], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> Path:
     """Download, verify and unpack the transcription component."""
-    from utils.updater import download_update
+    from utils.downloader import download_file
 
     if is_installed():
         return COMPONENT_DIR
@@ -149,10 +160,11 @@ def download_component(
     COMPONENT_DIR.mkdir(parents=True, exist_ok=True)
     archive = COMPONENT_DIR / "component.zip"
     try:
-        download_update(
+        download_file(
             COMPONENT_URL,
             archive,
-            COMPONENT_SHA256,
+            expected_sha256=COMPONENT_SHA256,
+            threads=4,
             progress=progress,
             should_cancel=should_cancel,
         )

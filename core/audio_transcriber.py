@@ -61,9 +61,17 @@ class LocalAudioTranscriber:
                 ) from exc
             model_dir.mkdir(parents=True, exist_ok=True)
             manual_path = cls.local_model_path(model_dir, model_name)
+            if not manual_path and model_name == 'medium':
+                try:
+                    from utils.model_downloader import download_model
+                    logger.info("本地语音模型未就绪，开始多线程下载（支持断点续传）")
+                    download_model(model_dir, model_name)
+                    manual_path = cls.local_model_path(model_dir, model_name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"预下载本地语音模型失败，将尝试默认加载: {exc}")
             model_argument = manual_path or model_name
             if manual_path:
-                logger.info(f"使用手动放置的本地语音识别模型: {manual_path}")
+                logger.info(f"使用本地语音识别模型: {manual_path}")
             else:
                 logger.info(f"正在加载本地语音识别模型: {model_name}（首次使用会下载模型）")
             cls._model = WhisperModel(

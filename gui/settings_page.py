@@ -42,7 +42,7 @@ class TranscriptionSetupWorker(QThread):
                     return
             self._download_model()
             self.setup_complete.emit(
-                True, f"本地识别组件与 {self.model_name} 模型已准备完成。"
+                True, f"本地语音模型加载成功（{self.model_name}），可以开始本地转写。"
             )
         except Exception as exc:  # noqa: BLE001
             self.setup_complete.emit(False, f"本地识别准备失败：{exc}")
@@ -89,26 +89,51 @@ class TranscriptionSetupWorker(QThread):
 
     def _download_model(self):
         from utils.transcription_component import configure_hf_endpoint, ensure_importable
+        from utils.model_downloader import download_model
 
         try:
             ensure_importable()
         except Exception:  # noqa: BLE001
             pass
         configure_hf_endpoint()
-        from faster_whisper import WhisperModel
-
         from core.audio_transcriber import LocalAudioTranscriber
 
         model_dir = Path('data/models/faster-whisper')
         manual_path = LocalAudioTranscriber.local_model_path(model_dir, self.model_name)
-        if manual_path:
-            self.status.emit(f"已找到手动放置的模型，正在加载：{manual_path}")
-        else:
-            self.status.emit(f"正在下载/加载 {self.model_name} 模型（首次使用需要一些时间）…")
+        if not manual_path:
+            self.status.emit(
+                "正在从国内镜像下载 medium 模型（约 1.5 GB，支持多线程和断点续传）…"
+            )
+
+            def report(done: int, total: int):
+                if total:
+                    percent = done * 100 // total
+                    self.status.emit(
+                        f"正在下载 medium 模型… {percent}% "
+                        f"({done / 1048576:.1f} / {total / 1048576:.1f} MB)"
+                    )
+
+            download_model(
+                model_dir,
+                self.model_name,
+                progress=report,
+            )
+            manual_path = LocalAudioTranscriber.local_model_path(
+                model_dir, self.model_name
+            )
+        if not manual_path:
+            raise RuntimeError("模型下载完成但文件校验不完整")
+
+        self.status.emit("模型下载完成，正在加载本地语音模型…")
+        from faster_whisper import WhisperModel
+
         WhisperModel(
-            manual_path or self.model_name, device='cpu', compute_type='int8',
+            str(manual_path),
+            device='cpu',
+            compute_type='int8',
             download_root=str(model_dir),
         )
+        self.status.emit("✅ 本地语音模型加载成功（medium）")
 
 
 class SettingsPage(QWidget):
@@ -539,6 +564,10 @@ class SettingsPage(QWidget):
         self.transcription_status_label.setWordWrap(True)
         layout.addWidget(self.transcription_status_label)
 
+        self.transcription_state_label = QLabel("模型状态：检测中…")
+        self.transcription_state_label.setWordWrap(True)
+        layout.addWidget(self.transcription_state_label)
+
         # 双日记系统
         self.diary_check = QCheckBox("启用双日记系统（记忆）")
         layout.addWidget(self.diary_check)
@@ -688,6 +717,7 @@ class SettingsPage(QWidget):
             self.config.get('analysis.cloud_transcription.model', 'whisper-1')
         )
         self._update_transcription_controls()
+        self._refresh_transcription_state()
         self.diary_check.setChecked(self.config.get('diary.enabled', True))
 
         # 自动运行
@@ -862,10 +892,43 @@ class SettingsPage(QWidget):
         self._transcription_worker.setup_complete.connect(self.on_transcription_setup_complete)
         self._transcription_worker.start()
 
+    def _refresh_transcription_state(self):
+        """Show whether the local model files are complete on disk."""
+        try:
+            from core.audio_transcriber import LocalAudioTranscriber
+            path = LocalAudioTranscriber.local_model_path(
+                Path('data/models/faster-whisper'), 'medium'
+            )
+        except Exception:  # noqa: BLE001
+            path = None
+        if path:
+            self.transcription_state_label.setText(
+                "✅ 本地语音模型已就绪（medium），可以开始本地转写"
+            )
+            self.transcription_state_label.setStyleSheet(
+                "color: #1a7f37; font-weight: 600;"
+            )
+            self.transcription_setup_btn.setText("重新检测本地模型")
+        else:
+            self.transcription_state_label.setText(
+                "本地语音模型未下载或文件不完整"
+            )
+            self.transcription_state_label.setStyleSheet(
+                "color: #9a6700; font-weight: 600;"
+            )
+            self.transcription_setup_btn.setText("下载本地识别组件和模型")
+
     def on_transcription_setup_complete(self, success: bool, message: str):
         self.transcription_setup_btn.setEnabled(True)
         self.transcription_status_label.setText(message)
         if success:
+            self.transcription_state_label.setText(
+                "✅ 本地语音模型加载成功（medium）"
+            )
+            self.transcription_state_label.setStyleSheet(
+                "color: #1a7f37; font-weight: 600;"
+            )
+            self.transcription_setup_btn.setText("重新检测本地模型")
             self.config.set('analysis.transcription_mode', 'local')
             self.config.set('analysis.local_transcription_enabled', True)
             self.config.set('analysis.local_transcription_model', 'medium')
