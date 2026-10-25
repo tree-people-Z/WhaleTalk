@@ -183,6 +183,7 @@ class ConfigManager:
             "interaction": {
                 "auto_comment": True,
                 "auto_like_commented_video": False,
+                "comment_requested_video": True,
                 "comment_monitor": True,
                 "auto_reply": True,
                 "reply_own_video_comments": True,

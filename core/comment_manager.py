@@ -108,6 +108,7 @@ class CommentManager:
                                 'rpid': rpid,
                                 'root_rpid': root or my_rpid,
                                 'user': comment.get('user'),
+                                'mid': comment.get('mid'),
                                 'content': comment.get('content'),
                                 'aid': aid,
                                 'bvid': my_comment.get('bvid'),
@@ -210,6 +211,7 @@ class CommentManager:
                     'rpid': rpid,
                     'root_rpid': rpid,
                     'user': comment.get('user'),
+                    'mid': comment.get('mid'),
                     'content': comment.get('content'),
                     'aid': aid,
                     'bvid': video.get('bvid'),
@@ -223,6 +225,70 @@ class CommentManager:
         if results:
             logger.info(f"自己视频下发现 {len(results)} 条待回复评论")
         return results
+
+    async def _comment_on_requested_video(
+        self, requested_video: Dict[str, Any], mention: Dict[str, Any], persona: str
+    ) -> Optional[str]:
+        """对方让看视频时，去她的视频下面留一条真实评论。"""
+        if not requested_video:
+            return None
+        if not self.config.get('interaction.comment_requested_video', True):
+            return None
+        aid = requested_video.get('aid')
+        bvid = requested_video.get('bvid', '')
+        if not aid or not bvid:
+            return None
+        if mention.get('aid') == aid:
+            return None
+        if getattr(self.bili, 'is_blocked', lambda: False)():
+            return None
+        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+            return None
+        try:
+            self_info = await self.bili.get_self_info()
+            if requested_video.get('owner_mid') == self_info.get('uid'):
+                return None
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.db.has_commented_video(bvid):
+                logger.debug(f"已经在她视频下评论过，跳过: {bvid}")
+                return None
+            max_comments = int(self.config.get('limits.max_comments_per_day', 96))
+            if self.db.get_today_comment_count() >= max_comments:
+                logger.info("今日顶层评论已达上限，跳过对方视频下的评论")
+                return None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"检查视频评论记录失败: {exc}")
+
+        video_content = (
+            f"简介：{requested_video.get('desc', '')}\n"
+            f"字幕片段：{requested_video.get('subtitle', '')}"
+        )
+        comment_text = await self.ai.generate_comment(
+            requested_video.get('title', ''),
+            video_content,
+            persona,
+        )
+        if not comment_text:
+            return None
+        success = await self.bili.post_comment(aid=aid, text=comment_text)
+        if not success:
+            logger.warning(f"在她视频下评论失败: {bvid}")
+            return None
+        try:
+            self.db.add_comment_record(
+                bvid=bvid,
+                aid=aid,
+                content=comment_text,
+                comment_type='post',
+                success=True,
+                rpid=getattr(self.bili, 'last_comment_rpid', None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"记录视频评论失败: {exc}")
+        logger.info(f"✅ 已在她视频下评论: {requested_video.get('title')} - {comment_text}")
+        return comment_text
 
     async def reply_to_mention(
         self,
@@ -253,10 +319,43 @@ class CommentManager:
             # 加载人设
             persona = self._load_persona()
 
+            # 对方让你“看看我的视频/这个视频”时，先取视频资料再回复。
+            video_context = f"视频: {video_title}"
+            try:
+                requested_video = await self.bili.resolve_requested_video(
+                    content or '', mention.get('mid')
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"解析对方请求的视频失败: {exc}")
+                requested_video = None
+            if requested_video:
+                video_context += (
+                    "\n\n# 对方让你看的视频\n"
+                    f"标题：{requested_video.get('title', '')}\n"
+                    f"UP主：{requested_video.get('owner', '')}\n"
+                    f"简介：{requested_video.get('desc', '')}\n"
+                    f"链接：{requested_video.get('url', '')}\n"
+                    f"字幕片段：{requested_video.get('subtitle') or '（无字幕）'}\n"
+                )
+                logger.info(
+                    f"准备回应对方请求的视频: {requested_video.get('title')} "
+                    f"({requested_video.get('bvid')})"
+                )
+                posted_video_comment = await self._comment_on_requested_video(
+                    requested_video, mention, persona
+                )
+                if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+                    return False
+                if posted_video_comment:
+                    video_context += (
+                        "\n# 你已经在她的视频下评论过\n"
+                        f"{posted_video_comment}\n"
+                    )
+
             # 生成回复
             reply_text = await self.ai.generate_reply(
                 original_comment=content,
-                video_context=f"视频: {video_title}",
+                video_context=video_context,
                 persona=persona,
                 user_name=user or '',
                 is_owner=bool(

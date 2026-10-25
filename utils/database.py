@@ -266,6 +266,14 @@ class Database:
         quota.last_run_at = datetime.now()
         self.session.commit()
 
+    def has_commented_video(self, bvid: str) -> bool:
+        """是否已经在某个视频下发过顶层评论。"""
+        return self.session.query(CommentRecord).filter(
+            CommentRecord.bvid == bvid,
+            CommentRecord.comment_type == 'post',
+            CommentRecord.success == True,  # noqa: E712
+        ).first() is not None
+
     def check_video_commented_recently(self, bvid: str, days: int = 7) -> bool:
         """检查视频最近是否被评论过"""
         cutoff = datetime.now().timestamp() - (days * 86400)

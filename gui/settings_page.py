@@ -148,6 +148,7 @@ class SettingsPage(QWidget):
         self.persona_enabled_check.stateChanged.connect(self.auto_save)
         self.comment_monitor_check.stateChanged.connect(self.auto_save)
         self.reply_own_video_check.stateChanged.connect(self.auto_save)
+        self.comment_requested_video_check.stateChanged.connect(self.auto_save)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.greet_whales_check.stateChanged.connect(self.auto_save)
         self.greet_whales_spin.valueChanged.connect(self.auto_save)
@@ -460,6 +461,12 @@ class SettingsPage(QWidget):
         self.reply_own_video_check = QCheckBox("回复我自己视频下的评论（必回）")
         layout.addWidget(self.reply_own_video_check)
 
+        # 对方让看视频时去视频下评论
+        self.comment_requested_video_check = QCheckBox(
+            "对方让我看视频时，去她的视频下面评论"
+        )
+        layout.addWidget(self.comment_requested_video_check)
+
         # 自动回复
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
@@ -654,6 +661,9 @@ class SettingsPage(QWidget):
         self.reply_own_video_check.setChecked(
             self.config.get('interaction.reply_own_video_comments', True)
         )
+        self.comment_requested_video_check.setChecked(
+            self.config.get('interaction.comment_requested_video', True)
+        )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
             self.config.get('interaction.greet_other_whales', True)
@@ -759,6 +769,10 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.reply_own_video_comments',
                 self.reply_own_video_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.comment_requested_video',
+                self.comment_requested_video_check.isChecked(),
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
