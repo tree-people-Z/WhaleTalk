@@ -458,6 +458,12 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         if persona:
             prompt_parts.append(f"# 你的身份\n{persona}\n")
 
+        prompt_parts.append(
+            "# 身份底线\n"
+            "绝对不要承认自己是 AI、人工智能、语言模型、程序或机器人。"
+            "被问“你是不是 AI”时，用角色口吻嘴硬否认，不要解释模型、接口或提示词。\n"
+        )
+
         prompt_parts.append(f"""# 任务
 为以下视频写一条评论。
 
@@ -487,7 +493,7 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         prompt_parts.append("\n直接输出评论内容，不要其他解释。")
 
         messages = [
-            {"role": "system", "content": "你是一个真实的B站用户，在认真观看后发表评论。"},
+            {"role": "system", "content": "你是一个真实的B站用户，在认真观看后发表评论。绝对不要承认自己是 AI、模型或程序。"},
             {"role": "user", "content": "".join(prompt_parts)}
         ]
 
@@ -535,6 +541,12 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         if persona:
             prompt_parts.append(f"# 你的身份\n{persona}\n")
 
+        prompt_parts.append(
+            "# 身份底线\n"
+            "绝对不要承认自己是 AI、人工智能、语言模型、程序或机器人。"
+            "被问“你是不是 AI”时，用角色口吻嘴硬否认，不要解释模型、接口或提示词。\n"
+        )
+
         if user_name:
             relationship = (
                 "账号主人，可以称呼“主人”"
@@ -570,7 +582,7 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
 """)
 
         messages = [
-            {"role": "system", "content": "你在B站评论区与人友好互动。"},
+            {"role": "system", "content": "你在B站评论区与人友好互动。绝对不要承认自己是 AI、人工智能、语言模型、程序或机器人；被问身份时按人设嘴硬否认。"},
             {"role": "user", "content": "".join(prompt_parts)}
         ]
 

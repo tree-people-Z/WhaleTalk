@@ -2,10 +2,14 @@
 
 import asyncio
 import datetime
+import hashlib
 import html
 import time
+from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
+import requests
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -32,10 +36,47 @@ class ThreadLoadWorker(QThread):
             replies = asyncio.run(
                 self.bili_api.get_comment_thread(self.aid, self.root_rpid)
             )
+            self._cache_images(replies)
             self.loaded.emit(replies)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"加载评论对话失败: {exc}")
             self.failed.emit(str(exc))
+
+    @staticmethod
+    def _cache_images(replies: List[Dict[str, Any]]):
+        """把楼里的评论图片下载到本地，供 QTextEdit 直接显示。"""
+        cache_dir = Path('data') / 'comment_images'
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Referer': 'https://www.bilibili.com/',
+        }
+        for reply in replies or []:
+            urls = reply.get('images') or []
+            local = []
+            for url in urls[:4]:
+                suffix = Path(urlparse(url).path).suffix.lower()
+                if suffix not in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+                    suffix = '.jpg'
+                path = cache_dir / (hashlib.md5(url.encode('utf-8')).hexdigest() + suffix)
+                if not path.exists():
+                    try:
+                        response = requests.get(url, headers=headers, timeout=8)
+                        content = response.content or b''
+                        if (
+                            response.ok
+                            and len(content) < 8 * 1024 * 1024
+                            and response.headers.get('Content-Type', '').startswith('image/')
+                        ):
+                            path.write_bytes(content)
+                    except Exception:  # noqa: BLE001
+                        continue
+                if path.exists():
+                    local.append(str(path.resolve()))
+            reply['local_images'] = local
 
 
 class CommentsTab(QWidget):
@@ -255,11 +296,30 @@ class CommentsTab(QWidget):
         )
 
     @staticmethod
+    def _images_html(comment: Dict[str, Any]) -> str:
+        parts = []
+        for path in comment.get('local_images') or []:
+            try:
+                uri = Path(path).as_uri()
+            except (ValueError, OSError):
+                continue
+            parts.append(
+                f'<div style="margin-top:6px;"><img src="{uri}" width="200"></div>'
+            )
+        if not parts and comment.get('images'):
+            parts.append(
+                '<div style="margin-top:5px; color:#9aa3b2; font-size:12px;">'
+                '🖼 评论含图片（加载中或不可访问）</div>'
+            )
+        return ''.join(parts)
+
+    @staticmethod
     def _reply_html(comment: Dict[str, Any], own_rpids: set, depth: int) -> str:
         rpid = comment.get('rpid')
         is_own = rpid in own_rpids
         user = html.escape(comment.get('user') or '未知用户')
         body = html.escape(comment.get('content') or '').replace('\n', '<br>')
+        images = CommentsTab._images_html(comment)
         timestamp = CommentsTab._fmt_time(comment.get('ctime'))
         color = '#2563eb' if is_own else '#374151'
         badge = (
@@ -279,7 +339,7 @@ class CommentsTab(QWidget):
             '<td valign="top" style="padding-left:6px;">'
             f'<div><b style="color:{color};">{user}</b> {badge}'
             f'<span style="color:#9aa3b2; font-size:12px;"> {timestamp}</span></div>'
-            f'<div style="margin-top:3px; color:#1f2937;">{body}</div>'
+            f'<div style="margin-top:3px; color:#1f2937;">{body}{images}</div>'
             '</td></tr></table></div>'
         )
 
@@ -318,6 +378,7 @@ class CommentsTab(QWidget):
             thread.get('commented_at')
         )
         root_content = html.escape(root.get('content') or '').replace('\n', '<br>')
+        root_images = self._images_html(root)
         root_color = '#2563eb' if root_is_me else '#374151'
         root_avatar = self._avatar(
             root_name, root_color, 32, '鱼' if root_is_me else root_name[:1]
@@ -354,7 +415,7 @@ class CommentsTab(QWidget):
             '<span style="font-size:11px; color:#2563eb; background:#eef4ff;'
             ' border-radius:4px; padding:1px 5px;">楼主</span></div>',
             f'<div style="color:#9aa3b2; font-size:12px;">{root_time}</div>',
-            f'<div style="margin-top:5px;">{root_content}</div>',
+            f'<div style="margin-top:5px;">{root_content}{root_images}</div>',
             '</td></tr></table>',
         ]
 

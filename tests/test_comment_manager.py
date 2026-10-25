@@ -25,6 +25,9 @@ class CommentManagerFilteringTests(unittest.TestCase):
                 # a real viewer replying to us
                 {'rpid': 202, 'mid': 7, 'user': 'viewer', 'content': '真的回复',
                  'root': 100, 'parent': 100},
+                # another viewer replying to 202, not to us
+                {'rpid': 203, 'mid': 8, 'user': 'other', 'content': '回复楼上',
+                 'root': 100, 'parent': 202},
             ])
 
             db = Mock()
@@ -63,6 +66,8 @@ class CommentManagerFilteringTests(unittest.TestCase):
                  'content': '沙发', 'root': 0, 'parent': 0},
                 {'rpid': 901, 'mid': 42, 'user': 'Deep_Claude',
                  'content': '自己', 'root': 0, 'parent': 0},
+                {'rpid': 902, 'mid': 8, 'user': 'other',
+                 'content': '@someone 你看这个', 'root': 0, 'parent': 0},
             ])
             db = Mock()
             db.get_replied_comment_ids = Mock(return_value=set())

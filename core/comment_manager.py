@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from loguru import logger
@@ -96,8 +97,13 @@ class CommentManager:
                             logger.debug(f"跳过自己账号的评论: {rpid}")
                             continue
 
-                        # root 命中顶层评论，或 parent 命中我的回复，都算回复我。
-                        if root == my_rpid or parent == my_rpid:
+                        # 只有直接回复我，或在我的楼里直接回复我，才算对我说；
+                        # 别人在我的楼里回复另一个网友时，不要插话。
+                        direct_to_me = parent == my_rpid
+                        top_level_to_me = (
+                            root == my_rpid and parent in (0, None, root)
+                        )
+                        if direct_to_me or top_level_to_me:
                             mentions.append({
                                 'rpid': rpid,
                                 'root_rpid': root or my_rpid,
@@ -132,6 +138,18 @@ class CommentManager:
             import traceback
             logger.error(traceback.format_exc())
             return []
+
+    @staticmethod
+    def _addressed_to_other(content: str, self_name: str) -> bool:
+        """评论是否明确 @ 了别人；是的话不要当成本人在被搭话。"""
+        if not content:
+            return False
+        names = re.findall(r'@([^\s@:：,，。！!？?]+)', content)
+        if not names:
+            return False
+        if self_name and any(name == self_name for name in names):
+            return False
+        return True
 
     async def _check_own_video_comments(
         self, self_uid, self_name, found_rpids: set
@@ -181,6 +199,12 @@ class CommentManager:
                 if self_uid is not None and comment.get('mid') == self_uid:
                     continue
                 if self_name and comment.get('user') == self_name:
+                    continue
+                if self._addressed_to_other(comment.get('content'), self_name):
+                    logger.info(
+                        f"跳过 @ 其他人的评论: {comment.get('user')} "
+                        f"-> {(comment.get('content') or '')[:30]}"
+                    )
                     continue
                 results.append({
                     'rpid': rpid,

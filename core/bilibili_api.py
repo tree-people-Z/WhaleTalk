@@ -727,6 +727,31 @@ class BilibiliAPI:
             logger.warning(f"获取视频媒体流地址失败 {bvid}: {e}")
             return {'audio': None, 'video': None}
 
+    @staticmethod
+    def _extract_comment_images(content: Dict[str, Any]) -> List[str]:
+        """提取评论里的图片地址（B站单图/多图字段都兼容）。"""
+        urls: List[str] = []
+
+        def add(value):
+            if isinstance(value, str):
+                url = value.strip()
+            elif isinstance(value, dict):
+                url = value.get('img_src') or value.get('url') or value.get('src') or ''
+            else:
+                return
+            if url.startswith('//'):
+                url = 'https:' + url
+            if url.startswith('http') and url not in urls:
+                urls.append(url)
+
+        pictures = content.get('pictures')
+        if isinstance(pictures, list):
+            for picture in pictures:
+                add(picture)
+        add(content.get('picture'))
+        add(content.get('pic'))
+        return urls[:6]
+
     async def get_comments(
         self,
         aid: int,
@@ -808,6 +833,7 @@ class BilibiliAPI:
                         'user': entry.get('member', {}).get('uname', '未知用户'),
                         'mid': entry.get('member', {}).get('mid'),
                         'content': entry.get('content', {}).get('message', ''),
+                        'images': self._extract_comment_images(entry.get('content') or {}),
                         'like': entry.get('like', 0),
                         'ctime': entry.get('ctime', 0),
                         'root': entry.get('root') or (root_rpid if entry is not c else 0),
@@ -834,6 +860,7 @@ class BilibiliAPI:
                                 'user': entry.get('member', {}).get('uname', '未知用户'),
                                 'mid': entry.get('member', {}).get('mid'),
                                 'content': entry.get('content', {}).get('message', ''),
+                                'images': self._extract_comment_images(entry.get('content') or {}),
                                 'like': entry.get('like', 0),
                                 'ctime': entry.get('ctime', 0),
                                 'root': entry.get('root') or root_rpid,
@@ -937,6 +964,7 @@ class BilibiliAPI:
                     'user': entry.get('member', {}).get('uname', '未知用户'),
                     'mid': entry.get('member', {}).get('mid'),
                     'content': entry.get('content', {}).get('message', ''),
+                    'images': self._extract_comment_images(entry.get('content') or {}),
                     'like': entry.get('like', 0),
                     'ctime': entry.get('ctime', 0),
                     'root': entry.get('root') or root_rpid,
