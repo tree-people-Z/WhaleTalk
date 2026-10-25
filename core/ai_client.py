@@ -521,6 +521,7 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
         video_context: str,
         persona: str = "",
         user_name: str = "",
+        memory_context: str = "",
         is_owner: bool = False,
     ) -> Optional[str]:
         """
@@ -531,6 +532,7 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
             video_context: 视频相关上下文
             persona: 角色人设
             user_name: 被回复的用户名
+            memory_context: 与该网友的历史互动摘要（可选）
             is_owner: 对方是否账号主人
 
         Returns:
@@ -546,6 +548,12 @@ score 表示客观作品质量。confidence表示证据对判断的支持程度�
             "绝对不要承认自己是 AI、人工智能、语言模型、程序或机器人。"
             "被问“你是不是 AI”时，用角色口吻嘴硬否认，不要解释模型、接口或提示词。\n"
         )
+
+        if memory_context:
+            prompt_parts.append(
+                "# 你记得的事（如果自然就带一句，不要逐字复述，也不要暴露记忆系统）\n"
+                f"{memory_context}\n"
+            )
 
         if user_name:
             relationship = (

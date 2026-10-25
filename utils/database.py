@@ -75,6 +75,35 @@ class LikeRecord(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class MemoryEvent(Base):
+    """长期记忆：一次与网友的互动。"""
+    __tablename__ = 'memory_events'
+
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(30), index=True)  # reply/comment/greeting/requested_video
+    user_name = Column(String(100))
+    user_mid = Column(Integer, index=True)
+    aid = Column(Integer)
+    bvid = Column(String(20))
+    video_title = Column(Text)
+    content = Column(Text)       # 对方说的话
+    my_content = Column(Text)    # 我说的话
+    outcome = Column(String(30), default='sent')
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class UserMemory(Base):
+    """长期记忆：对某个网友的摘要。"""
+    __tablename__ = 'user_memories'
+
+    id = Column(Integer, primary_key=True)
+    user_mid = Column(Integer, unique=True, index=True)
+    user_name = Column(String(100))
+    summary = Column(Text)
+    interaction_count = Column(Integer, default=1)
+    last_seen = Column(DateTime, default=datetime.now)
+
+
 class DailyQuota(Base):
     """每日配额表"""
     __tablename__ = 'daily_quota'
@@ -206,6 +235,96 @@ class Database:
         self.session.add(record)
         self.session.commit()
         return record
+
+    def add_memory_event(
+        self,
+        event_type: str,
+        *,
+        user_name: str = "",
+        user_mid: Optional[int] = None,
+        aid: Optional[int] = None,
+        bvid: str = "",
+        video_title: str = "",
+        content: str = "",
+        my_content: str = "",
+        outcome: str = "sent",
+    ) -> MemoryEvent:
+        event = MemoryEvent(
+            event_type=event_type,
+            user_name=user_name or "",
+            user_mid=user_mid,
+            aid=aid,
+            bvid=bvid or "",
+            video_title=video_title or "",
+            content=content or "",
+            my_content=my_content or "",
+            outcome=outcome,
+        )
+        self.session.add(event)
+        if user_mid or user_name:
+            memory = None
+            if user_mid:
+                memory = self.session.query(UserMemory).filter_by(
+                    user_mid=user_mid
+                ).first()
+            if memory is None and user_name:
+                memory = self.session.query(UserMemory).filter_by(
+                    user_name=user_name
+                ).first()
+            if memory is None:
+                memory = UserMemory(
+                    user_mid=user_mid,
+                    user_name=user_name or "",
+                    summary="",
+                    interaction_count=0,
+                )
+                self.session.add(memory)
+            memory.user_name = user_name or memory.user_name
+            memory.interaction_count = int(memory.interaction_count or 0) + 1
+            memory.last_seen = datetime.now()
+            recent = [event.content, event.my_content]
+            summary_line = " | ".join(part for part in recent if part)[:300]
+            if summary_line:
+                old = (memory.summary or "").splitlines()
+                memory.summary = "\n".join(([summary_line] + old)[:20])
+        self.session.commit()
+        return event
+
+    def get_memory_context(
+        self, user_mid: Optional[int] = None, user_name: str = "", limit: int = 5
+    ) -> str:
+        """Format recent interactions with this user for the reply prompt."""
+        query = self.session.query(MemoryEvent)
+        if user_mid:
+            query = query.filter(MemoryEvent.user_mid == user_mid)
+        elif user_name:
+            query = query.filter(MemoryEvent.user_name == user_name)
+        else:
+            return ""
+        events = query.order_by(MemoryEvent.created_at.desc()).limit(limit).all()
+        if not events:
+            return ""
+        lines = []
+        for event in reversed(events):
+            when = event.created_at.strftime('%m-%d %H:%M') if event.created_at else ''
+            if event.content:
+                lines.append(f"- {when} 对方说：{event.content[:120]}")
+            if event.my_content:
+                lines.append(f"  你上次回：{event.my_content[:120]}")
+        return "\n".join(lines)
+
+    def get_recent_memory_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        events = self.session.query(MemoryEvent)\
+            .order_by(MemoryEvent.created_at.desc())\
+            .limit(limit).all()
+        return [{
+            'event_type': event.event_type,
+            'user_name': event.user_name,
+            'user_mid': event.user_mid,
+            'content': event.content,
+            'my_content': event.my_content,
+            'created_at': event.created_at,
+        } for event in events]
 
     def add_like_record(
         self, bvid: str, aid: int, success: bool = True, error_message: str = ""
@@ -372,11 +491,15 @@ class Database:
             .filter_by(commented=True).count()
 
         today_quota = self.get_today_quota()
+        today_posts = self.get_today_comment_count()
+        today_total = self.get_today_comment_count(include_replies=True)
 
         return {
             'total_videos_analyzed': total_videos,
             'total_comments_sent': total_comments,
-            'today_comments': today_quota.comments_sent,
+            'today_comments': today_total,
+            'today_posts': today_posts,
+            'today_replies': max(0, today_total - today_posts),
             'today_videos': today_quota.videos_analyzed,
             'today_runs': today_quota.runs_completed
         }

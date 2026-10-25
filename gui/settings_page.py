@@ -393,7 +393,7 @@ class SettingsPage(QWidget):
         # 每日最大评论数
         self.max_comments_spin = QSpinBox()
         self.max_comments_spin.setRange(0, 9999)
-        layout.addRow("每日最大评论数:", self.max_comments_spin)
+        layout.addRow("每日最大发送数（评论+回复）:", self.max_comments_spin)
 
         # 每日最大点赞数
         self.max_likes_spin = QSpinBox()
@@ -669,7 +669,7 @@ class SettingsPage(QWidget):
         self.order_combo.setCurrentIndex(order_map.get(order, 0))
 
         # 限制设置
-        self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 96))
+        self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 60))
         self.max_likes_spin.setValue(self.config.get('limits.max_likes_per_day', 50))
         self.cooldown_spin.setValue(self.config.get('limits.same_video_cooldown_days', 7))
         self.max_videos_spin.setValue(self.config.get('limits.max_videos_per_run', 20))

@@ -1,4 +1,4 @@
-﻿import tempfile
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -19,7 +19,7 @@ class ConfigDefaultTests(unittest.TestCase):
         self.assertTrue(config.get('schedule.deepseek_offpeak_only'))
         self.assertEqual(config.get('search.order'), 'totalrank')
         self.assertEqual(config.get('search.max_results_per_keyword'), 5)
-        self.assertEqual(config.get('limits.max_comments_per_day'), 96)
+        self.assertEqual(config.get('limits.max_comments_per_day'), 60)
         self.assertEqual(config.get('limits.max_videos_per_run'), 20)
         self.assertEqual(config.get('limits.min_score_to_comment'), 10)
         self.assertEqual(config.get('limits.min_score_to_mention_owner'), 13)

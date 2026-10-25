@@ -167,7 +167,7 @@ class ConfigManager:
                 "order": "totalrank"  # 综合排序
             },
             "limits": {
-                "max_comments_per_day": 96,
+                "max_comments_per_day": 60,
                 "max_likes_per_day": 50,
                 "max_videos_per_run": 20,
                 "skip_analyzed_within_hours": 2,

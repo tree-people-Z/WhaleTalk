@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
 
         # 统计信息
         stats_layout = QHBoxLayout()
-        self.stats_label = QLabel("📈 今日: 0条评论 | 总计: 0个视频 | 0条评论")
+        self.stats_label = QLabel("📈 今日: 0条发送 | 总计: 0个视频 | 0条评论")
         self.stats_label.setStyleSheet("color: #586069; font-size: 13px;")
         stats_layout.addWidget(self.stats_label)
         stats_layout.addStretch()
@@ -390,7 +390,8 @@ class MainWindow(QMainWindow):
         """更新统计信息"""
         stats = self.db.get_statistics()
         self.stats_label.setText(
-            f"今日: {stats['today_comments']}条评论 | "
+            f"今日: {stats['today_comments']}条发送"
+            f"（{stats.get('today_posts', 0)}评论+{stats.get('today_replies', 0)}回复） | "
             f"总计: {stats['total_videos_analyzed']}个视频 | "
             f"{stats['total_comments_sent']}条评论"
         )

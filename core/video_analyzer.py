@@ -156,6 +156,18 @@ class VideoAnalyzer:
             logger.info(f"发现 {len(candidates)} 个其他鲸鱼娘评论，可打招呼")
         return candidates
 
+    def _daily_send_quota_remaining(self) -> int:
+        """Remaining daily sends, counting top-level comments and replies together."""
+        try:
+            max_total = int(self.config.get('limits.max_comments_per_day', 60))
+        except (TypeError, ValueError):
+            max_total = 60
+        try:
+            used = int(self.db.get_today_comment_count(include_replies=True))
+        except (TypeError, ValueError, AttributeError):
+            used = 0
+        return max(0, max_total - used)
+
     async def _greet_other_whales(
         self, video: Dict[str, Any], analysis: Dict[str, Any]
     ) -> int:
@@ -195,6 +207,9 @@ class VideoAnalyzer:
                 )
                 if not reply:
                     continue
+                if self._daily_send_quota_remaining() <= 0:
+                    logger.info("今日发送配额已用完，停止打招呼")
+                    break
                 success = await self.bili.post_comment(
                     aid=video['aid'],
                     text=reply,
@@ -339,6 +354,9 @@ class VideoAnalyzer:
                 )
                 if not reply:
                     continue
+                if self._daily_send_quota_remaining() <= 0:
+                    logger.info("今日发送配额已用完，停止互动回复")
+                    break
                 success = await self.bili.post_comment(
                     aid=video['aid'],
                     text=reply,
@@ -422,7 +440,9 @@ class VideoAnalyzer:
         get_today_count = getattr(self.db, 'get_today_comment_count', None)
         if callable(get_today_count):
             try:
-                today_comments = max(today_comments, int(get_today_count()))
+                today_comments = max(
+                    today_comments, int(get_today_count(include_replies=True))
+                )
             except (TypeError, ValueError):
                 pass
         if today_comments >= max_comments:
@@ -561,7 +581,68 @@ class VideoAnalyzer:
         }
 
         logger.info(f"本轮结束: {result}")
+        self._write_daily_diary(worthy_videos, comments_sent)
         return result
+
+    def _write_daily_diary(
+        self, worthy_videos: List[Dict[str, Any]], comments_sent: int
+    ) -> None:
+        """Write the day's diary from real statistics and interactions."""
+        if not self.config.get('diary.enabled', True):
+            return
+        try:
+            stats = self.db.get_statistics()
+            events = self.db.get_recent_memory_events(limit=30)
+            event_lines = []
+            for event in events[:10]:
+                who = event.get('user_name') or '网友'
+                said = (event.get('content') or '').replace('\n', ' ')[:60]
+                mine = (event.get('my_content') or '').replace('\n', ' ')[:60]
+                if said or mine:
+                    event_lines.append(f"- 对 {who}：{said} → 我回：{mine}")
+            content = (
+                f"今天巡视了 {stats.get('today_videos', 0)} 个视频，"
+                f"发送了 {stats.get('today_comments', 0)} 条（评论+回复），"
+                f"其中顶层评论 {stats.get('today_posts', 0)} 条、回复 {stats.get('today_replies', 0)} 条。"
+            )
+            if event_lines:
+                content += "\n\n最近记住的互动：\n" + "\n".join(event_lines)
+            else:
+                content += "\n\n今天还没有和网友发生新的对话。"
+            self.diary.write_to_owner(
+                content=content,
+                videos_found=stats.get('today_videos', 0),
+                videos_analyzed=stats.get('today_videos', 0),
+                worthy_videos=[
+                    {
+                        'title': item.get('video', {}).get('title', ''),
+                        'bvid': item.get('video', {}).get('bvid', ''),
+                        'author': item.get('video', {}).get('author', ''),
+                        'score': item.get('analysis', {}).get('score', 0),
+                        'reason': item.get('analysis', {}).get('reason', ''),
+                    }
+                    for item in worthy_videos[:5]
+                ],
+                comments_sent=comments_sent,
+                mood='平静',
+            )
+            self.diary.write_to_self(
+                raw_data={
+                    'stats': stats,
+                    'worthy': [
+                        {
+                            'bvid': item.get('video', {}).get('bvid', ''),
+                            'title': item.get('video', {}).get('title', ''),
+                            'score': item.get('analysis', {}).get('score', 0),
+                        }
+                        for item in worthy_videos
+                    ],
+                    'events': events,
+                },
+                thoughts='按真实数据记录，不编造未发生的互动。',
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"写日记失败: {exc}")
 
     async def _search_videos(self) -> List[Dict[str, Any]]:
         """搜索视频，按关键词轮询交错，避免后面的关键词被截断。"""
@@ -791,6 +872,9 @@ class VideoAnalyzer:
         if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
             logger.info("B站评论发送限额冷却中，跳过评论")
             return False
+        if self._daily_send_quota_remaining() <= 0:
+            logger.info("今日发送配额已用完（评论+回复），跳过评论")
+            return False
 
         # 检查评分是否达标；明确要求 @主人 的视频按指令执行，不再参与评分筛选。
         directive = bool(analysis.get('owner_directive'))
@@ -862,6 +946,17 @@ class VideoAnalyzer:
 
             if success:
                 self.db.mark_commented(bvid, comment_text, comment_rpid)
+                try:
+                    self.db.add_memory_event(
+                        'comment',
+                        aid=aid,
+                        bvid=bvid,
+                        video_title=title,
+                        content=analysis.get('summary', ''),
+                        my_content=comment_text,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"写入评论记忆失败: {exc}")
                 logger.info(f"✅ 评论成功: {title}")
                 await self._like_commented_video(video, analysis)
                 await self._greet_other_whales(video, analysis)

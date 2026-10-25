@@ -1,4 +1,4 @@
-﻿import json
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,9 +8,9 @@ from utils.config_manager import ConfigManager
 
 
 class ApiKeyNormalizationTests(unittest.TestCase):
-    def test_default_daily_comment_limit_is_96(self):
+    def test_default_daily_send_limit_is_60(self):
         config = ConfigManager(Path('nonexistent-config-for-defaults.json'))
-        self.assertEqual(config.get('limits.max_comments_per_day'), 96)
+        self.assertEqual(config.get('limits.max_comments_per_day'), 60)
 
     def test_config_load_and_save_strip_key_whitespace(self):
         with tempfile.TemporaryDirectory() as temp_dir:

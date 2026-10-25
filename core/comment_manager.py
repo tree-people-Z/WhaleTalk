@@ -140,6 +140,17 @@ class CommentManager:
             logger.error(traceback.format_exc())
             return []
 
+    def _daily_send_quota_remaining(self) -> int:
+        try:
+            max_total = int(self.config.get('limits.max_comments_per_day', 60))
+        except (TypeError, ValueError):
+            max_total = 60
+        try:
+            used = int(self.db.get_today_comment_count(include_replies=True))
+        except (TypeError, ValueError, AttributeError):
+            used = 0
+        return max(0, max_total - used)
+
     @staticmethod
     def _addressed_to_other(content: str, self_name: str) -> bool:
         """评论是否明确 @ 了别人；是的话不要当成本人在被搭话。"""
@@ -254,9 +265,9 @@ class CommentManager:
             if self.db.has_commented_video(bvid):
                 logger.debug(f"已经在她视频下评论过，跳过: {bvid}")
                 return None
-            max_comments = int(self.config.get('limits.max_comments_per_day', 96))
-            if self.db.get_today_comment_count() >= max_comments:
-                logger.info("今日顶层评论已达上限，跳过对方视频下的评论")
+            max_comments = int(self.config.get('limits.max_comments_per_day', 60))
+            if self.db.get_today_comment_count(include_replies=True) >= max_comments:
+                logger.info("今日发送配额已用完（评论+回复），跳过对方视频下的评论")
                 return None
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"检查视频评论记录失败: {exc}")
@@ -316,6 +327,9 @@ class CommentManager:
             if rpid in self.processed_rpids:
                 logger.info(f"已处理过该评论: {rpid}")
                 return False
+            if self._daily_send_quota_remaining() <= 0:
+                logger.info("今日发送配额已用完（评论+回复），跳过回复")
+                return False
 
             # 加载人设
             persona = self._load_persona()
@@ -353,12 +367,28 @@ class CommentManager:
                         f"{posted_video_comment}\n"
                     )
 
+            memory_context = ""
+            try:
+                memory_context = self.db.get_memory_context(
+                    user_mid=mention.get('mid'),
+                    user_name=user or '',
+                    limit=5,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"读取长期记忆失败: {exc}")
+            if memory_context:
+                video_context += (
+                    "\n# 你记得这位网友的事（自然地用，不要逐字复述）\n"
+                    f"{memory_context}\n"
+                )
+
             # 生成回复
             reply_text = await self.ai.generate_reply(
                 original_comment=content,
                 video_context=video_context,
                 persona=persona,
                 user_name=user or '',
+                memory_context=memory_context,
                 is_owner=bool(
                     user and user == self.config.get('bilibili.owner_name', '')
                 ),
@@ -393,6 +423,19 @@ class CommentManager:
                     parent_content=content or '',
                 )
                 self.processed_rpids.add(rpid)
+                try:
+                    self.db.add_memory_event(
+                        'reply',
+                        user_name=user or '',
+                        user_mid=mention.get('mid'),
+                        aid=aid,
+                        bvid=mention.get('bvid', ''),
+                        video_title=video_title,
+                        content=content or '',
+                        my_content=reply_text,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"写入长期记忆失败: {exc}")
                 logger.info(f"✅ 回复成功: @{user}")
             else:
                 logger.error(f"❌ 回复失败: @{user}")
@@ -409,6 +452,9 @@ class CommentManager:
         replied = 0
         if self.config.get('interaction.auto_reply', True):
             for mention in mentions:
+                if self._daily_send_quota_remaining() <= 0:
+                    logger.warning("今日发送配额已用完（评论+回复），停止本轮回复")
+                    break
                 if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
                     logger.warning("评论发送冷却中，停止本轮回复")
                     break
