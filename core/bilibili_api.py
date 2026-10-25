@@ -798,8 +798,29 @@ class BilibiliAPI:
             def stream_url(track):
                 return track.get('baseUrl') or track.get('base_url') or track.get('url')
 
-            audio_url = stream_url(audio_tracks[0]) if audio_tracks else None
-            video_url = stream_url(video_tracks[0]) if video_tracks else None
+            def pick_track(tracks):
+                """Prefer AVC and a mirror host, then the lowest bandwidth.
+
+                Frame/audio extraction only needs a small, decodable stream; the
+                first DASH entry is often the 1080p+ rendition and can make a
+                one-frame ffmpeg seek download far more data than necessary.
+                """
+                if not tracks:
+                    return None
+                def score(track):
+                    url = stream_url(track) or ''
+                    codec = str(track.get('codecs') or '')
+                    return (
+                        0 if codec.startswith('avc1') else 1,
+                        0 if 'upos' in url else 1,
+                        int(track.get('bandwidth') or 0),
+                    )
+                return min(tracks, key=score)
+
+            audio_track = pick_track(audio_tracks)
+            video_track = pick_track(video_tracks)
+            audio_url = stream_url(audio_track) if audio_track else None
+            video_url = stream_url(video_track) if video_track else None
             # Legacy/non-DASH responses can contain a muxed stream.
             durl = data.get('durl') or []
             if durl:
