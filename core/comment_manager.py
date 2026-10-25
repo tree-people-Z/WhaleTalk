@@ -284,6 +284,7 @@ class CommentManager:
                 comment_type='post',
                 success=True,
                 rpid=getattr(self.bili, 'last_comment_rpid', None),
+                thread_root=getattr(self.bili, 'last_comment_rpid', None),
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"记录视频评论失败: {exc}")
@@ -387,6 +388,7 @@ class CommentManager:
                     success=True,
                     rpid=getattr(self.bili, 'last_comment_rpid', None),
                     parent_rpid=rpid,
+                    thread_root=mention.get('root_rpid') or rpid,
                     target_user=user or '',
                     parent_content=content or '',
                 )

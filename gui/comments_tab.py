@@ -174,38 +174,60 @@ class CommentsTab(QWidget):
 
     # ------------------------------------------------------------------ data
     @staticmethod
+    def _thread_key(thread: Dict[str, Any]) -> tuple:
+        return (
+            thread.get('aid'),
+            thread.get('thread_root'),
+            thread.get('comment_type'),
+        )
+
+    @staticmethod
     def _group_threads(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge all records that belong to the same comment thread."""
+        """Merge records into one row per thread, falling back per video for old rows."""
+        post_roots = {}
+        for record in records:
+            if record.get('comment_type') == 'post' and record.get('rpid'):
+                post_roots.setdefault(record.get('aid'), set()).add(record.get('rpid'))
+
         grouped: Dict[tuple, List[Dict[str, Any]]] = {}
         for record in records:
             aid = record.get('aid') or 0
-            root = record.get('thread_root') or record.get('rpid')
-            grouped.setdefault((aid, root), []).append(record)
+            comment_type = record.get('comment_type')
+            known = bool(record.get('thread_root_known')) or comment_type == 'post'
+            if known:
+                root = record.get('rpid') if comment_type == 'post' else record.get('thread_root')
+                key = (aid, 'thread', root)
+            else:
+                roots = post_roots.get(aid) or set()
+                if len(roots) == 1:
+                    key = (aid, 'thread', next(iter(roots)))
+                else:
+                    key = (aid, 'video', None)
+            grouped.setdefault(key, []).append(record)
 
         merged = []
-        for (aid, root), items in grouped.items():
+        for (aid, _kind, _root), items in grouped.items():
             items.sort(key=lambda item: item.get('commented_at') or datetime.datetime.min)
-            root_record = next(
-                (
-                    item for item in items
-                    if item.get('comment_type') == 'post'
-                    and item.get('rpid') == root
-                ),
+            post_record = next(
+                (item for item in items if item.get('comment_type') == 'post'),
                 None,
             )
-            if root_record is None:
-                root_record = next(
-                    (item for item in items if item.get('rpid') == root),
-                    items[-1],
-                )
+            root_record = post_record or items[-1]
             group = dict(root_record)
-            group['thread_root'] = root
+            group['thread_root'] = (
+                post_record.get('rpid') if post_record
+                else (root_record.get('thread_root') or root_record.get('rpid'))
+            )
             group['records'] = items
             group['my_count'] = len(items)
             group['last_at'] = items[-1].get('commented_at')
             group['last_content'] = items[-1].get('content') or ''
             group['content'] = root_record.get('content') or ''
             group['commented_at'] = root_record.get('commented_at')
+            group['merged_by_video'] = not any(
+                item.get('thread_root_known') or item.get('comment_type') == 'post'
+                for item in items
+            )
             merged.append(group)
         merged.sort(
             key=lambda group: group.get('last_at') or datetime.datetime.min,
@@ -222,21 +244,65 @@ class CommentsTab(QWidget):
         except Exception as exc:  # noqa: BLE001
             self.status_label.setText(f"读取评论记录失败：{exc}")
             return
-        self.threads = self._group_threads(records)
+        groups = self._group_threads(records)
+        signature = tuple(
+            (
+                group.get('aid'),
+                group.get('thread_root'),
+                group.get('my_count'),
+                group.get('last_at'),
+                group.get('last_content'),
+            )
+            for group in groups
+        )
+        if signature == getattr(self, '_signature', None):
+            self.threads = groups
+            self.status_label.setText(
+                f"共 {len(groups)} 个评论楼（{len(records)} 条已发评论/回复）"
+            )
+            return
+        self._signature = signature
+        self.threads = groups
         self._loaded_at = time.time()
+
+        selected = self._current_thread()
+        selected_key = self._thread_key(selected) if selected else None
+        scroll = self.thread_table.verticalScrollBar().value()
+
+        self.thread_table.blockSignals(True)
+        self.thread_table.setUpdatesEnabled(False)
         self.thread_table.setRowCount(0)
         self.thread_table.setRowCount(len(self.threads))
         for row, thread in enumerate(self.threads):
             self._fill_row(row, thread)
+        target_row = 0
+        if selected_key:
+            for row, thread in enumerate(self.threads):
+                if self._thread_key(thread) == selected_key:
+                    target_row = row
+                    break
         if self.threads:
+            self.thread_table.selectRow(target_row)
+            self.thread_table.scrollToItem(
+                self.thread_table.item(target_row, 0)
+            )
+            self.thread_table.verticalScrollBar().setValue(scroll)
             self.status_label.setText(
                 f"共 {len(self.threads)} 个评论楼（{len(records)} 条已发评论/回复）"
             )
-            self.thread_table.selectRow(0)
-            self._load_thread(self.threads[0])
         else:
             self.status_label.setText("还没有发送过评论或回复")
             self.transcript.setHtml("")
+        self.thread_table.setUpdatesEnabled(True)
+        self.thread_table.blockSignals(False)
+
+        if self.threads:
+            current = self._current_thread()
+            current_key = self._thread_key(current)
+            has_transcript = bool(self.transcript.toPlainText().strip())
+            if not (selected_key == current_key and has_transcript):
+                self._load_thread(current)
+        self._loaded_at = time.time()
 
     def _fill_row(self, row: int, thread: Dict[str, Any]):
         commented_at = thread.get('last_at') or thread.get('commented_at')
@@ -250,7 +316,8 @@ class CommentsTab(QWidget):
         is_reply = thread.get('comment_type') == 'reply'
         notified = thread.get('aid') in self._notified_aids
         if count > 1:
-            type_text = ('🔔 ' if notified else '') + f'楼·{count}'
+            label = '视频楼' if thread.get('merged_by_video') else '楼'
+            type_text = ('🔔 ' if notified else '') + f'{label}·{count}'
         else:
             type_text = ('🔔 ' if notified else '') + ('回复' if is_reply else '评论')
         object_text = title

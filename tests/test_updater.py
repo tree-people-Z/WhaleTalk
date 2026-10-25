@@ -32,11 +32,11 @@ class UpdaterTests(unittest.TestCase):
 
     def test_check_for_update_returns_downloadable_asset(self):
         response = Mock(status_code=200)
-        response.json.return_value = _release_payload('v1.9.0')
+        response.json.return_value = _release_payload('v1.9.1')
         with patch('requests.get', return_value=response):
             result = updater.check_for_update()
         self.assertEqual(result['status'], 'update')
-        self.assertEqual(result['version'], '1.9.0')
+        self.assertEqual(result['version'], '1.9.1')
         self.assertEqual(
             result['asset_url'], 'https://example.test/WhaleTalk-Windows-x64.zip'
         )

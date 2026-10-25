@@ -210,6 +210,7 @@ class VideoAnalyzer:
                         success=True,
                         rpid=getattr(self.bili, 'last_comment_rpid', None),
                         parent_rpid=target.get('rpid'),
+                        thread_root=target.get('root') or target.get('rpid'),
                         target_user=target.get('user') or '',
                         parent_content=target.get('content') or '',
                     )
@@ -353,6 +354,7 @@ class VideoAnalyzer:
                         success=True,
                         rpid=getattr(self.bili, 'last_comment_rpid', None),
                         parent_rpid=target.get('rpid'),
+                        thread_root=target.get('root') or target.get('rpid'),
                         target_user=target.get('user') or '',
                         parent_content=target.get('content') or '',
                     )
@@ -866,7 +868,8 @@ class VideoAnalyzer:
                 content=comment_text,
                 comment_type='post',
                 success=success,
-                rpid=comment_rpid
+                rpid=comment_rpid,
+                thread_root=comment_rpid,
             )
 
             if success:

@@ -50,6 +50,7 @@ class CommentRecord(Base):
     aid = Column(Integer)
     rpid = Column(Integer)  # 评论ID
     parent_rpid = Column(Integer)  # 被回复的评论ID
+    thread_root = Column(Integer)  # 楼层根评论ID（用于合并同一栋楼）
 
     comment_type = Column(String(20))  # 'post'=发出, 'reply'=回复
     content = Column(Text)
@@ -107,6 +108,9 @@ class Database:
         if 'parent_content' not in columns:
             with self.engine.begin() as connection:
                 connection.execute(text('ALTER TABLE comments ADD COLUMN parent_content TEXT'))
+        if 'thread_root' not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(text('ALTER TABLE comments ADD COLUMN thread_root INTEGER'))
         if 'target_user' not in columns:
             with self.engine.begin() as connection:
                 connection.execute(text('ALTER TABLE comments ADD COLUMN target_user VARCHAR(100)'))
@@ -180,6 +184,7 @@ class Database:
         error_message: str = "",
         rpid: Optional[int] = None,
         parent_rpid: Optional[int] = None,
+        thread_root: Optional[int] = None,
         target_user: str = "",
         parent_content: str = ""
     ) -> CommentRecord:
@@ -189,6 +194,7 @@ class Database:
             aid=aid,
             rpid=rpid,
             parent_rpid=parent_rpid,
+            thread_root=thread_root,
             comment_type=comment_type,
             content=content,
             target_user=target_user,
@@ -318,10 +324,14 @@ class Database:
         results = []
         for record in records:
             video = self.session.query(VideoRecord).filter_by(bvid=record.bvid).first()
+            stored_root = getattr(record, 'thread_root', None)
             thread_root = (
-                record.parent_rpid
-                if record.comment_type == 'reply' and record.parent_rpid
-                else record.rpid
+                stored_root
+                or (
+                    record.parent_rpid
+                    if record.comment_type == 'reply' and record.parent_rpid
+                    else record.rpid
+                )
             )
             results.append({
                 'aid': record.aid,
@@ -329,6 +339,7 @@ class Database:
                 'rpid': record.rpid,
                 'parent_rpid': record.parent_rpid,
                 'thread_root': thread_root,
+                'thread_root_known': bool(stored_root),
                 'comment_type': record.comment_type,
                 'target_user': record.target_user or '',
                 'parent_content': record.parent_content or '',
