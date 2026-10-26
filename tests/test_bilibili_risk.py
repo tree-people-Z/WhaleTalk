@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,7 +39,7 @@ class BilibiliRiskControlTests(unittest.TestCase):
 
         async def scenario():
             with patch(
-                'core.bilibili_api.comment.send_comment',
+                'core.bilibili_comment.comment.send_comment',
                 AsyncMock(side_effect=Exception(
                     '接口返回错误代码：12014，信息：发送失败，已达到当前评论发送上限'
                 )),
@@ -54,7 +54,7 @@ class BilibiliRiskControlTests(unittest.TestCase):
                 return {'data': {}}
 
             with patch(
-                'core.bilibili_api.comment.send_comment',
+                'core.bilibili_comment.comment.send_comment',
                 side_effect=fake_send,
             ):
                 self.assertFalse(await api.post_comment(1, '测试2'))
@@ -75,7 +75,7 @@ class BilibiliRiskControlTests(unittest.TestCase):
 
         async def scenario():
             with patch(
-                'core.bilibili_api.comment.get_comments',
+                'core.bilibili_comment.comment.get_comments',
                 AsyncMock(side_effect=Exception('网络错误，状态码：412 - <html>')),
             ):
                 first = await api.get_comments(123)
@@ -89,7 +89,7 @@ class BilibiliRiskControlTests(unittest.TestCase):
                 return {}
 
             with patch(
-                'core.bilibili_api.comment.get_comments',
+                'core.bilibili_comment.comment.get_comments',
                 side_effect=fake_get_comments,
             ):
                 second = await api.get_comments(456)

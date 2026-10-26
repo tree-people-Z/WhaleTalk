@@ -12,20 +12,16 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
-from bilibili_api import login_v2, search, video, comment, user
-from bilibili_api import favorite_list, dynamic
-from bilibili_api.session import EventType
-from bilibili_api.utils.picture import Picture
-from bilibili_api.utils.danmaku import Danmaku
-from bilibili_api import session as bili_session
+from bilibili_api import login_v2, search, video, user
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
-from bilibili_api.comment import OrderType
-from bilibili_api.user import RelationType
+from core.bilibili_dm import BiliDMMixin
+from core.bilibili_comment import BiliCommentMixin
+from core.bilibili_interact import BiliInteractMixin
 from loguru import logger
 
 
-class BilibiliAPI:
+class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
     """B站API封装类"""
 
     def __init__(self, credential_path: Path = None):
@@ -299,140 +295,6 @@ class BilibiliAPI:
         self._own_videos_cache = (datetime.now(), videos)
         return videos
 
-    @staticmethod
-    def _message_text(message: Dict[str, Any]) -> str:
-        """Extract readable text from a private-message payload."""
-        content = message.get('content')
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except (TypeError, ValueError):
-                return content.strip()
-        if isinstance(content, dict):
-            for key in ('content', 'text', 'title'):
-                value = content.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-            return '[非文本消息]'
-        return '' if content is None else str(content)
-
-    async def get_at_messages(self, since_time: int = 0) -> List[Dict[str, Any]]:
-        """Read B站 @ notifications, including comments in new threads."""
-        if not self.credential:
-            return []
-        try:
-            data = await bili_session.get_at(self.credential)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"获取@消息失败: {exc}")
-            return []
-        results = []
-        for entry in (data or {}).get('items') or []:
-            inner = entry.get('item') or {}
-            user = entry.get('user') or {}
-            at_time = int(entry.get('at_time') or 0)
-            if at_time <= since_time:
-                continue
-            uri = inner.get('uri') or inner.get('native_uri') or ''
-            match = re.search(r'(BV[0-9A-Za-z]+)', uri)
-            if not match:
-                continue
-            bvid = match.group(1)
-            source_id = inner.get('source_id') or inner.get('target_id')
-            if not source_id:
-                continue
-            root_id = inner.get('root_id') or 0
-            content = inner.get('source_content') or inner.get('title') or ''
-            results.append({
-                'rpid': int(source_id),
-                'root_rpid': int(root_id) if root_id else int(source_id),
-                'bvid': bvid,
-                'aid': int(inner.get('subject_id') or 0),
-                'user': user.get('nickname') or '',
-                'mid': user.get('mid'),
-                'content': content,
-                'at_time': at_time,
-                'type': 'at',
-            })
-        return results
-
-    async def get_private_sessions(self, session_type: int = 1) -> List[Dict[str, Any]]:
-        """获取私信会话列表。session_type: 1 私信, 4 全部。"""
-        if not self.credential:
-            return []
-        try:
-            data = await bili_session.get_sessions(
-                credential=self.credential, session_type=session_type
-            )
-        except Exception as exc:
-            logger.warning(f"获取私信会话失败: {exc}")
-            return []
-
-        sessions = []
-        for item in (data.get('session_list') or []):
-            talker_id = item.get('talker_id')
-            if not talker_id:
-                continue
-            last = item.get('last_msg') or {}
-            account = item.get('account_info') or {}
-            sessions.append({
-                'talker_id': int(talker_id),
-                'session_type': item.get('session_type') or session_type,
-                'name': account.get('name') or item.get('name') or f'UID {talker_id}',
-                'unread': int(item.get('unread_count') or 0),
-                'last_message': self._message_text(last),
-                'last_sender_uid': last.get('sender_uid'),
-                'last_timestamp': int(last.get('timestamp') or item.get('top_ts') or 0),
-            })
-        sessions.sort(key=lambda row: row.get('last_timestamp') or 0, reverse=True)
-        return sessions
-
-    @staticmethod
-    def _message_image_url(message: Dict[str, Any]) -> str:
-        content = message.get('content')
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except (TypeError, ValueError):
-                return ''
-        if isinstance(content, dict):
-            for key in ('url', 'image_url', 'img_src', 'original'):
-                value = content.get(key)
-                if isinstance(value, str) and value.startswith('http'):
-                    return value
-        return ''
-
-    async def get_private_messages(
-        self, talker_id: int, session_type: int = 1
-    ) -> List[Dict[str, Any]]:
-        """获取与某个用户的私信消息（按时间升序）。"""
-        if not self.credential:
-            return []
-        try:
-            data = await bili_session.fetch_session_msgs(
-                talker_id=int(talker_id),
-                credential=self.credential,
-                session_type=session_type,
-            )
-        except Exception as exc:
-            logger.warning(f"获取私信消息失败 talker={talker_id}: {exc}")
-            return []
-
-        messages = []
-        for item in (data.get('messages') or []):
-            if item.get('msg_type') == 5:  # 撤回的消息
-                content = '[消息已撤回]'
-            else:
-                content = self._message_text(item)
-            messages.append({
-                'sender_uid': item.get('sender_uid'),
-                'timestamp': int(item.get('timestamp') or 0),
-                'content': content,
-                'image_url': self._message_image_url(item),
-                'msg_type': item.get('msg_type'),
-            })
-        messages.sort(key=lambda row: row.get('timestamp') or 0)
-        return messages
-
     async def check_login(self) -> bool:
         """检查登录状态"""
         if not self.credential:
@@ -657,6 +519,101 @@ class BilibiliAPI:
                 self.set_blocked(30)
             return []
 
+    async def get_user_videos(self, uid: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """获取指定用户的最近投稿视频。"""
+        if not uid:
+            return []
+        try:
+            data = await user.User(int(uid), credential=self.credential).get_videos(
+                pn=1, ps=max(1, min(int(limit), 30))
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"获取用户 {uid} 投稿视频失败: {exc}")
+            return []
+        payload = data.get('list') if isinstance(data, dict) else None
+        items = (payload or {}).get('vlist') if isinstance(payload, dict) else None
+        if not items and isinstance(data, dict):
+            items = data.get('vlist') or []
+        videos = []
+        for item in items or []:
+            bvid = item.get('bvid')
+            aid = item.get('aid')
+            if bvid and aid:
+                videos.append({
+                    'bvid': bvid,
+                    'aid': aid,
+                    'title': item.get('title') or bvid,
+                })
+        return videos
+
+    async def resolve_requested_video(
+        self, text: str, commenter_mid: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
+        """解析评论里“看看我的视频/这个视频”的请求，返回可读的视频资料。"""
+        if not text:
+            return None
+        bvid = None
+        bv_match = re.search(r'(BV[0-9A-Za-z]{10})', text)
+        av_match = re.search(r'av(\d+)', text, re.I)
+        b23_match = re.search(r'https?://b23\.tv/\S+', text, re.I)
+
+        if b23_match:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        b23_match.group(0),
+                        allow_redirects=True,
+                        headers={'User-Agent': 'Mozilla/5.0'},
+                    ) as response:
+                        final_url = str(response.url)
+                resolved = re.search(r'(BV[0-9A-Za-z]{10})', final_url)
+                if resolved:
+                    bvid = resolved.group(1)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"解析 b23 短链失败: {exc}")
+
+        if not bvid and bv_match:
+            bvid = bv_match.group(1)
+        if not bvid and av_match:
+            try:
+                info = await video.Video(
+                    aid=int(av_match.group(1)), credential=self.credential
+                ).get_info()
+                bvid = info.get('bvid')
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"解析 av 号失败: {exc}")
+
+        wants_my_video = bool(re.search(
+            r'(看|瞧|瞅).{0,8}(我|俺).{0,6}(视频|投稿|作品)|'
+            r'我(的|发的|做的|拍的).{0,4}(视频|投稿|作品)',
+            text,
+        ))
+        if not bvid and wants_my_video and commenter_mid:
+            videos = await self.get_user_videos(commenter_mid, limit=3)
+            if videos:
+                bvid = videos[0].get('bvid')
+
+        if not bvid:
+            return None
+        info = await self.get_video_info(bvid)
+        if not info:
+            return None
+        subtitle = await self.get_subtitle(bvid) or ''
+        subtitle = re.sub(r'\s+', ' ', subtitle).strip()[:1200]
+        return {
+            'bvid': bvid,
+            'aid': info.get('aid'),
+            'title': info.get('title') or bvid,
+            'desc': (info.get('desc') or '').strip()[:600],
+            'owner': info.get('owner') or '',
+            'owner_mid': info.get('owner_mid'),
+            'duration': info.get('duration') or 0,
+            'url': f'https://www.bilibili.com/video/{bvid}',
+            'subtitle': subtitle,
+            'requested_by': 'commenter_upload' if wants_my_video else 'explicit_link',
+        }
+
     async def get_video_info(self, bvid: str) -> Optional[Dict[str, Any]]:
         """获取视频详细信息"""
         try:
@@ -794,619 +751,6 @@ class BilibiliAPI:
         except Exception as e:
             logger.warning(f"获取视频媒体流地址失败 {bvid}: {e}")
             return {'audio': None, 'video': None}
-
-    @staticmethod
-    def _extract_comment_images(content: Dict[str, Any]) -> List[str]:
-        """提取评论里的图片地址（B站单图/多图字段都兼容）。"""
-        urls: List[str] = []
-
-        def add(value):
-            if isinstance(value, str):
-                url = value.strip()
-            elif isinstance(value, dict):
-                url = value.get('img_src') or value.get('url') or value.get('src') or ''
-            else:
-                return
-            if url.startswith('//'):
-                url = 'https:' + url
-            if url.startswith('http') and url not in urls:
-                urls.append(url)
-
-        pictures = content.get('pictures')
-        if isinstance(pictures, list):
-            for picture in pictures:
-                add(picture)
-        add(content.get('picture'))
-        add(content.get('pic'))
-        return urls[:6]
-
-    async def get_comments(
-        self,
-        aid: int,
-        sort: int = 2,  # 2=热门, 0=时间
-        count: int = 20,
-        include_replies: bool = False,
-        root_rpids: Optional[set] = None
-    ) -> List[Dict[str, Any]]:
-        """获取视频评论"""
-        if self.is_blocked():
-            logger.debug(f"风控冷却中，跳过获取评论 aid={aid}")
-            return []
-        closed_cache = getattr(self, '_closed_comment_aids', None)
-        if closed_cache is None:
-            closed_cache = {}
-            self._closed_comment_aids = closed_cache
-        closed_at = closed_cache.get(aid)
-        if closed_at and (datetime.now() - closed_at).total_seconds() < 600:
-            logger.debug(f"评论区已关闭（缓存），跳过 aid={aid}")
-            return []
-        cache_key = None
-        comments_cache = getattr(self, '_comments_cache', None)
-        if comments_cache is None:
-            comments_cache = {}
-            self._comments_cache = comments_cache
-        if not include_replies:
-            cache_key = (aid, sort, count)
-            cached = comments_cache.get(cache_key)
-            if cached and (datetime.now() - cached[0]).total_seconds() < 120:
-                return list(cached[1])
-        await self._pace_comment_request()
-        try:
-            # 转换排序参数为枚举
-            order_type = OrderType.LIKE if sort == 2 else OrderType.TIME
-
-            comments_data = await comment.get_comments(
-                oid=aid,
-                type_=comment.CommentResourceType.VIDEO,
-                page_index=1,
-                order=order_type,
-                credential=self.credential
-            )
-
-            # 检查返回数据
-            if not comments_data or 'replies' not in comments_data:
-                logger.warning(f"视频 aid={aid} 没有评论或评论区已关闭")
-                return []
-
-            replies = comments_data.get('replies', [])
-            if not replies:
-                logger.info(f"视频 aid={aid} 暂无评论")
-                return []
-
-            comments = []
-            fetched_roots = set()
-            for c in replies[:count]:
-                if not c:
-                    continue
-                entries = [c]
-                # Top-level replies usually omit nested replies; fetch the
-                # official sub-reply endpoint so replies to our comments are visible.
-                root_rpid = c.get('rpid')
-                if root_rpid and include_replies and (root_rpids is None or root_rpid in root_rpids):
-                    try:
-                        sub_data = await comment.Comment(
-                            oid=aid,
-                            type_=comment.CommentResourceType.VIDEO,
-                            rpid=root_rpid,
-                            credential=self.credential
-                        ).get_sub_comments(page_index=1, page_size=20)
-                        sub_replies = (sub_data.get('replies') or []) if isinstance(sub_data, dict) else []
-                        entries.extend(sub_replies)
-                        fetched_roots.add(root_rpid)
-                    except Exception as exc:
-                        logger.debug(f"获取楼中楼失败 aid={aid}, root={root_rpid}: {exc}")
-                for entry in entries:
-                    comments.append({
-                        'rpid': entry.get('rpid'),
-                        'user': entry.get('member', {}).get('uname', '未知用户'),
-                        'mid': entry.get('member', {}).get('mid'),
-                        'content': entry.get('content', {}).get('message', ''),
-                        'images': self._extract_comment_images(entry.get('content') or {}),
-                        'like': entry.get('like', 0),
-                        'ctime': entry.get('ctime', 0),
-                        'root': entry.get('root') or (root_rpid if entry is not c else 0),
-                        'parent': entry.get('parent', 0)
-                    })
-
-            # A user's own top-level comment may not be present on the first
-            # page (especially when sorted by likes), so fetch known roots by ID.
-            if include_replies and root_rpids:
-                seen = {item['rpid'] for item in comments if item.get('rpid')}
-                for root_rpid in root_rpids - fetched_roots:
-                    try:
-                        sub_data = await comment.Comment(
-                            oid=aid,
-                            type_=comment.CommentResourceType.VIDEO,
-                            rpid=root_rpid,
-                            credential=self.credential
-                        ).get_sub_comments(page_index=1, page_size=20)
-                        for entry in (sub_data.get('replies') or []) if isinstance(sub_data, dict) else []:
-                            if not entry or entry.get('rpid') in seen:
-                                continue
-                            comments.append({
-                                'rpid': entry.get('rpid'),
-                                'user': entry.get('member', {}).get('uname', '未知用户'),
-                                'mid': entry.get('member', {}).get('mid'),
-                                'content': entry.get('content', {}).get('message', ''),
-                                'images': self._extract_comment_images(entry.get('content') or {}),
-                                'like': entry.get('like', 0),
-                                'ctime': entry.get('ctime', 0),
-                                'root': entry.get('root') or root_rpid,
-                                'parent': entry.get('parent', 0)
-                            })
-                            seen.add(entry.get('rpid'))
-                    except Exception as exc:
-                        logger.debug(f"按评论ID获取楼中楼失败 aid={aid}, root={root_rpid}: {exc}")
-
-            if cache_key is not None:
-                comments_cache[cache_key] = (datetime.now(), list(comments))
-            logger.info(f"获取评论成功, aid={aid}, 数量: {len(comments)}")
-            return comments
-
-        except Exception as e:
-            message = str(e)
-
-            if '12002' in message or '评论功能已关闭' in message:
-                closed_cache[aid] = datetime.now()
-                logger.info(f"视频 aid={aid} 评论区已关闭，跳过")
-                return []
-
-            if "412" in message or any(
-                keyword in message for keyword in ("风控", "频繁", "验证码")
-            ):
-                self.set_blocked(30)
-                logger.warning(
-                    f"获取评论触发 B 站 412 风控，暂停评论请求 30 分钟: aid={aid}"
-                )
-            else:
-                logger.error(
-                    f"获取评论失败 aid={aid}: {self._short_error(message)}"
-                )
-            return []
-
-    async def _load_all_subcomments(
-        self, aid: int, root_rpid: int, page_size: int = 20, max_pages: int = 20
-    ) -> List[Dict[str, Any]]:
-        """Load every page of a comment thread, not just the first page."""
-        entries: List[Dict[str, Any]] = []
-        seen = set()
-        page_index = 1
-        while page_index <= max_pages:
-            try:
-                sub_data = await comment.Comment(
-                    oid=aid,
-                    type_=comment.CommentResourceType.VIDEO,
-                    rpid=root_rpid,
-                    credential=self.credential,
-                ).get_sub_comments(page_index=page_index, page_size=page_size)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"获取楼中楼第 {page_index} 页失败 aid={aid}, root={root_rpid}: {exc}")
-                break
-            replies = (sub_data.get('replies') or []) if isinstance(sub_data, dict) else []
-            new_entries = [
-                entry for entry in replies
-                if entry and entry.get('rpid') not in seen
-            ]
-            if not new_entries:
-                break
-            for entry in new_entries:
-                seen.add(entry.get('rpid'))
-                entries.append(entry)
-
-            page_info = sub_data.get('page') or {}
-            try:
-                total = int(page_info.get('count') or page_info.get('acount') or 0)
-            except (TypeError, ValueError):
-                total = 0
-            if total and len(entries) >= total:
-                break
-            if not total and len(replies) < page_size:
-                break
-            page_index += 1
-            await asyncio.sleep(0.4)
-        return entries
-
-    async def get_comment_thread(
-        self, aid: int, root_rpid: int, count: int = 50
-    ) -> List[Dict[str, Any]]:
-        """获取某条评论下的完整对话（我方楼层 + 网友回复），按时间排序。"""
-        try:
-            root_rpid = int(root_rpid)
-        except (TypeError, ValueError):
-            return []
-        comments = await self.get_comments(
-            aid, count=count, include_replies=True, root_rpids={root_rpid}
-        )
-        by_rpid = {}
-        for item in comments:
-            rpid = item.get('rpid')
-            if rpid and rpid not in by_rpid:
-                by_rpid[rpid] = item
-        # get_comments only returns the first sub-comment page; fetch all pages
-        # so the whole thread is visible.
-        for entry in await self._load_all_subcomments(aid, root_rpid):
-            rpid = entry.get('rpid')
-            if rpid and rpid not in by_rpid:
-                by_rpid[rpid] = {
-                    'rpid': rpid,
-                    'user': entry.get('member', {}).get('uname', '未知用户'),
-                    'mid': entry.get('member', {}).get('mid'),
-                    'content': entry.get('content', {}).get('message', ''),
-                    'images': self._extract_comment_images(entry.get('content') or {}),
-                    'like': entry.get('like', 0),
-                    'ctime': entry.get('ctime', 0),
-                    'root': entry.get('root') or root_rpid,
-                    'parent': entry.get('parent', 0),
-                }
-        thread = [
-            item for item in by_rpid.values()
-            if item.get('root') == root_rpid or item.get('rpid') == root_rpid
-        ]
-        thread.sort(key=lambda item: item.get('ctime') or 0)
-        seen = set()
-        result = []
-        for item in thread:
-            rpid = item.get('rpid')
-            if rpid in seen:
-                continue
-            seen.add(rpid)
-            result.append(item)
-        return result
-
-    async def post_comment(
-        self,
-        aid: int,
-        text: str,
-        root_rpid: Optional[int] = None,
-        parent_rpid: Optional[int] = None
-    ) -> bool:
-        """
-        发送评论
-
-        Args:
-            aid: 视频aid
-            text: 评论内容
-            root_rpid: 回复的评论ID（楼中楼回复）
-
-        Returns:
-            是否成功
-        """
-        if self.is_blocked():
-            logger.warning("当前处于风控状态，跳过评论")
-            return False
-
-        if self.is_posting_blocked():
-            logger.info("评论发送限额冷却中，跳过本次发送")
-            return False
-
-        if not self.credential:
-            logger.error("未登录，无法发送评论")
-            return False
-
-        try:
-            self.last_comment_rpid = None
-            response = await comment.send_comment(
-                text=text,
-                oid=aid,
-                type_=comment.CommentResourceType.VIDEO,
-                root=root_rpid,
-                parent=parent_rpid,
-                credential=self.credential
-            )
-            payload = response.get('data', response) if isinstance(response, dict) else {}
-            self.last_comment_rpid = (
-                payload.get('rpid') or payload.get('reply', {}).get('rpid')
-                if isinstance(payload, dict) else None
-            )
-
-            logger.info(f"评论发送成功: {text[:30]}...")
-            return True
-
-        except Exception as e:
-            message = str(e)
-
-            if any(keyword in message for keyword in ('12014', '已达到当前评论发送上限')):
-                self.set_posting_blocked(message[:120])
-                return False
-
-            logger.error(f"发送评论失败: {self._short_error(message)}")
-
-            # 检测风控
-            if any(keyword in message for keyword in ["412", "风控", "频繁", "验证码"]):
-                self.set_blocked(30)
-
-            return False
-
-    async def like_video(self, aid: int) -> bool:
-        """给视频点赞；已经赞过按成功处理。"""
-        if not self.credential:
-            logger.error("未登录，无法点赞")
-            return False
-        if self.is_blocked():
-            logger.warning("当前处于风控状态，跳过点赞")
-            return False
-        try:
-            await video.Video(aid=aid, credential=self.credential).like(True)
-            logger.info(f"点赞视频成功: aid={aid}")
-            return True
-        except Exception as e:  # noqa: BLE001
-            message = str(e)
-            if any(keyword in message for keyword in ('65006', '已经赞', '已点赞')):
-                logger.debug(f"视频已经点过赞: aid={aid}")
-                return True
-            logger.warning(f"点赞视频失败 aid={aid}: {self._short_error(message)}")
-            return False
-
-    async def like_comment(self, aid: int, rpid: int) -> bool:
-        """给网友评论点赞；已经赞过按成功处理。"""
-        if not self.credential or not rpid:
-            return False
-        try:
-            await comment.Comment(
-                oid=aid,
-                type_=comment.CommentResourceType.VIDEO,
-                rpid=rpid,
-                credential=self.credential,
-            ).like(True)
-            logger.info(f"点赞评论成功: rpid={rpid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            message = str(exc)
-            if any(keyword in message for keyword in ('65006', '已经赞', '已点赞')):
-                return True
-            logger.debug(f"点赞评论失败 rpid={rpid}: {self._short_error(message)}")
-            return False
-
-    async def report_watch(self, bvid: str) -> bool:
-        """上报一次观看进度，让账号更像真实观众（低频使用）。"""
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            viewer = video.Video(bvid=bvid, credential=self.credential)
-            info = await viewer.get_info()
-            duration = int(info.get('duration') or 0)
-            cid = info.get('cid')
-            await viewer.report_start_watching(page_index=0)
-            if duration and cid:
-                progress = max(1, int(duration * random.uniform(0.2, 0.7)))
-                await viewer.report_watch_history(progress=progress, cid=cid)
-            logger.info(f"已上报观看进度: {bvid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"上报观看进度失败 {bvid}: {self._short_error(str(exc))}")
-            return False
-
-    async def favorite_video(self, aid: int) -> bool:
-        """把视频收藏到默认收藏夹（已收藏则跳过）。"""
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            viewer = video.Video(aid=aid, credential=self.credential)
-            if await viewer.has_favoured():
-                return True
-            info = await self.get_self_info()
-            uid = info.get('uid')
-            if not uid:
-                return False
-            data = await favorite_list.get_video_favorite_list(
-                uid, credential=self.credential
-            )
-            folders = (data or {}).get('list') or []
-            if not folders:
-                return False
-            folder_id = int(folders[0].get('id'))
-            await viewer.set_favorite([folder_id])
-            logger.info(f"收藏视频成功: aid={aid} folder={folder_id}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"收藏视频失败 aid={aid}: {self._short_error(str(exc))}")
-            return False
-
-    async def follow_user(self, uid: int) -> bool:
-        """关注用户；已关注按成功处理。"""
-        if not self.credential or not uid or self.is_blocked():
-            return False
-        try:
-            info = await self.get_self_info()
-            if info.get('uid') == uid:
-                return False
-            await user.User(uid, credential=self.credential).modify_relation(
-                RelationType.SUBSCRIBE
-            )
-            logger.info(f"关注用户成功: {uid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            message = str(exc)
-            if any(keyword in message for keyword in ('已经关注', '已关注', '22001')):
-                return True
-            logger.debug(f"关注用户失败 {uid}: {self._short_error(message)}")
-            return False
-
-    async def follow_video_author(self, bvid: str) -> bool:
-        info = await self.get_video_info(bvid)
-        if not info:
-            return False
-        return await self.follow_user(info.get('owner_mid') or 0)
-
-    async def like_latest_user_dynamic(self, uid: int) -> bool:
-        """给某个 UP 最近一条动态点赞（低频行为）。"""
-        if not self.credential or not uid or self.is_blocked():
-            return False
-        try:
-            data = await user.User(uid, credential=self.credential).get_dynamics_new()
-            for item in (data or {}).get('items') or []:
-                dynamic_id = item.get('id_str') or item.get('id')
-                if not dynamic_id:
-                    continue
-                await dynamic.Dynamic(
-                    int(dynamic_id), credential=self.credential
-                ).set_like(True)
-                logger.info(f"点赞动态成功: uid={uid} dynamic={dynamic_id}")
-                return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"点赞动态失败 uid={uid}: {self._short_error(str(exc))}")
-        return False
-
-    async def like_video_author_dynamic(self, bvid: str) -> bool:
-        info = await self.get_video_info(bvid)
-        if not info:
-            return False
-        return await self.like_latest_user_dynamic(info.get('owner_mid') or 0)
-
-    async def post_video_dynamic(self, bvid: str, title: str) -> bool:
-        """把视频分享成一条纯文本动态（低频、需显式开启）。"""
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            text = (
-                f"看到这个视频：{title}\n"
-                f"https://www.bilibili.com/video/{bvid}"
-            )
-            payload = dynamic.BuildDynamic.create_by_args(text=text)
-            await dynamic.send_dynamic(payload, self.credential)
-            logger.info(f"发布视频动态成功: {bvid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"发布动态失败 {bvid}: {self._short_error(str(exc))}")
-            return False
-
-    async def send_private_picture(self, talker_id: int, image_path: str) -> bool:
-        if not self.credential or not talker_id or not Path(image_path).is_file():
-            return False
-        try:
-            picture = Picture.from_file(str(Path(image_path)))
-            await bili_session.send_msg(
-                credential=self.credential,
-                receiver_id=int(talker_id),
-                msg_type=EventType.PICTURE,
-                content=picture,
-            )
-            logger.info(f"私信图片发送成功: {talker_id}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"私信图片发送失败: {self._short_error(str(exc))}")
-            return False
-
-    async def send_dynamic_with_image(self, text: str, image_path: str) -> bool:
-        if not self.credential or not Path(image_path).is_file():
-            return False
-        try:
-            payload = dynamic.BuildDynamic.create_by_args(
-                text=text,
-                pics=[Picture.from_file(str(Path(image_path)))],
-            )
-            await dynamic.send_dynamic(payload, self.credential)
-            logger.info(f"带图动态发送成功: {image_path}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"带图动态发送失败: {self._short_error(str(exc))}")
-            return False
-
-    async def send_danmaku(self, bvid: str, text: str, dm_time: float = 1.0) -> bool:
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            await video.Video(bvid=bvid, credential=self.credential).send_danmaku(
-                danmaku=Danmaku(text=text[:100], dm_time=max(0.0, dm_time))
-            )
-            logger.info(f"弹幕发送成功: {bvid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"弹幕发送失败 {bvid}: {self._short_error(str(exc))}")
-            return False
-
-    async def like_video_danmaku(self, bvid: str) -> bool:
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            viewer = video.Video(bvid=bvid, credential=self.credential)
-            danmakus = await viewer.get_danmakus(page_index=0)
-            for danmaku in danmakus or []:
-                dmid = getattr(danmaku, 'id_str', None) or getattr(danmaku, 'id', None)
-                if dmid:
-                    await viewer.like_danmaku(dmid=int(dmid), page_index=0)
-                    logger.info(f"弹幕点赞成功: {bvid}")
-                    return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"弹幕点赞失败 {bvid}: {self._short_error(str(exc))}")
-        return False
-
-    async def send_private_message(self, talker_id: int, text: str) -> bool:
-        """给私信会话对象发送纯文本消息。"""
-        if not self.credential or not talker_id or not text.strip():
-            return False
-        try:
-            await bili_session.send_msg(
-                credential=self.credential,
-                receiver_id=int(talker_id),
-                msg_type=EventType.TEXT,
-                content=text.strip(),
-            )
-            logger.info(f"私信发送成功: {talker_id}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"私信发送失败 {talker_id}: {self._short_error(str(exc))}")
-            return False
-
-    async def coin_video(self, aid: int, num: int = 1) -> bool:
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            viewer = video.Video(aid=aid, credential=self.credential)
-            if await viewer.get_pay_coins() >= 2:
-                return True
-            await viewer.pay_coin(num=max(1, min(int(num), 2)), like=False)
-            logger.info(f"投币成功: aid={aid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"投币失败 aid={aid}: {self._short_error(str(exc))}")
-            return False
-
-    async def share_video(self, aid: int) -> bool:
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            await video.Video(aid=aid, credential=self.credential).share()
-            logger.info(f"分享视频成功: aid={aid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"分享视频失败 aid={aid}: {self._short_error(str(exc))}")
-            return False
-
-    async def add_to_watch_later(self, aid: int) -> bool:
-        if not self.credential or self.is_blocked():
-            return False
-        try:
-            await video.Video(aid=aid, credential=self.credential).add_to_toview()
-            logger.info(f"稍后再看成功: aid={aid}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"稍后再看失败 aid={aid}: {self._short_error(str(exc))}")
-            return False
-
-    async def repost_latest_user_dynamic(self, uid: int, text: str = "转发动态") -> bool:
-        if not self.credential or not uid or self.is_blocked():
-            return False
-        try:
-            data = await user.User(uid, credential=self.credential).get_dynamics_new()
-            for item in (data or {}).get('items') or []:
-                dynamic_id = item.get('id_str') or item.get('id')
-                if not dynamic_id:
-                    continue
-                await dynamic.Dynamic(
-                    int(dynamic_id), credential=self.credential
-                ).repost(text)
-                logger.info(f"转发动态成功: uid={uid} dynamic={dynamic_id}")
-                return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"转发动态失败 uid={uid}: {self._short_error(str(exc))}")
-        return False
-
-    async def repost_video_author_dynamic(self, bvid: str) -> bool:
-        info = await self.get_video_info(bvid)
-        if not info:
-            return False
-        return await self.repost_latest_user_dynamic(info.get('owner_mid') or 0)
 
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""

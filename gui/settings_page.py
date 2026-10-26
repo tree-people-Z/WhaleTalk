@@ -143,7 +143,6 @@ class SettingsPage(QWidget):
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
-    agent_requested = pyqtSignal()
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -186,7 +185,6 @@ class SettingsPage(QWidget):
         self.share_video_check.stateChanged.connect(self.auto_save)
         self.watch_later_check.stateChanged.connect(self.auto_save)
         self.repost_dynamic_check.stateChanged.connect(self.auto_save)
-        self.post_image_dynamic_check.stateChanged.connect(self.auto_save)
         self.send_danmaku_check.stateChanged.connect(self.auto_save)
         self.like_danmaku_check.stateChanged.connect(self.auto_save)
         for spin in (
@@ -248,6 +246,12 @@ class SettingsPage(QWidget):
             "收起概率" if expanded else "行为概率"
         )
 
+    def _toggle_schedule_panel(self, visible: bool):
+        self.schedule_group.setVisible(visible)
+        self.schedule_toggle_btn.setText(
+            "隐藏自动运行与闲时设置" if visible else "显示自动运行与闲时设置"
+        )
+
     def auto_save(self):
         """自动保存设置（静默）"""
         try:
@@ -298,6 +302,12 @@ class SettingsPage(QWidget):
         layout.addWidget(advanced_group)
 
         schedule_group = self._create_schedule_section()
+        schedule_group.setVisible(False)
+        self.schedule_group = schedule_group
+        self.schedule_toggle_btn = QPushButton("显示自动运行与闲时设置")
+        self.schedule_toggle_btn.setCheckable(True)
+        self.schedule_toggle_btn.toggled.connect(self._toggle_schedule_panel)
+        layout.addWidget(self.schedule_toggle_btn)
         layout.addWidget(schedule_group)
 
         about_group = self._create_about_section()
@@ -556,10 +566,6 @@ class SettingsPage(QWidget):
         layout.addWidget(self.watch_later_check)
         self.repost_dynamic_check = QCheckBox("偶尔转发UP主的动态（默认关闭）")
         layout.addWidget(self.repost_dynamic_check)
-        self.post_image_dynamic_check = QCheckBox(
-            "偶尔发带图动态（使用私信收集的图片，默认关闭）"
-        )
-        layout.addWidget(self.post_image_dynamic_check)
         layout.addWidget(self._section_header("弹幕"))
         self.send_danmaku_check = QCheckBox("偶尔发一条弹幕（默认关闭）")
         layout.addWidget(self.send_danmaku_check)
@@ -668,13 +674,6 @@ class SettingsPage(QWidget):
         layout.addWidget(self.transcription_state_label)
 
         # 记忆与人格进化全自动，不提供开关
-
-        layout.addWidget(self._section_header("自主观察"))
-        self.agent_btn = QPushButton("自主观察一轮")
-        self.agent_btn.clicked.connect(self.agent_requested.emit)
-        layout.addWidget(self.agent_btn)
-        self.agent_status = QLabel()
-        self.agent_status.setVisible(False)
 
         group.setLayout(layout)
         return group
@@ -825,9 +824,6 @@ class SettingsPage(QWidget):
         )
         self.repost_dynamic_check.setChecked(
             self.config.get('interaction.repost_up_dynamic', False)
-        )
-        self.post_image_dynamic_check.setChecked(
-            self.config.get('interaction.post_image_dynamic', False)
         )
         self.send_danmaku_check.setChecked(
             self.config.get('interaction.send_danmaku', False)
@@ -1031,10 +1027,6 @@ class SettingsPage(QWidget):
                 'interaction.repost_up_dynamic', self.repost_dynamic_check.isChecked()
             )
             self.config.set(
-                'interaction.post_image_dynamic',
-                self.post_image_dynamic_check.isChecked(),
-            )
-            self.config.set(
                 'interaction.send_danmaku', self.send_danmaku_check.isChecked()
             )
             self.config.set(
@@ -1097,11 +1089,6 @@ class SettingsPage(QWidget):
         ):
             widget.setEnabled(is_cloud)
         self.transcription_setup_btn.setEnabled(is_local)
-
-    def set_agent_running(self, running: bool, message: str = ""):
-        self.agent_btn.setEnabled(not running)
-        if message:
-            self.agent_status.setText(message)
 
     def open_local_model_dir(self):
         """Create and open the folder for manually downloaded model files."""

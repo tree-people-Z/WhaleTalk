@@ -28,7 +28,6 @@ from core.ai_client import AIClient
 from core.video_analyzer import VideoAnalyzer
 from core.scheduler import TaskScheduler
 from gui.memory_worker import MemoryWorker
-from gui.agent_worker import AgentWorker
 from utils.database import Database
 from utils.config_manager import ConfigManager
 from utils.updater import launch_update_installer
@@ -115,13 +114,11 @@ class MainWindow(QMainWindow):
         self._update_download = None
         self._update_progress = None
         self.settings_page.check_update_requested.connect(self.check_updates_manually)
-        self.settings_page.agent_requested.connect(self.run_agent_observation)
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
         self._update_timer.setInterval(5000)
         self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_timer.start()
-        self._agent_worker = None
         self._memory_worker = None
         QTimer.singleShot(20000, self._maybe_consolidate_memory)
         self._memory_check_timer = QTimer(self)
@@ -836,32 +833,6 @@ class MainWindow(QMainWindow):
             self.log("🧠 长期记忆已更新")
         elif message:
             logger.debug(f"长期记忆整理: {message}")
-        """只读自主观察：她自己选工具，不发任何内容。"""
-        if self._agent_worker is not None and self._agent_worker.isRunning():
-            return
-        if self.bili_api is None or self.ai_client is None:
-            QMessageBox.warning(
-                self, "无法观察", "请先登录B站并配置 AI API Key。"
-            )
-            return
-        self.settings_page.set_agent_running(True, "她正在自己决定看什么…")
-        self.log("🐋 鲸鱼娘开始自主观察（只读）")
-        worker = AgentWorker(
-            self.bili_api, self.db, self.ai_client, self.config, self
-        )
-        self._agent_worker = worker
-        worker.done.connect(self._on_agent_done)
-        worker.finished.connect(worker.deleteLater)
-        worker.start()
-
-    def _on_agent_done(self, success: bool, message: str):
-        self.settings_page.set_agent_running(False)
-        if success:
-            self.settings_page.agent_status.setText(f"观察完成：{message}")
-            self.log(f"🐋 自主观察完成: {message}")
-        else:
-            self.settings_page.agent_status.setText(f"观察失败：{message}")
-            self.log(f"⚠️ 自主观察失败: {message}")
 
     def _update_failed(self, message, dialog):
         dialog.close()

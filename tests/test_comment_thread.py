@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -53,7 +53,7 @@ class CommentThreadTests(unittest.TestCase):
         fake_comment.get_sub_comments = AsyncMock(side_effect=fake_get_sub)
 
         async def run():
-            with patch('core.bilibili_api.comment.Comment',
+            with patch('core.bilibili_comment.comment.Comment',
                        return_value=fake_comment), \
                     patch('core.bilibili_api.asyncio.sleep', AsyncMock()):
                 return await api._load_all_subcomments(1, 100)

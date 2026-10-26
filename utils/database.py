@@ -308,25 +308,6 @@ class Database:
         self.session.commit()
         return asset
 
-    def get_random_media_asset(self) -> Optional[Dict[str, Any]]:
-        asset = self.session.query(MediaAsset)\
-            .order_by(MediaAsset.used_count.asc(), MediaAsset.created_at.desc())\
-            .first()
-        if asset is None:
-            return None
-        return {
-            'id': asset.id,
-            'path': asset.path,
-            'description': asset.description or '',
-            'tags': asset.tags or '',
-        }
-
-    def mark_media_asset_used(self, asset_id: int) -> None:
-        asset = self.session.query(MediaAsset).filter_by(id=int(asset_id)).first()
-        if asset:
-            asset.used_count = int(asset.used_count or 0) + 1
-            self.session.commit()
-
     def get_today_memory_event_count(self, event_type: str) -> int:
         start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         return self.session.query(MemoryEvent).filter(

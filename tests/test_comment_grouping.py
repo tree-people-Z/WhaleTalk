@@ -1,4 +1,4 @@
-import datetime
+﻿import datetime
 import unittest
 
 from gui.comments_tab import CommentsTab

@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -30,7 +30,7 @@ class PrivateMessageTests(unittest.TestCase):
                      'last_msg': {'content': '在吗', 'timestamp': 200}},
                 ]
             }
-            with patch('core.bilibili_api.bili_session.get_sessions',
+            with patch('core.bilibili_dm.bili_session.get_sessions',
                        new=AsyncMock(return_value=payload)):
                 return await api.get_private_sessions()
 
@@ -53,7 +53,7 @@ class PrivateMessageTests(unittest.TestCase):
                      'msg_type': 5},
                 ]
             }
-            with patch('core.bilibili_api.bili_session.fetch_session_msgs',
+            with patch('core.bilibili_dm.bili_session.fetch_session_msgs',
                        new=AsyncMock(return_value=payload)):
                 return await api.get_private_messages(9)
 

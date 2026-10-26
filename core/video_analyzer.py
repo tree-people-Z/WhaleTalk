@@ -708,22 +708,6 @@ class VideoAnalyzer:
                     except Exception as exc:  # noqa: BLE001
                         logger.debug(f"转发动态失败: {exc}")
                 if (
-                    self.config.get('interaction.post_image_dynamic', False)
-                    and self._roll_probability('prob_image_dynamic', 2)
-                ):
-                    try:
-                        asset = self.db.get_random_media_asset()
-                        if asset:
-                            sent = await self.bili.send_dynamic_with_image(
-                                f"看到这个视频：{title}\n"
-                                f"https://www.bilibili.com/video/{bvid}",
-                                asset['path'],
-                            )
-                            if sent:
-                                self.db.mark_media_asset_used(asset['id'])
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug(f"带图动态失败: {exc}")
-                if (
                     self.config.get('interaction.send_danmaku', False)
                     and self._roll_probability('prob_send_danmaku', 2)
                 ):

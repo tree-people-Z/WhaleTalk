@@ -130,15 +130,6 @@ B 站返回 `12014 已达到当前评论发送上限` 时，程序会暂停发�
 - 回复和私信读取 `memory.md`，不读取整篇日记。
 - 不再有独立的 `persona_style.md`、自动复盘、人设候选、风格快照或行为评估。
 
-## 只读工具 Agent（2.0）
-
-- `core/tool_agent.py` 定义 `ReadOnlyTools` 和 `ToolAgent`。
-- 工具清单：搜索视频、视频详情、读评论、自己投稿、最近评论、长期记忆、统计、日记。
-- AI 每步只输出 JSON：`{"action":"tool",...}` 或 `{"action":"finish",...}`；最多 6 步。
-- 只读，不提供评论/点赞/私信/发动态等写工具。
-- 运行记录写入 `data/agent_traces/`，GUI 设置页按钮“自主观察一轮”触发，后台线程执行。
-- 新增模块需要加入 `WhaleTalk.spec` 的 `hiddenimports`（`gui.agent_worker`、`core.tool_agent`、`utils.media_library`、`utils.persona_evolution`、`utils.probability`、`utils.reply_scope`）。
-
 ## 真人行为概率
 
 配置键在 `interaction` 下：

@@ -30,7 +30,7 @@ class ConversationAgent:
         config,
         send_reply: Callable[..., Awaitable[bool]],
         send_dm: Optional[Callable[..., Awaitable[bool]]] = None,
-        send_dm_image: Optional[Callable[..., Awaitable[bool]]] = None,
+        send_video_comment: Optional[Callable[..., Awaitable[bool]]] = None,
     ):
         self.bili = bili_api
         self.db = db
@@ -38,25 +38,38 @@ class ConversationAgent:
         self.config = config
         self.send_reply = send_reply
         self.send_dm = send_dm
-        self.send_dm_image = send_dm_image
+        self.send_video_comment = send_video_comment
 
     def _read_tools(self, scope: str) -> list:
+        memory_tool = {
+            'name': 'read_memory',
+            'description': '读取长期记忆（事件、经验、风格）。',
+            'parameters': {},
+        }
+        requested_tools = [
+            {
+                'name': 'find_requested_video',
+                'description': '对方让你看视频时，解析链接或对方投稿。',
+                'parameters': {},
+            },
+            {
+                'name': 'comment_on_video',
+                'description': '解析到视频后，在该视频下发一条顶层评论。',
+                'parameters': {
+                    'bvid': 'string',
+                    'text': 'string',
+                    'mention_owner': 'bool(可选)',
+                },
+            },
+        ]
         if scope == 'dm':
             return [
-                {
-                    'name': 'read_memory',
-                    'description': '读取长期记忆（事件、经验、风格）。',
-                    'parameters': {},
-                },
+                memory_tool,
+                *requested_tools,
                 {
                     'name': 'reply_dm',
                     'description': '回复当前私信。不想回就 finish。',
                     'parameters': {'text': 'string'},
-                },
-                {
-                    'name': 'send_dm_image',
-                    'description': '从图片库挑一张图发给对方，可配一句话。',
-                    'parameters': {'caption': 'string(可选)'},
                 },
             ]
         return [
@@ -70,15 +83,15 @@ class ConversationAgent:
                 'description': '读取视频标题、简介、UP主。',
                 'parameters': {'bvid': 'string'},
             },
-            {
-                'name': 'read_memory',
-                'description': '读取长期记忆（事件、经验、风格）。',
-                'parameters': {},
-            },
+            memory_tool,
+            *requested_tools,
             {
                 'name': 'reply_comment',
                 'description': '回复目标评论。只在判断值得接话时调用。',
-                'parameters': {'text': 'string'},
+                'parameters': {
+                    'text': 'string',
+                    'mention_owner': 'bool(可选)',
+                },
             },
             {
                 'name': 'like_comment',
@@ -99,7 +112,6 @@ class ConversationAgent:
         elif scope == 'dm':
             scope_rule = (
                 '这是B站私信。可以回复，也可以选择不回；不要群发，不要连续追问。'
-                '有合适的图片时可以发一张，但不要频繁发图。'
             )
         elif scope == 'own_thread':
             scope_rule = (
@@ -111,16 +123,35 @@ class ConversationAgent:
                 '这是你之前参与过的评论楼。只有别人回复你、话题继续时才接话；'
                 '不要主动加入新的楼，也不要打断别人之间的对话。'
             )
+        owner_name = event.get('owner_name') or ''
+        owner_rule = (
+            f'如果对方希望艾特主人，可以把 mention_owner 设为 true，系统会加上 @{owner_name}；'
+            '也可以不艾特，按语境判断。'
+            if owner_name else '主人昵称未知，不要凭空艾特主人。'
+        )
         return (
             f'# 核心人格\n{persona or "你是鲸鱼娘。"}\n\n'
             f'# 长期记忆\n{memory or "（暂无）"}\n\n'
-            f'# 当前规则\n{scope_rule}\n\n'
+            f'# 当前规则\n{scope_rule}\n{owner_rule}\n'
+            '网友提出看视频、艾特主人这类合理请求时，尽量满足；'
+            '先理解对方想要什么，再自己决定用什么方式回应，不要机械照做。\n\n'
             f'# 可用工具\n{json.dumps(self._read_tools(scope), ensure_ascii=False)}\n\n'
             '每步只输出一个 JSON：\n'
             '{"action":"tool","tool":"工具名","arguments":{...}}\n'
             '或 {"action":"finish","reason":"不回/已回复"}\n'
             '最多 5 步。不要编造工具结果。'
         )
+
+    @staticmethod
+    def _maybe_mention_owner(
+        event: Dict[str, Any], text: str, args: Dict[str, Any]
+    ) -> str:
+        if not args.get('mention_owner'):
+            return text
+        owner = event.get('owner_name') or ''
+        if not owner or f'@{owner}' in text:
+            return text
+        return f'@{owner} {text}'
 
     async def _execute(self, name: str, args: Dict[str, Any], event: Dict[str, Any]) -> Any:
         if name == 'get_comment_thread':
@@ -154,12 +185,25 @@ class ConversationAgent:
                 return {'ok': True}
             except Exception as exc:  # noqa: BLE001
                 return {'error': str(exc)}
-        if name == 'send_dm_image':
-            if self.send_dm_image is None:
-                return {'error': '当前不能发图'}
-            caption = str(args.get('caption') or '').strip()
-            ok = await self.send_dm_image(event, caption)
-            return {'ok': bool(ok)}
+        if name == 'find_requested_video':
+            try:
+                video = await self.bili.resolve_requested_video(
+                    event.get('content') or '',
+                    int(event.get('mid') or 0),
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {'error': str(exc)}
+            return video or {'error': '没有解析到视频'}
+        if name == 'comment_on_video':
+            if self.send_video_comment is None:
+                return {'error': '当前不能去视频下评论'}
+            bvid = str(args.get('bvid') or '').strip()
+            text = str(args.get('text') or '').strip()
+            if not bvid or not text:
+                return {'error': '缺少 bvid 或评论内容'}
+            text = self._maybe_mention_owner(event, text, args)
+            ok = await self.send_video_comment(event, bvid, text)
+            return {'ok': bool(ok), 'bvid': bvid}
         if name == 'reply_dm':
             text = str(args.get('text') or '').strip()
             if not text or self.send_dm is None:
@@ -170,6 +214,7 @@ class ConversationAgent:
             text = str(args.get('text') or '').strip()
             if not text:
                 return {'error': '回复内容为空'}
+            text = self._maybe_mention_owner(event, text, args)
             ok = await self.send_reply(event, text)
             return {'ok': bool(ok), 'text': text}
         return {'error': f'未知工具: {name}'}

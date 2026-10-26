@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -22,7 +22,7 @@ class BilibiliCommentTests(unittest.TestCase):
                 'like': 0,
                 'ctime': 1,
             }
-            with patch('core.bilibili_api.comment.get_comments', new=AsyncMock(return_value={
+            with patch('core.bilibili_comment.comment.get_comments', new=AsyncMock(return_value={
                 'replies': [{'rpid': 999, 'member': {}, 'content': {'message': 'top'}}]
             })) as get_comments, patch.object(
                 comment.Comment, 'get_sub_comments', new=AsyncMock(return_value={'replies': [child]})
@@ -42,7 +42,7 @@ class BilibiliCommentTests(unittest.TestCase):
             api = BilibiliAPI.__new__(BilibiliAPI)
             api.credential = object()
             api.blocked_until = None
-            with patch('core.bilibili_api.comment.send_comment', new=AsyncMock(return_value={
+            with patch('core.bilibili_comment.comment.send_comment', new=AsyncMock(return_value={
                 'rpid': 789
             })) as send:
                 sent = await api.post_comment(42, 'simulated reply', root_rpid=123, parent_rpid=456)

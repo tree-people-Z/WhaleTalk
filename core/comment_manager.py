@@ -4,9 +4,6 @@
 """
 
 import asyncio
-import json
-import re
-from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime
 from loguru import logger
@@ -16,6 +13,7 @@ from core.ai_client import AIClient
 from utils.database import Database
 from utils.config_manager import ConfigManager
 from utils.probability import roll_probability
+from core.comment_events import CommentEventCollector
 
 
 class CommentManager:
@@ -35,115 +33,9 @@ class CommentManager:
 
         # 记录已处理的评论ID
         self.processed_rpids = set()
-
-    async def check_mentions(self) -> List[Dict[str, Any]]:
-        """
-        检查是否有人@我或回复我的评论
-
-        Returns:
-            未处理的@提醒和回复列表
-        """
-        if not self.config.get('interaction.comment_monitor', False):
-            return []
-
-        try:
-            mentions = []
-            already_replied = self.db.get_replied_comment_ids()
-            self.processed_rpids.update(already_replied)
-            self.processed_rpids.update(self._load_skipped())
-            # 自己发过的评论/回复不能当作“别人回复我”，否则会自问自答刷屏。
-            own_rpids = self.db.get_own_comment_rpids()
-            self.processed_rpids.update(own_rpids)
-            self_uid = None
-            self_name = ''
-            try:
-                self_info = await self.bili.get_self_info()
-                self_uid = self_info.get('uid')
-                self_name = self_info.get('name') or ''
-            except Exception as exc:
-                logger.debug(f"获取当前账号信息失败: {exc}")
-
-            # 1. 检查我发送的评论和回复是否有回复
-            my_comments = self.db.get_recent_comments(limit=20, include_replies=True)
-            found_rpids = set()
-
-            for my_comment in my_comments:
-                if not my_comment.get('aid'):
-                    continue
-
-                aid = my_comment['aid']
-                my_rpid = my_comment.get('rpid')
-                thread_root = my_comment.get('thread_root') or my_rpid
-
-                if not my_rpid:
-                    continue
-
-                # 获取该视频的评论
-                try:
-                    comments = await self.bili.get_comments(
-                        aid, count=50, include_replies=True,
-                        root_rpids={thread_root}
-                    )
-
-                    for comment in comments:
-                        # 检查是否是回复我的评论/回复
-                        root = comment.get('root', 0)
-                        parent = comment.get('parent', 0)
-                        rpid = comment.get('rpid')
-
-                        # 跳过自己发出的评论（含自动回复产生的楼层），避免自问自答。
-                        if rpid in self.processed_rpids or rpid in found_rpids:
-                            continue
-                        if self_uid is not None and comment.get('mid') == self_uid:
-                            logger.debug(f"跳过自己发出的评论: {rpid}")
-                            continue
-                        if self_name and comment.get('user') == self_name:
-                            logger.debug(f"跳过自己账号的评论: {rpid}")
-                            continue
-
-                        # 只有直接回复我，或在我的楼里直接回复我，才算对我说；
-                        # 别人在我的楼里回复另一个网友时，不要插话。
-                        direct_to_me = parent == my_rpid
-                        top_level_to_me = (
-                            root == my_rpid and parent in (0, None, root)
-                        )
-                        if direct_to_me or top_level_to_me:
-                            mentions.append({
-                                'rpid': rpid,
-                                'root_rpid': root or my_rpid,
-                                'user': comment.get('user'),
-                                'mid': comment.get('mid'),
-                                'content': comment.get('content'),
-                                'aid': aid,
-                                'bvid': my_comment.get('bvid'),
-                                'type': 'reply',
-                                'video_title': my_comment.get('video_title', '')
-                            })
-                            found_rpids.add(rpid)
-                            logger.info(f"发现回复: {comment.get('user')} -> {comment.get('content')[:30]}")
-
-                except Exception as e:
-                    logger.debug(f"检查评论回复失败 aid={aid}: {e}")
-                    continue
-
-                await asyncio.sleep(0.5)  # 避免请求过快
-
-            # 2. 自己投稿视频下的评论（仅在“所有人”范围）
-            from utils.reply_scope import REPLY_SCOPE_ALL, resolve_reply_scope
-            if resolve_reply_scope(self.config) == REPLY_SCOPE_ALL:
-                own_mentions = await self._check_own_video_comments(
-                    self_uid, self_name, found_rpids
-                )
-                mentions = own_mentions + mentions
-
-            logger.info(f"检查完成，发现 {len(mentions)} 条新回复")
-            return mentions
-
-        except Exception as e:
-            logger.error(f"检查@提醒失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return []
+        self.events = CommentEventCollector(
+            self.bili, self.db, self.config, self.processed_rpids
+        )
 
     def _roll_probability(self, key: str, default: float) -> bool:
         return roll_probability(self.config, key, default)
@@ -159,91 +51,18 @@ class CommentManager:
             used = 0
         return max(0, max_total - used)
 
+    async def check_mentions(self) -> List[Dict[str, Any]]:
+        return await self.events.check_mentions()
+
+    async def check_at_messages(self) -> List[Dict[str, Any]]:
+        return await self.events.check_at_messages()
+
     @staticmethod
-    def _addressed_to_other(content: str, self_name: str) -> bool:
-        """评论是否明确 @ 了别人；是的话不要当成本人在被搭话。"""
-        if not content:
-            return False
-        names = re.findall(r'@([^\s@:：,，。！!？?]+)', content)
-        if not names:
-            return False
-        if self_name and any(name == self_name for name in names):
-            return False
-        return True
+    def _is_owner_event(event: Dict[str, Any], owner_name: str, owner_uid: str) -> bool:
+        return CommentEventCollector._is_owner_event(event, owner_name, owner_uid)
 
-    async def _check_own_video_comments(
-        self, self_uid, self_name, found_rpids: set
-    ) -> List[Dict[str, Any]]:
-        """检查自己投稿视频下的新评论，按时间优先返回。"""
-        try:
-            video_limit = int(
-                self.config.get('interaction.own_video_count', 10)
-            )
-        except (TypeError, ValueError):
-            video_limit = 10
-        try:
-            max_replies = int(
-                self.config.get('interaction.max_own_video_replies_per_check', 10)
-            )
-        except (TypeError, ValueError):
-            max_replies = 10
-        if max_replies <= 0:
-            return []
-        try:
-            videos = await self.bili.get_own_videos(limit=video_limit)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"获取自己投稿视频失败: {exc}")
-            return []
-
-        results = []
-        for video in videos or []:
-            if len(results) >= max_replies:
-                break
-            aid = video.get('aid')
-            if not aid:
-                continue
-            try:
-                comments = await self.bili.get_comments(
-                    aid, sort=0, count=20
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"获取自己视频评论失败 aid={aid}: {exc}")
-                continue
-            for comment in comments or []:
-                rpid = comment.get('rpid')
-                if not rpid or rpid in self.processed_rpids or rpid in found_rpids:
-                    continue
-                # 只处理顶层评论，楼中楼由“回复我的评论”路径处理。
-                if comment.get('root') not in (0, None):
-                    continue
-                if self_uid is not None and comment.get('mid') == self_uid:
-                    continue
-                if self_name and comment.get('user') == self_name:
-                    continue
-                if self._addressed_to_other(comment.get('content'), self_name):
-                    logger.info(
-                        f"跳过 @ 其他人的评论: {comment.get('user')} "
-                        f"-> {(comment.get('content') or '')[:30]}"
-                    )
-                    continue
-                results.append({
-                    'rpid': rpid,
-                    'root_rpid': rpid,
-                    'user': comment.get('user'),
-                    'mid': comment.get('mid'),
-                    'content': comment.get('content'),
-                    'aid': aid,
-                    'bvid': video.get('bvid'),
-                    'type': 'own_video',
-                    'video_title': video.get('title', ''),
-                })
-                found_rpids.add(rpid)
-                if len(results) >= max_replies:
-                    break
-            await asyncio.sleep(0.5)
-        if results:
-            logger.info(f"自己视频下发现 {len(results)} 条待回复评论")
-        return results
+    def _mark_skipped(self, rpid: int) -> None:
+        self.events._mark_skipped(rpid)
 
     async def reply_to_mention(self, mention: Dict[str, Any]) -> bool:
         """Let the model decide whether/how to reply in own or other threads."""
@@ -291,24 +110,82 @@ class CommentManager:
                 'last_bot_reply_at': last.isoformat() if last else '',
                 'is_reply_to_bot': True,
                 'is_direct_at': bool(mention.get('is_direct_at')),
+                'owner_name': self.config.get('bilibili.owner_name', ''),
                 'user': mention.get('user') or '',
                 'mid': mention.get('mid'),
                 'content': mention.get('content') or '',
+                'parent_content': mention.get('parent_content') or '',
+                'root_content': mention.get('root_content') or '',
                 'aid': mention.get('aid'),
                 'bvid': mention.get('bvid') or '',
                 'video_title': mention.get('video_title') or '',
             }
             agent = ConversationAgent(
-                self.bili, self.db, self.ai, self.config, self._send_agent_reply
+                self.bili,
+                self.db,
+                self.ai,
+                self.config,
+                self._send_agent_reply,
+                None,
+                self._send_agent_video_comment,
             )
             success = await agent.handle(event)
             self.processed_rpids.add(rpid)
-            self._mark_skipped(rpid)
+            self.events._mark_skipped(rpid)
             if success:
                 self.db.record_thread_reply(root)
             return success
         except Exception as exc:  # noqa: BLE001
             logger.error(f"对话 Agent 处理失败: {exc}")
+            return False
+
+    async def _send_agent_video_comment(
+        self, event: Dict[str, Any], bvid: str, text: str
+    ) -> bool:
+        """Comment under a video the viewer asked the bot to look at."""
+        try:
+            if not bvid or not text.strip():
+                return False
+            if self._daily_send_quota_remaining() <= 0:
+                return False
+            if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
+                return False
+            if self.db.has_commented_video(bvid):
+                return False
+            info = await self.bili.get_video_info(bvid)
+            if not info or not info.get('aid'):
+                return False
+            aid = int(info['aid'])
+            success = await self.bili.post_comment(aid=aid, text=text)
+            if not success:
+                return False
+            rpid = getattr(self.bili, 'last_comment_rpid', None)
+            self.db.add_comment_record(
+                bvid=bvid,
+                aid=aid,
+                content=text,
+                comment_type='post',
+                success=True,
+                rpid=rpid,
+                thread_root=rpid,
+            )
+            try:
+                self.db.add_memory_event(
+                    'comment',
+                    user_name=event.get('user') or '',
+                    user_mid=event.get('mid'),
+                    aid=aid,
+                    bvid=bvid,
+                    video_title=info.get('title') or '',
+                    content=event.get('content') or '',
+                    my_content=text,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"记录视频评论记忆失败: {exc}")
+            logger.info(f"✅ Agent 在请求视频下评论: {info.get('title')}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Agent 视频评论失败: {exc}")
             return False
 
     async def _send_agent_reply(self, event: Dict[str, Any], text: str) -> bool:
@@ -440,6 +317,7 @@ class CommentManager:
                 'mid': talker_id,
                 'content': last.get('content') or '',
                 'image_description': image_description,
+                'owner_name': self.config.get('bilibili.owner_name', ''),
             }
             from core.conversation_agent import ConversationAgent
             agent = ConversationAgent(
@@ -449,7 +327,7 @@ class CommentManager:
                 self.config,
                 self._send_agent_reply,
                 self._send_agent_dm,
-                self._send_agent_dm_image,
+                self._send_agent_video_comment,
             )
             replied_now = await agent.handle(event)
             self.db.set_dm_state(talker_id, timestamp)
@@ -477,103 +355,6 @@ class CommentManager:
             logger.debug(f"记录私信记忆失败: {exc}")
         return True
 
-    async def _send_agent_dm_image(self, event: Dict[str, Any], caption: str = '') -> bool:
-        talker_id = int(event.get('talker_id') or 0)
-        if not talker_id:
-            return False
-        asset = self.db.get_random_media_asset()
-        if not asset:
-            return False
-        path = Path(asset.get('path') or '')
-        if not path.is_file():
-            return False
-        if not await self.bili.send_private_picture(talker_id, str(path)):
-            return False
-        if caption:
-            await self.bili.send_private_message(talker_id, caption)
-        self.db.mark_media_asset_used(asset['id'])
-        try:
-            self.db.add_memory_event(
-                'dm_image',
-                user_name=event.get('user') or '',
-                user_mid=talker_id,
-                content=event.get('content') or '',
-                my_content=caption or '[图片]',
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"记录发图记忆失败: {exc}")
-        return True
-
-    def _load_skipped(self) -> set:
-        try:
-            path = Path('data') / 'skipped_mentions.json'
-            if path.is_file():
-                return set(int(item) for item in json.loads(path.read_text(encoding='utf-8')))
-        except (OSError, ValueError, TypeError):
-            pass
-        return set()
-
-    def _mark_skipped(self, rpid: int) -> None:
-        skipped = self._load_skipped()
-        skipped.add(int(rpid))
-        try:
-            path = Path('data') / 'skipped_mentions.json'
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(sorted(skipped)[-1000:]), encoding='utf-8')
-        except OSError:
-            pass
-
-    def _load_at_seen(self) -> set:
-        try:
-            path = Path('data') / 'at_seen.json'
-            if path.is_file():
-                return set(int(item) for item in json.loads(path.read_text(encoding='utf-8')))
-        except (OSError, ValueError, TypeError):
-            pass
-        return set()
-
-    def _mark_at_seen(self, rpid: int) -> None:
-        seen = self._load_at_seen()
-        seen.add(int(rpid))
-        try:
-            path = Path('data') / 'at_seen.json'
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(sorted(seen)[-500:]), encoding='utf-8'
-            )
-        except OSError:
-            pass
-
-    async def check_at_messages(self) -> List[Dict[str, Any]]:
-        """Read direct @ notifications, including comments in new threads."""
-        if not self.config.get('interaction.comment_monitor', False):
-            return []
-        try:
-            seen = self._load_at_seen()
-            items = await self.bili.get_at_messages(since_time=0)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"读取@消息失败: {exc}")
-            return []
-        results = []
-        for item in items or []:
-            rpid = item.get('rpid')
-            if not rpid or rpid in seen or rpid in self.processed_rpids:
-                continue
-            item['is_direct_at'] = True
-            results.append(item)
-            if len(results) >= 5:
-                break
-        return results
-
-    @staticmethod
-    def _is_owner_event(event: Dict[str, Any], owner_name: str, owner_uid: str) -> bool:
-        mid = str(event.get('mid') or '')
-        user = event.get('user') or ''
-        return bool(
-            (owner_uid and mid == str(owner_uid))
-            or (owner_name and user == owner_name)
-        )
-
     async def check_and_reply(self) -> Dict[str, Any]:
         """检查新回复；自动回复开启时逐条交给对话模型处理。"""
         mentions = await self.check_mentions()
@@ -584,11 +365,11 @@ class CommentManager:
             owner_uid = self.config.get('bilibili.owner_uid', '')
             mentions = [
                 item for item in mentions
-                if self._is_owner_event(item, owner_name, owner_uid)
+                if CommentEventCollector._is_owner_event(item, owner_name, owner_uid)
             ]
             at_messages = [
                 item for item in at_messages
-                if self._is_owner_event(item, owner_name, owner_uid)
+                if CommentEventCollector._is_owner_event(item, owner_name, owner_uid)
             ]
         replied = 0
         if self.config.get('interaction.auto_reply', True):

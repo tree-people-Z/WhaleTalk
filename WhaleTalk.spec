@@ -20,13 +20,15 @@ datas = [
 # The package also ships JSON tables under bilibili_api/data.
 hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
 hiddenimports += [
-    "gui.agent_worker",
     "gui.memory_worker",
-    "core.tool_agent",
     "core.conversation_agent",
     "core.long_term_memory",
     "core.daily_diary",
     "core.agent_protocol",
+    "core.comment_events",
+    "core.bilibili_dm",
+    "core.bilibili_comment",
+    "core.bilibili_interact",
     "utils.media_library",
     "utils.probability",
     "utils.reply_scope",
