@@ -243,6 +243,20 @@ class SettingsPage(QWidget):
         widget.wheelEvent = lambda event: None
         widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+    @staticmethod
+    def _section_header(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet(
+            "font-weight: 600; font-size: 13px; color: #1f6feb; margin-top: 10px;"
+        )
+        return label
+
+    def _toggle_probability_panel(self, expanded: bool):
+        self.prob_panel.setVisible(expanded)
+        self.prob_toggle_btn.setText(
+            "收起行为概率设置" if expanded else "展开行为概率设置"
+        )
+
     def auto_save(self):
         """自动保存设置（静默）"""
         try:
@@ -505,6 +519,7 @@ class SettingsPage(QWidget):
         layout.setSpacing(10)
 
         # 评论监听
+        layout.addWidget(self._section_header("评论与回复"))
         self.comment_monitor_check = QCheckBox("启用评论监听（检测回复和@）")
         layout.addWidget(self.comment_monitor_check)
 
@@ -518,6 +533,7 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.comment_requested_video_check)
 
+        layout.addWidget(self._section_header("视频互动"))
         self.like_replied_comment_check = QCheckBox(
             "回复后顺手给网友评论点赞（约一半概率）"
         )
@@ -532,6 +548,7 @@ class SettingsPage(QWidget):
         layout.addWidget(self.favorite_video_check)
         self.follow_up_check = QCheckBox("关注喜欢的UP主（低频，默认关闭）")
         layout.addWidget(self.follow_up_check)
+        layout.addWidget(self._section_header("动态"))
         self.like_up_dynamic_check = QCheckBox("偶尔给UP主的动态点赞（默认关闭）")
         layout.addWidget(self.like_up_dynamic_check)
         self.post_video_dynamic_check = QCheckBox(
@@ -539,6 +556,7 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.post_video_dynamic_check)
 
+        layout.addWidget(self._section_header("私信"))
         self.reply_private_messages_check = QCheckBox("自动回复私信（低频，默认开启）")
         layout.addWidget(self.reply_private_messages_check)
         self.coin_video_check = QCheckBox("评论成功后偶尔投币（约5%）")
@@ -553,12 +571,14 @@ class SettingsPage(QWidget):
             "偶尔发带图动态（使用私信收集的图片，默认关闭）"
         )
         layout.addWidget(self.post_image_dynamic_check)
+        layout.addWidget(self._section_header("弹幕"))
         self.send_danmaku_check = QCheckBox("偶尔发一条弹幕（默认关闭）")
         layout.addWidget(self.send_danmaku_check)
         self.like_danmaku_check = QCheckBox("偶尔点赞视频弹幕（默认关闭）")
         layout.addWidget(self.like_danmaku_check)
 
-        prob_form = QFormLayout()
+        self.prob_panel = QWidget()
+        prob_form = QFormLayout(self.prob_panel)
         self.prob_like_reply_spin = QSpinBox()
         self.prob_like_reply_spin.setRange(0, 100)
         self.prob_like_reply_spin.setSuffix("%")
@@ -599,9 +619,15 @@ class SettingsPage(QWidget):
         self.prob_repost_spin.setRange(0, 100)
         self.prob_repost_spin.setSuffix("%")
         prob_form.addRow("转发UP动态:", self.prob_repost_spin)
-        layout.addLayout(prob_form)
+        self.prob_panel.setVisible(False)
+        self.prob_toggle_btn = QPushButton("展开行为概率设置")
+        self.prob_toggle_btn.setCheckable(True)
+        self.prob_toggle_btn.toggled.connect(self._toggle_probability_panel)
+        layout.addWidget(self.prob_toggle_btn)
+        layout.addWidget(self.prob_panel)
 
         # 自动回复
+        layout.addWidget(self._section_header("回复规则"))
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
 
@@ -632,6 +658,7 @@ class SettingsPage(QWidget):
         layout.addLayout(reply_layout)
 
         # 画面分析
+        layout.addWidget(self._section_header("分析与转写"))
         self.frame_analysis_check = QCheckBox("每条视频分析画面（需要ffmpeg和支持视觉的模型）")
         layout.addWidget(self.frame_analysis_check)
 
@@ -681,7 +708,8 @@ class SettingsPage(QWidget):
         self.diary_check = QCheckBox("启用双日记系统（记忆）")
         layout.addWidget(self.diary_check)
 
-        self.self_review_btn = QPushButton("生成每周自我复盘（不会自动改人设）")
+        layout.addWidget(self._section_header("人格与自我进化"))
+        self.self_review_btn = QPushButton("生成每周自我复盘")
         self.self_review_btn.clicked.connect(self.self_review_requested.emit)
         layout.addWidget(self.self_review_btn)
         self.self_review_status = QLabel(
