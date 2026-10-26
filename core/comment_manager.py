@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import random
 import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -423,6 +424,14 @@ class CommentManager:
                     parent_content=content or '',
                 )
                 self.processed_rpids.add(rpid)
+                if (
+                    self.config.get('interaction.like_replied_comments', True)
+                    and random.random() < 0.5
+                ):
+                    try:
+                        await self.bili.like_comment(aid, rpid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"给网友评论点赞失败: {exc}")
                 try:
                     self.db.add_memory_event(
                         'reply',

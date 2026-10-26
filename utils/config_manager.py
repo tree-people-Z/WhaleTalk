@@ -184,6 +184,8 @@ class ConfigManager:
                 "auto_comment": True,
                 "auto_like_commented_video": False,
                 "comment_requested_video": True,
+                "like_replied_comments": True,
+                "report_watching": False,
                 "comment_monitor": True,
                 "auto_reply": True,
                 "reply_own_video_comments": True,

@@ -174,6 +174,8 @@ class SettingsPage(QWidget):
         self.comment_monitor_check.stateChanged.connect(self.auto_save)
         self.reply_own_video_check.stateChanged.connect(self.auto_save)
         self.comment_requested_video_check.stateChanged.connect(self.auto_save)
+        self.like_replied_comment_check.stateChanged.connect(self.auto_save)
+        self.report_watching_check.stateChanged.connect(self.auto_save)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.greet_whales_check.stateChanged.connect(self.auto_save)
         self.greet_whales_spin.valueChanged.connect(self.auto_save)
@@ -492,6 +494,16 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.comment_requested_video_check)
 
+        self.like_replied_comment_check = QCheckBox(
+            "回复后顺手给网友评论点赞（约一半概率）"
+        )
+        layout.addWidget(self.like_replied_comment_check)
+
+        self.report_watching_check = QCheckBox(
+            "评论成功后上报观看进度（默认关闭，会上报播放量）"
+        )
+        layout.addWidget(self.report_watching_check)
+
         # 自动回复
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
@@ -693,6 +705,12 @@ class SettingsPage(QWidget):
         self.comment_requested_video_check.setChecked(
             self.config.get('interaction.comment_requested_video', True)
         )
+        self.like_replied_comment_check.setChecked(
+            self.config.get('interaction.like_replied_comments', True)
+        )
+        self.report_watching_check.setChecked(
+            self.config.get('interaction.report_watching', False)
+        )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
             self.config.get('interaction.greet_other_whales', True)
@@ -803,6 +821,14 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.comment_requested_video',
                 self.comment_requested_video_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.like_replied_comments',
+                self.like_replied_comment_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.report_watching',
+                self.report_watching_check.isChecked(),
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(

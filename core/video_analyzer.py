@@ -946,6 +946,14 @@ class VideoAnalyzer:
 
             if success:
                 self.db.mark_commented(bvid, comment_text, comment_rpid)
+                if (
+                    self.config.get('interaction.report_watching', False)
+                    and random.random() < 0.5
+                ):
+                    try:
+                        await self.bili.report_watch(bvid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"上报观看进度失败: {exc}")
                 try:
                     self.db.add_memory_event(
                         'comment',

@@ -1174,6 +1174,45 @@ class BilibiliAPI:
             logger.warning(f"点赞视频失败 aid={aid}: {self._short_error(message)}")
             return False
 
+    async def like_comment(self, aid: int, rpid: int) -> bool:
+        """给网友评论点赞；已经赞过按成功处理。"""
+        if not self.credential or not rpid:
+            return False
+        try:
+            await comment.Comment(
+                oid=aid,
+                type_=comment.CommentResourceType.VIDEO,
+                rpid=rpid,
+                credential=self.credential,
+            ).like(True)
+            logger.info(f"点赞评论成功: rpid={rpid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc)
+            if any(keyword in message for keyword in ('65006', '已经赞', '已点赞')):
+                return True
+            logger.debug(f"点赞评论失败 rpid={rpid}: {self._short_error(message)}")
+            return False
+
+    async def report_watch(self, bvid: str) -> bool:
+        """上报一次观看进度，让账号更像真实观众（低频使用）。"""
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            viewer = video.Video(bvid=bvid, credential=self.credential)
+            info = await viewer.get_info()
+            duration = int(info.get('duration') or 0)
+            cid = info.get('cid')
+            await viewer.report_start_watching(page_index=0)
+            if duration and cid:
+                progress = max(1, int(duration * random.uniform(0.2, 0.7)))
+                await viewer.report_watch_history(progress=progress, cid=cid)
+            logger.info(f"已上报观看进度: {bvid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"上报观看进度失败 {bvid}: {self._short_error(str(exc))}")
+            return False
+
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""
         if not self.credential:
