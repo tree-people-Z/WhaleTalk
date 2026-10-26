@@ -383,6 +383,19 @@ class CommentManager:
                     f"{memory_context}\n"
                 )
 
+            if self.config.get('memory.use_self_review', True):
+                try:
+                    from core.self_review import SelfReview
+                    hints = SelfReview(self.db).load_review_hints(600)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"读取自我复盘提醒失败: {exc}")
+                    hints = ""
+                if hints:
+                    video_context += (
+                        "\n# 最近自我复盘的提醒（避免机械感，不要提到复盘）\n"
+                        f"{hints}\n"
+                    )
+
             # 生成回复
             reply_text = await self.ai.generate_reply(
                 original_comment=content,

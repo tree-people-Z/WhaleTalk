@@ -610,6 +610,10 @@ class SettingsPage(QWidget):
         self.self_review_status.setStyleSheet("color: #6b7280; font-size: 12px;")
         layout.addWidget(self.self_review_status)
 
+        self.apply_candidates_btn = QPushButton("查看并应用人设候选…")
+        self.apply_candidates_btn.clicked.connect(self.apply_persona_candidates)
+        layout.addWidget(self.apply_candidates_btn)
+
         group.setLayout(layout)
         return group
 
@@ -956,6 +960,37 @@ class SettingsPage(QWidget):
         self.self_review_btn.setEnabled(not running)
         if message:
             self.self_review_status.setText(message)
+
+    def apply_persona_candidates(self):
+        """Preview and manually apply AI candidates; always keep a backup."""
+        from core.self_review import SelfReview
+        text = SelfReview.read_candidates()
+        if not text:
+            QMessageBox.information(
+                self, "暂无人设候选",
+                "先生成每周自我复盘，候选会写入 data/persona_candidates.md。",
+            )
+            return
+        preview = text[:1800]
+        reply = QMessageBox.question(
+            self,
+            "应用人设候选",
+            "以下内容将追加到 data/persona.md：\n\n"
+            f"{preview}\n\n"
+            "应用前会自动备份 persona.md。确定应用吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            backup = SelfReview.apply_candidates_to_persona()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "应用失败", str(exc))
+            return
+        QMessageBox.information(
+            self, "已应用",
+            f"人设候选已追加到 data/persona.md。\n旧文件备份：{backup}",
+        )
 
     def open_local_model_dir(self):
         """Create and open the folder for manually downloaded model files."""

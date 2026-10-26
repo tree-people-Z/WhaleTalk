@@ -218,6 +218,7 @@ class ConfigManager:
             },
             "memory": {
                 "enabled": True,
+                "use_self_review": True,
                 "auto_self_review": True
             },
             "logging": {

@@ -5,6 +5,7 @@ candidate list for a human to inspect/apply.
 """
 
 import datetime
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,56 @@ class SelfReview:
             return True
         age = datetime.datetime.now().timestamp() - latest.stat().st_mtime
         return age >= days * 86400
+
+    def load_review_hints(self, max_chars: int = 700) -> str:
+        """Return the actionable “next week” suggestions from the latest review."""
+        path = self.last_review_path()
+        if path is None:
+            return ''
+        try:
+            text = path.read_text(encoding='utf-8')
+        except OSError:
+            return ''
+        marker = '## 下周建议'
+        if marker in text:
+            section = text.split(marker, 1)[1]
+            section = section.split('\n## ', 1)[0]
+        else:
+            section = text
+        return section.strip()[:max_chars]
+
+    @staticmethod
+    def read_candidates(candidates_path: Optional[Path] = None) -> str:
+        path = Path(candidates_path or (Path('data') / 'persona_candidates.md'))
+        if not path.is_file():
+            return ''
+        try:
+            return path.read_text(encoding='utf-8').strip()
+        except OSError:
+            return ''
+
+    @staticmethod
+    def apply_candidates_to_persona(
+        persona_path: Optional[Path] = None,
+        candidates_path: Optional[Path] = None,
+    ) -> Path:
+        """Append confirmed candidates to the persona with a timestamped backup."""
+        persona = Path(persona_path or (Path('data') / 'persona.md'))
+        candidates = SelfReview.read_candidates(candidates_path)
+        if not persona.is_file():
+            raise RuntimeError('找不到 data/persona.md')
+        if not candidates or '暂无' in candidates and len(candidates) < 80:
+            raise RuntimeError('没有可应用的人设候选')
+        stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        backup = persona.with_name(persona.name + f'.bak-{stamp}')
+        shutil.copy2(persona, backup)
+        with persona.open('a', encoding='utf-8') as stream:
+            stream.write(
+                f"\n\n## 自复盘候选（人工确认 {datetime.date.today().isoformat()}）\n"
+                f"{candidates}\n"
+            )
+        logger.info(f'已应用人设候选，备份: {backup}')
+        return backup
 
     def _recent_diaries(self) -> List[str]:
         base = self.review_dir.parent
