@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from bilibili_api import login_v2, search, video, comment, user
 from bilibili_api import favorite_list, dynamic
 from bilibili_api.session import EventType
+from bilibili_api.utils.picture import Picture
+from bilibili_api.utils.danmaku import Danmaku
 from bilibili_api import session as bili_session
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
@@ -374,6 +376,21 @@ class BilibiliAPI:
         sessions.sort(key=lambda row: row.get('last_timestamp') or 0, reverse=True)
         return sessions
 
+    @staticmethod
+    def _message_image_url(message: Dict[str, Any]) -> str:
+        content = message.get('content')
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (TypeError, ValueError):
+                return ''
+        if isinstance(content, dict):
+            for key in ('url', 'image_url', 'img_src', 'original'):
+                value = content.get(key)
+                if isinstance(value, str) and value.startswith('http'):
+                    return value
+        return ''
+
     async def get_private_messages(
         self, talker_id: int, session_type: int = 1
     ) -> List[Dict[str, Any]]:
@@ -400,6 +417,7 @@ class BilibiliAPI:
                 'sender_uid': item.get('sender_uid'),
                 'timestamp': int(item.get('timestamp') or 0),
                 'content': content,
+                'image_url': self._message_image_url(item),
                 'msg_type': item.get('msg_type'),
             })
         messages.sort(key=lambda row: row.get('timestamp') or 0)
@@ -1309,6 +1327,67 @@ class BilibiliAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"发布动态失败 {bvid}: {self._short_error(str(exc))}")
             return False
+
+    async def send_private_picture(self, talker_id: int, image_path: str) -> bool:
+        if not self.credential or not talker_id or not Path(image_path).is_file():
+            return False
+        try:
+            picture = Picture.from_file(str(Path(image_path)))
+            await bili_session.send_msg(
+                credential=self.credential,
+                receiver_id=int(talker_id),
+                msg_type=EventType.PICTURE,
+                content=picture,
+            )
+            logger.info(f"私信图片发送成功: {talker_id}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"私信图片发送失败: {self._short_error(str(exc))}")
+            return False
+
+    async def send_dynamic_with_image(self, text: str, image_path: str) -> bool:
+        if not self.credential or not Path(image_path).is_file():
+            return False
+        try:
+            payload = dynamic.BuildDynamic.create_by_args(
+                text=text,
+                pics=[Picture.from_file(str(Path(image_path)))],
+            )
+            await dynamic.send_dynamic(payload, self.credential)
+            logger.info(f"带图动态发送成功: {image_path}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"带图动态发送失败: {self._short_error(str(exc))}")
+            return False
+
+    async def send_danmaku(self, bvid: str, text: str, dm_time: float = 1.0) -> bool:
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            await video.Video(bvid=bvid, credential=self.credential).send_danmaku(
+                danmaku=Danmaku(text=text[:100], dm_time=max(0.0, dm_time))
+            )
+            logger.info(f"弹幕发送成功: {bvid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"弹幕发送失败 {bvid}: {self._short_error(str(exc))}")
+            return False
+
+    async def like_video_danmaku(self, bvid: str) -> bool:
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            viewer = video.Video(bvid=bvid, credential=self.credential)
+            danmakus = await viewer.get_danmakus(page_index=0)
+            for danmaku in danmakus or []:
+                dmid = getattr(danmaku, 'id_str', None) or getattr(danmaku, 'id', None)
+                if dmid:
+                    await viewer.like_danmaku(dmid=int(dmid), page_index=0)
+                    logger.info(f"弹幕点赞成功: {bvid}")
+                    return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"弹幕点赞失败 {bvid}: {self._short_error(str(exc))}")
+        return False
 
     async def send_private_message(self, talker_id: int, text: str) -> bool:
         """给私信会话对象发送纯文本消息。"""

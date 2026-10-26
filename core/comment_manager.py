@@ -14,6 +14,7 @@ from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
 from utils.database import Database
 from utils.config_manager import ConfigManager
+from utils.probability import roll_probability
 
 
 class CommentManager:
@@ -142,12 +143,7 @@ class CommentManager:
             return []
 
     def _roll_probability(self, key: str, default: float) -> bool:
-        try:
-            probability = float(self.config.get(f'interaction.{key}', default))
-        except (TypeError, ValueError):
-            probability = default
-        probability = max(0.0, min(100.0, probability))
-        return random.random() * 100 < probability
+        return roll_probability(self.config, key, default)
 
     def _daily_send_quota_remaining(self) -> int:
         try:
@@ -530,6 +526,25 @@ class CommentManager:
                 limit=5,
             )
             video_context = "B站私信（不是评论区）"
+            image_url = last.get('image_url') or ''
+            if image_url:
+                try:
+                    from utils.media_library import collect_image
+                    asset = await collect_image(
+                        self.db,
+                        image_url,
+                        source='dm',
+                        ai_client=self.ai,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"收集私信图片失败: {exc}")
+                    asset = None
+                if asset:
+                    video_context += (
+                        "\n# 对方发来的图片\n"
+                        f"{asset.get('description') or '收到一张图片，内容未能识别'}\n"
+                    )
+                    video_context += "这张图已收进你的图片库，之后可以用于动态或私信。\n"
             if memory_context:
                 video_context += f"\n\n# 你记得这位网友的事\n{memory_context}"
             reply = await self.ai.generate_reply(

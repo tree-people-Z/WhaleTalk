@@ -143,6 +143,7 @@ class SettingsPage(QWidget):
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
     self_review_requested = pyqtSignal()
+    agent_requested = pyqtSignal()
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -186,6 +187,9 @@ class SettingsPage(QWidget):
         self.share_video_check.stateChanged.connect(self.auto_save)
         self.watch_later_check.stateChanged.connect(self.auto_save)
         self.repost_dynamic_check.stateChanged.connect(self.auto_save)
+        self.post_image_dynamic_check.stateChanged.connect(self.auto_save)
+        self.send_danmaku_check.stateChanged.connect(self.auto_save)
+        self.like_danmaku_check.stateChanged.connect(self.auto_save)
         for spin in (
             self.prob_like_reply_spin, self.prob_report_watch_spin,
             self.prob_favorite_spin, self.prob_follow_spin,
@@ -545,6 +549,14 @@ class SettingsPage(QWidget):
         layout.addWidget(self.watch_later_check)
         self.repost_dynamic_check = QCheckBox("偶尔转发UP主的动态（默认关闭）")
         layout.addWidget(self.repost_dynamic_check)
+        self.post_image_dynamic_check = QCheckBox(
+            "偶尔发带图动态（使用私信收集的图片，默认关闭）"
+        )
+        layout.addWidget(self.post_image_dynamic_check)
+        self.send_danmaku_check = QCheckBox("偶尔发一条弹幕（默认关闭）")
+        layout.addWidget(self.send_danmaku_check)
+        self.like_danmaku_check = QCheckBox("偶尔点赞视频弹幕（默认关闭）")
+        layout.addWidget(self.like_danmaku_check)
 
         prob_form = QFormLayout()
         self.prob_like_reply_spin = QSpinBox()
@@ -690,6 +702,14 @@ class SettingsPage(QWidget):
         self.rollback_persona_btn = QPushButton("回滚人设到上一版")
         self.rollback_persona_btn.clicked.connect(self.rollback_persona)
         layout.addWidget(self.rollback_persona_btn)
+
+        self.agent_btn = QPushButton("让她自主观察一轮（只读，不发任何内容）")
+        self.agent_btn.clicked.connect(self.agent_requested.emit)
+        layout.addWidget(self.agent_btn)
+        self.agent_status = QLabel("她会自己选择看哪些视频、读哪些评论，只读不写。")
+        self.agent_status.setWordWrap(True)
+        self.agent_status.setStyleSheet("color: #6b7280; font-size: 12px;")
+        layout.addWidget(self.agent_status)
 
         group.setLayout(layout)
         return group
@@ -844,6 +864,15 @@ class SettingsPage(QWidget):
         )
         self.repost_dynamic_check.setChecked(
             self.config.get('interaction.repost_up_dynamic', False)
+        )
+        self.post_image_dynamic_check.setChecked(
+            self.config.get('interaction.post_image_dynamic', False)
+        )
+        self.send_danmaku_check.setChecked(
+            self.config.get('interaction.send_danmaku', False)
+        )
+        self.like_danmaku_check.setChecked(
+            self.config.get('interaction.like_danmaku', False)
         )
         self.prob_like_reply_spin.setValue(
             self.config.get('interaction.prob_like_reply', 50)
@@ -1060,6 +1089,16 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.repost_up_dynamic', self.repost_dynamic_check.isChecked()
             )
+            self.config.set(
+                'interaction.post_image_dynamic',
+                self.post_image_dynamic_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.send_danmaku', self.send_danmaku_check.isChecked()
+            )
+            self.config.set(
+                'interaction.like_danmaku', self.like_danmaku_check.isChecked()
+            )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
                 'interaction.greet_other_whales', self.greet_whales_check.isChecked()
@@ -1136,6 +1175,11 @@ class SettingsPage(QWidget):
         self.self_review_btn.setEnabled(not running)
         if message:
             self.self_review_status.setText(message)
+
+    def set_agent_running(self, running: bool, message: str = ""):
+        self.agent_btn.setEnabled(not running)
+        if message:
+            self.agent_status.setText(message)
 
     def rollback_persona(self):
         from utils.persona_evolution import rollback_persona as do_rollback

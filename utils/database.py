@@ -104,6 +104,30 @@ class UserMemory(Base):
     last_seen = Column(DateTime, default=datetime.now)
 
 
+class MediaAsset(Base):
+    """Collected images for later reuse (DM images, dynamic images, etc.)."""
+    __tablename__ = 'media_assets'
+
+    id = Column(Integer, primary_key=True)
+    path = Column(Text, unique=True)
+    source = Column(String(30))
+    source_url = Column(Text)
+    description = Column(Text)
+    tags = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+    used_count = Column(Integer, default=0)
+
+
+class PrivateChatState(Base):
+    """Last replied private-message timestamp per conversation."""
+    __tablename__ = 'private_chat_state'
+
+    id = Column(Integer, primary_key=True)
+    talker_id = Column(Integer, unique=True, index=True)
+    last_replied_ts = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.now)
+
+
 class DailyQuota(Base):
     """每日配额表"""
     __tablename__ = 'daily_quota'
@@ -312,6 +336,69 @@ class Database:
             if event.my_content:
                 lines.append(f"  你上次回：{event.my_content[:120]}")
         return "\n".join(lines)
+
+    def add_media_asset(
+        self, path: str, source: str = '', source_url: str = '',
+        description: str = '', tags: str = '',
+    ) -> MediaAsset:
+        asset = self.session.query(MediaAsset).filter_by(path=path).first()
+        if asset is None:
+            asset = MediaAsset(
+                path=path, source=source, source_url=source_url,
+                description=description, tags=tags,
+            )
+            self.session.add(asset)
+        else:
+            if description:
+                asset.description = description
+            if tags:
+                asset.tags = tags
+            asset.source = source or asset.source
+        self.session.commit()
+        return asset
+
+    def get_random_media_asset(self) -> Optional[Dict[str, Any]]:
+        asset = self.session.query(MediaAsset)\
+            .order_by(MediaAsset.used_count.asc(), MediaAsset.created_at.desc())\
+            .first()
+        if asset is None:
+            return None
+        return {
+            'id': asset.id,
+            'path': asset.path,
+            'description': asset.description or '',
+            'tags': asset.tags or '',
+        }
+
+    def mark_media_asset_used(self, asset_id: int) -> None:
+        asset = self.session.query(MediaAsset).filter_by(id=int(asset_id)).first()
+        if asset:
+            asset.used_count = int(asset.used_count or 0) + 1
+            self.session.commit()
+
+    def get_today_memory_event_count(self, event_type: str) -> int:
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.session.query(MemoryEvent).filter(
+            MemoryEvent.event_type == event_type,
+            MemoryEvent.created_at >= start,
+        ).count()
+
+    def get_dm_state(self, talker_id: int) -> int:
+        state = self.session.query(PrivateChatState).filter_by(
+            talker_id=int(talker_id)
+        ).first()
+        return int(state.last_replied_ts or 0) if state else 0
+
+    def set_dm_state(self, talker_id: int, timestamp: int) -> None:
+        state = self.session.query(PrivateChatState).filter_by(
+            talker_id=int(talker_id)
+        ).first()
+        if state is None:
+            state = PrivateChatState(talker_id=int(talker_id))
+            self.session.add(state)
+        state.last_replied_ts = int(timestamp or 0)
+        state.updated_at = datetime.now()
+        self.session.commit()
 
     def get_recent_memory_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         events = self.session.query(MemoryEvent)\

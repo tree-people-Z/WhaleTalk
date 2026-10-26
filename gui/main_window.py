@@ -29,6 +29,7 @@ from core.video_analyzer import VideoAnalyzer
 from core.scheduler import TaskScheduler
 from core.self_review import SelfReview
 from gui.self_review_worker import SelfReviewWorker
+from gui.agent_worker import AgentWorker
 from utils.database import Database
 from utils.config_manager import ConfigManager
 from utils.updater import launch_update_installer
@@ -116,12 +117,14 @@ class MainWindow(QMainWindow):
         self._update_progress = None
         self.settings_page.check_update_requested.connect(self.check_updates_manually)
         self.settings_page.self_review_requested.connect(self.generate_self_review)
+        self.settings_page.agent_requested.connect(self.run_agent_observation)
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
         self._update_timer.setInterval(5000)
         self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_timer.start()
         self._self_review_worker = None
+        self._agent_worker = None
         QTimer.singleShot(15000, self._maybe_auto_self_review)
 
         # 运行期间每 6 小时复查一次更新。
@@ -824,7 +827,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "无法复盘", "请先在设置里配置 AI API Key。")
             return
         self.settings_page.set_self_review_running(True, "正在生成自我复盘…")
-        worker = SelfReviewWorker(SelfReview(self.db, self.ai_client), self)
+        worker = SelfReviewWorker(
+            SelfReview(self.db, self.ai_client, config=self.config), self
+        )
         self._self_review_worker = worker
         worker.done.connect(self._on_self_review_done)
         worker.finished.connect(worker.deleteLater)
@@ -847,6 +852,34 @@ class MainWindow(QMainWindow):
             self.settings_page.self_review_status.setText(f"复盘失败：{message}")
             QMessageBox.warning(self, "自我复盘失败", message)
 
+    def run_agent_observation(self):
+        """只读自主观察：她自己选工具，不发任何内容。"""
+        if self._agent_worker is not None and self._agent_worker.isRunning():
+            return
+        if self.bili_api is None or self.ai_client is None:
+            QMessageBox.warning(
+                self, "无法观察", "请先登录B站并配置 AI API Key。"
+            )
+            return
+        self.settings_page.set_agent_running(True, "她正在自己决定看什么…")
+        self.log("🐋 鲸鱼娘开始自主观察（只读）")
+        worker = AgentWorker(
+            self.bili_api, self.db, self.ai_client, self.config, self
+        )
+        self._agent_worker = worker
+        worker.done.connect(self._on_agent_done)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_agent_done(self, success: bool, message: str):
+        self.settings_page.set_agent_running(False)
+        if success:
+            self.settings_page.agent_status.setText(f"观察完成：{message}")
+            self.log(f"🐋 自主观察完成: {message}")
+        else:
+            self.settings_page.agent_status.setText(f"观察失败：{message}")
+            self.log(f"⚠️ 自主观察失败: {message}")
+
     def _maybe_auto_self_review(self):
         if not self.config.get('memory.auto_self_review', True):
             return
@@ -855,7 +888,7 @@ class MainWindow(QMainWindow):
         try:
             if not self.db.get_recent_memory_events(limit=1):
                 return
-            review = SelfReview(self.db, self.ai_client)
+            review = SelfReview(self.db, self.ai_client, config=self.config)
             if review.is_due(7):
                 self.generate_self_review()
         except Exception as exc:  # noqa: BLE001

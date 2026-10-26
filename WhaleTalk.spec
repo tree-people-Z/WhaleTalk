@@ -1,4 +1,4 @@
-﻿# Build with: python -m PyInstaller --clean --noconfirm WhaleTalk.spec
+# Build with: python -m PyInstaller --clean --noconfirm WhaleTalk.spec
 from pathlib import Path
 import os
 import site
@@ -19,6 +19,13 @@ datas = [
 # the static analysis cannot see bilibili_api.clients.*; collect them explicitly.
 # The package also ships JSON tables under bilibili_api/data.
 hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
+hiddenimports += [
+    "gui.agent_worker",
+    "core.tool_agent",
+    "utils.media_library",
+    "utils.persona_evolution",
+    "utils.probability",
+]
 datas += collect_data_files("bilibili_api")
 if ONEFILE:
     ffmpeg_payload = project_root / "build" / "ffmpeg.zip"

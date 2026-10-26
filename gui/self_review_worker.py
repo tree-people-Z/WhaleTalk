@@ -17,7 +17,8 @@ class SelfReviewWorker(QThread):
     def run(self):
         try:
             result = asyncio.run(self.review.generate())
-            self.done.emit(True, result.get('review_path', ''))
+            message = result.get('auto_message') or result.get('review_path', '')
+            self.done.emit(True, message)
         except Exception as exc:  # noqa: BLE001
             logger.warning(f'自我复盘生成失败: {exc}')
             self.done.emit(False, str(exc))

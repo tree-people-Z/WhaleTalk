@@ -5,7 +5,6 @@ candidate list for a human to inspect/apply.
 """
 
 import datetime
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,9 +12,10 @@ from loguru import logger
 
 
 class SelfReview:
-    def __init__(self, db, ai_client=None, diary_dir: Optional[Path] = None):
+    def __init__(self, db, ai_client=None, diary_dir: Optional[Path] = None, config=None):
         self.db = db
         self.ai = ai_client
+        self.config = config
         self.review_dir = Path(diary_dir or Path('data') / 'diaries') / 'self_review'
         self.review_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_path = Path('data') / 'persona_candidates.md'
@@ -63,23 +63,46 @@ class SelfReview:
         persona_path: Optional[Path] = None,
         candidates_path: Optional[Path] = None,
     ) -> Path:
-        """Append confirmed candidates to the persona with a timestamped backup."""
+        """Append confirmed candidates to the persona with a versioned backup."""
+        from utils.persona_evolution import apply_candidates
         persona = Path(persona_path or (Path('data') / 'persona.md'))
         candidates = SelfReview.read_candidates(candidates_path)
-        if not persona.is_file():
-            raise RuntimeError('找不到 data/persona.md')
-        if not candidates or '暂无' in candidates and len(candidates) < 80:
-            raise RuntimeError('没有可应用的人设候选')
-        stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        backup = persona.with_name(persona.name + f'.bak-{stamp}')
-        shutil.copy2(persona, backup)
-        with persona.open('a', encoding='utf-8') as stream:
-            stream.write(
-                f"\n\n## 自复盘候选（人工确认 {datetime.date.today().isoformat()}）\n"
-                f"{candidates}\n"
+        result = apply_candidates(persona, candidates, auto=False)
+        return result['backup']
+
+    def _maybe_auto_apply(self) -> str:
+        """Apply candidates automatically when enabled, once per interval."""
+        if self.config is None or not self.config.get('memory.auto_apply_persona', False):
+            return ''
+        try:
+            interval_days = int(self.config.get('memory.auto_apply_interval_days', 7))
+        except (TypeError, ValueError):
+            interval_days = 7
+        stamp_path = Path('data') / 'persona_last_auto_apply.txt'
+        now = datetime.datetime.now()
+        if stamp_path.is_file():
+            try:
+                last = datetime.datetime.fromisoformat(
+                    stamp_path.read_text(encoding='utf-8').strip()
+                )
+                if (now - last).days < interval_days:
+                    return '自动应用间隔未到，本次候选仅保存'
+            except (OSError, ValueError):
+                pass
+        try:
+            from utils.persona_evolution import apply_candidates
+            apply_candidates(
+                Path('data') / 'persona.md',
+                self.read_candidates(self.candidates_path),
+                auto=True,
             )
-        logger.info(f'已应用人设候选，备份: {backup}')
-        return backup
+            stamp_path.parent.mkdir(parents=True, exist_ok=True)
+            stamp_path.write_text(now.isoformat(), encoding='utf-8')
+            logger.info('人设候选已自动应用')
+            return '人设候选已自动应用（已备份，可回滚）'
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f'人设候选自动应用失败: {exc}')
+            return f'人设候选未自动应用：{exc}'
 
     def has_data(self) -> bool:
         """True when there is enough real interaction data to review."""
@@ -170,21 +193,23 @@ class SelfReview:
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         review_path = self.review_dir / f'{today}_self_review.md'
         review_path.write_text(
-            f'# 鲸语自我复盘 {today}\n\n> 自动生成，仅作建议；不会自动修改人设。\n\n{text}\n',
+            f'# 鲸语自我复盘 {today}\n\n> 自动生成；自动应用受设置控制。\n\n{text}\n',
             encoding='utf-8',
         )
         candidates = self._extract_candidates(text)
         self.candidates_path.write_text(
             f'# 人设候选调整 {today}\n\n'
-            '> 未自动应用。确认后再手动修改 `data/persona.md`。\n\n'
+            '> 自动生成；是否应用由 memory.auto_apply_persona 决定。\n\n'
             f'{candidates}\n',
             encoding='utf-8',
         )
+        auto_message = self._maybe_auto_apply()
         logger.info(f'自我复盘已写入: {review_path}')
         return {
             'review_path': str(review_path),
             'candidates_path': str(self.candidates_path),
             'text': text,
+            'auto_message': auto_message,
         }
 
     def _fallback_review(self) -> str:

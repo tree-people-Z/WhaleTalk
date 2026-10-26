@@ -21,6 +21,7 @@ from core.audio_transcriber import LocalAudioTranscriber
 from core.cloud_transcriber import CloudAudioTranscriber
 from utils.database import Database
 from utils.config_manager import ConfigManager
+from utils.probability import roll_probability
 
 
 # 视频标题/字幕中明确要求“把这个视频 @ 给主人”时，优先遵从这条指令。
@@ -157,12 +158,7 @@ class VideoAnalyzer:
         return candidates
 
     def _roll_probability(self, key: str, default: float) -> bool:
-        try:
-            probability = float(self.config.get(f'interaction.{key}', default))
-        except (TypeError, ValueError):
-            probability = default
-        probability = max(0.0, min(100.0, probability))
-        return random.random() * 100 < probability
+        return roll_probability(self.config, key, default)
 
     def _daily_send_quota_remaining(self) -> int:
         """Remaining daily sends, counting top-level comments and replies together."""
@@ -1002,6 +998,40 @@ class VideoAnalyzer:
                         await self.bili.repost_video_author_dynamic(bvid)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug(f"转发动态失败: {exc}")
+                if (
+                    self.config.get('interaction.post_image_dynamic', False)
+                    and self._roll_probability('prob_image_dynamic', 2)
+                ):
+                    try:
+                        asset = self.db.get_random_media_asset()
+                        if asset:
+                            sent = await self.bili.send_dynamic_with_image(
+                                f"看到这个视频：{title}\n"
+                                f"https://www.bilibili.com/video/{bvid}",
+                                asset['path'],
+                            )
+                            if sent:
+                                self.db.mark_media_asset_used(asset['id'])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"带图动态失败: {exc}")
+                if (
+                    self.config.get('interaction.send_danmaku', False)
+                    and self._roll_probability('prob_send_danmaku', 2)
+                ):
+                    try:
+                        await self.bili.send_danmaku(
+                            bvid, f"{title[:16]}……", dm_time=1.0
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"发送弹幕失败: {exc}")
+                if (
+                    self.config.get('interaction.like_danmaku', False)
+                    and self._roll_probability('prob_like_danmaku', 5)
+                ):
+                    try:
+                        await self.bili.like_video_danmaku(bvid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"点赞弹幕失败: {exc}")
                 if (
                     self.config.get('interaction.follow_commented_up', False)
                     and self._roll_probability('prob_follow_up', 10)
