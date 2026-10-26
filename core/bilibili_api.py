@@ -13,10 +13,12 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from bilibili_api import login_v2, search, video, comment, user
+from bilibili_api import favorite_list
 from bilibili_api import session as bili_session
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
 from bilibili_api.comment import OrderType
+from bilibili_api.user import RelationType
 from loguru import logger
 import qrcode
 from io import BytesIO
@@ -1212,6 +1214,58 @@ class BilibiliAPI:
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"上报观看进度失败 {bvid}: {self._short_error(str(exc))}")
             return False
+
+    async def favorite_video(self, aid: int) -> bool:
+        """把视频收藏到默认收藏夹（已收藏则跳过）。"""
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            viewer = video.Video(aid=aid, credential=self.credential)
+            if await viewer.has_favoured():
+                return True
+            info = await self.get_self_info()
+            uid = info.get('uid')
+            if not uid:
+                return False
+            data = await favorite_list.get_video_favorite_list(
+                uid, credential=self.credential
+            )
+            folders = (data or {}).get('list') or []
+            if not folders:
+                return False
+            folder_id = int(folders[0].get('id'))
+            await viewer.set_favorite([folder_id])
+            logger.info(f"收藏视频成功: aid={aid} folder={folder_id}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"收藏视频失败 aid={aid}: {self._short_error(str(exc))}")
+            return False
+
+    async def follow_user(self, uid: int) -> bool:
+        """关注用户；已关注按成功处理。"""
+        if not self.credential or not uid or self.is_blocked():
+            return False
+        try:
+            info = await self.get_self_info()
+            if info.get('uid') == uid:
+                return False
+            await user.User(uid, credential=self.credential).modify_relation(
+                RelationType.SUBSCRIBE
+            )
+            logger.info(f"关注用户成功: {uid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc)
+            if any(keyword in message for keyword in ('已经关注', '已关注', '22001')):
+                return True
+            logger.debug(f"关注用户失败 {uid}: {self._short_error(message)}")
+            return False
+
+    async def follow_video_author(self, bvid: str) -> bool:
+        info = await self.get_video_info(bvid)
+        if not info:
+            return False
+        return await self.follow_user(info.get('owner_mid') or 0)
 
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""

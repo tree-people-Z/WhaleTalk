@@ -954,6 +954,22 @@ class VideoAnalyzer:
                         await self.bili.report_watch(bvid)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug(f"上报观看进度失败: {exc}")
+                if (
+                    self.config.get('interaction.favorite_commented_video', True)
+                    and random.random() < 0.2
+                ):
+                    try:
+                        await self.bili.favorite_video(aid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"收藏视频失败: {exc}")
+                if (
+                    self.config.get('interaction.follow_commented_up', False)
+                    and random.random() < 0.1
+                ):
+                    try:
+                        await self.bili.follow_video_author(bvid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"关注UP失败: {exc}")
                 try:
                     self.db.add_memory_event(
                         'comment',

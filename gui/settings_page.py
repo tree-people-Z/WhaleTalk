@@ -177,6 +177,8 @@ class SettingsPage(QWidget):
         self.comment_requested_video_check.stateChanged.connect(self.auto_save)
         self.like_replied_comment_check.stateChanged.connect(self.auto_save)
         self.report_watching_check.stateChanged.connect(self.auto_save)
+        self.favorite_video_check.stateChanged.connect(self.auto_save)
+        self.follow_up_check.stateChanged.connect(self.auto_save)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.greet_whales_check.stateChanged.connect(self.auto_save)
         self.greet_whales_spin.valueChanged.connect(self.auto_save)
@@ -505,6 +507,11 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.report_watching_check)
 
+        self.favorite_video_check = QCheckBox("评论成功后偶尔收藏视频（约20%）")
+        layout.addWidget(self.favorite_video_check)
+        self.follow_up_check = QCheckBox("关注喜欢的UP主（低频，默认关闭）")
+        layout.addWidget(self.follow_up_check)
+
         # 自动回复
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
@@ -722,6 +729,12 @@ class SettingsPage(QWidget):
         self.report_watching_check.setChecked(
             self.config.get('interaction.report_watching', False)
         )
+        self.favorite_video_check.setChecked(
+            self.config.get('interaction.favorite_commented_video', True)
+        )
+        self.follow_up_check.setChecked(
+            self.config.get('interaction.follow_commented_up', False)
+        )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
             self.config.get('interaction.greet_other_whales', True)
@@ -840,6 +853,14 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.report_watching',
                 self.report_watching_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.favorite_commented_video',
+                self.favorite_video_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.follow_commented_up',
+                self.follow_up_check.isChecked(),
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
