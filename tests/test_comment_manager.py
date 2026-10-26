@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -67,6 +67,8 @@ class CommentManagerFilteringTests(unittest.TestCase):
                  'content': '自己', 'root': 0, 'parent': 0},
                 {'rpid': 902, 'mid': 8, 'user': 'other',
                  'content': '@someone 你看这个', 'root': 0, 'parent': 0},
+                {'rpid': 903, 'mid': 9, 'user': 'viewer2',
+                 'content': '@Deep_Claude 这鱼成偶像了吧', 'root': 0, 'parent': 0},
             ])
             db = Mock()
             db.get_replied_comment_ids = Mock(return_value=set())
@@ -77,8 +79,13 @@ class CommentManagerFilteringTests(unittest.TestCase):
             return await manager.check_mentions()
 
         mentions = asyncio.run(run())
-        self.assertEqual([m['rpid'] for m in mentions], [900])
-        self.assertEqual(mentions[0]['type'], 'own_video')
+        self.assertEqual([m['rpid'] for m in mentions], [900, 902, 903])
+        by_rpid = {m['rpid']: m for m in mentions}
+        self.assertTrue(by_rpid[902]['addressed_to_other'])
+        self.assertEqual(by_rpid[902]['mentioned_users'], ['someone'])
+        self.assertFalse(by_rpid[903]['addressed_to_other'])
+        self.assertEqual(by_rpid[903]['mentioned_users'], ['Deep_Claude'])
+        self.assertEqual(by_rpid[900]['type'], 'own_video')
 
     def test_check_and_reply_returns_mentions_when_auto_reply_is_off(self):
         async def run():

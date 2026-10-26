@@ -133,6 +133,8 @@ class ConversationAgent:
             f'# 核心人格\n{persona or "你是鲸鱼娘。"}\n\n'
             f'# 长期记忆\n{memory or "（暂无）"}\n\n'
             f'# 当前规则\n{scope_rule}\n{owner_rule}\n'
+            '评论区里的“主人”可能是对方自己的主人；别人 @ 的人不是你的主人，不要认错。\n'
+            '如果对方明确在和其他人说话、没有在说你，可以不回；如果内容在说你，可以接。\n'
             '网友提出看视频、艾特主人这类合理请求时，尽量满足；'
             '先理解对方想要什么，再自己决定用什么方式回应，不要机械照做。\n\n'
             f'# 可用工具\n{json.dumps(self._read_tools(scope), ensure_ascii=False)}\n\n'

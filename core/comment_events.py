@@ -133,11 +133,15 @@ class CommentEventCollector:
             return []
 
     @staticmethod
-    def _addressed_to_other(content: str, self_name: str) -> bool:
-        """评论是否明确 @ 了别人；是的话不要当成本人在被搭话。"""
+    def _mentioned_users(content: str) -> list:
         if not content:
-            return False
-        names = re.findall(r'@([^\s@:：,，。！!？?]+)', content)
+            return []
+        return re.findall(r'@([^\s@:：,，。！!？?]+)', content)
+
+    @staticmethod
+    def _addressed_to_other(content: str, self_name: str) -> bool:
+        """评论是否明确 @ 了别人；仅作为上下文，不再直接丢弃。"""
+        names = CommentEventCollector._mentioned_users(content)
         if not names:
             return False
         if self_name and any(name == self_name for name in names):
@@ -193,18 +197,17 @@ class CommentEventCollector:
                     continue
                 if self_name and comment.get('user') == self_name:
                     continue
-                if self._addressed_to_other(comment.get('content'), self_name):
-                    logger.info(
-                        f"跳过 @ 其他人的评论: {comment.get('user')} "
-                        f"-> {(comment.get('content') or '')[:30]}"
-                    )
-                    continue
+                content = comment.get('content') or ''
+                mentioned = self._mentioned_users(content)
+                addressed_to_other = self._addressed_to_other(content, self_name)
                 results.append({
                     'rpid': rpid,
                     'root_rpid': rpid,
                     'user': comment.get('user'),
                     'mid': comment.get('mid'),
                     'content': comment.get('content'),
+                    'mentioned_users': mentioned,
+                    'addressed_to_other': addressed_to_other,
                     'images': comment.get('images') or [],
                     'aid': aid,
                     'bvid': video.get('bvid'),

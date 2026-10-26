@@ -114,6 +114,8 @@ class CommentManager:
                 'user': mention.get('user') or '',
                 'mid': mention.get('mid'),
                 'content': mention.get('content') or '',
+                'mentioned_users': mention.get('mentioned_users') or [],
+                'addressed_to_other': bool(mention.get('addressed_to_other')),
                 'parent_content': mention.get('parent_content') or '',
                 'root_content': mention.get('root_content') or '',
                 'images': mention.get('images') or [],
