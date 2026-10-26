@@ -169,6 +169,8 @@ class ConfigManager:
             "limits": {
                 "max_comments_per_day": 60,
                 "max_likes_per_day": 50,
+                "max_dm_per_check": 3,
+                "max_dm_per_day": 10,
                 "max_videos_per_run": 20,
                 "skip_analyzed_within_hours": 2,
                 "max_greetings_per_video": 2,
@@ -195,6 +197,15 @@ class ConfigManager:
                 "prob_follow_up": 10,
                 "prob_like_dynamic": 10,
                 "prob_post_dynamic": 5,
+                "prob_coin_video": 5,
+                "prob_share_video": 2,
+                "prob_watch_later": 10,
+                "prob_repost_dynamic": 3,
+                "reply_private_messages": True,
+                "coin_commented_video": True,
+                "share_commented_video": False,
+                "watch_later_commented_video": True,
+                "repost_up_dynamic": False,
                 "report_watching": False,
                 "comment_monitor": True,
                 "auto_reply": True,
@@ -225,7 +236,9 @@ class ConfigManager:
             "memory": {
                 "enabled": True,
                 "use_self_review": True,
-                "auto_self_review": True
+                "auto_self_review": True,
+                "auto_apply_persona": False,
+                "auto_apply_interval_days": 7
             },
             "logging": {
                 "level": "INFO",

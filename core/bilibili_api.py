@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from bilibili_api import login_v2, search, video, comment, user
 from bilibili_api import favorite_list, dynamic
+from bilibili_api.session import EventType
 from bilibili_api import session as bili_session
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
@@ -1308,6 +1309,83 @@ class BilibiliAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"发布动态失败 {bvid}: {self._short_error(str(exc))}")
             return False
+
+    async def send_private_message(self, talker_id: int, text: str) -> bool:
+        """给私信会话对象发送纯文本消息。"""
+        if not self.credential or not talker_id or not text.strip():
+            return False
+        try:
+            await bili_session.send_msg(
+                credential=self.credential,
+                receiver_id=int(talker_id),
+                msg_type=EventType.TEXT,
+                content=text.strip(),
+            )
+            logger.info(f"私信发送成功: {talker_id}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"私信发送失败 {talker_id}: {self._short_error(str(exc))}")
+            return False
+
+    async def coin_video(self, aid: int, num: int = 1) -> bool:
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            viewer = video.Video(aid=aid, credential=self.credential)
+            if await viewer.get_pay_coins() >= 2:
+                return True
+            await viewer.pay_coin(num=max(1, min(int(num), 2)), like=False)
+            logger.info(f"投币成功: aid={aid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"投币失败 aid={aid}: {self._short_error(str(exc))}")
+            return False
+
+    async def share_video(self, aid: int) -> bool:
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            await video.Video(aid=aid, credential=self.credential).share()
+            logger.info(f"分享视频成功: aid={aid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"分享视频失败 aid={aid}: {self._short_error(str(exc))}")
+            return False
+
+    async def add_to_watch_later(self, aid: int) -> bool:
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            await video.Video(aid=aid, credential=self.credential).add_to_toview()
+            logger.info(f"稍后再看成功: aid={aid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"稍后再看失败 aid={aid}: {self._short_error(str(exc))}")
+            return False
+
+    async def repost_latest_user_dynamic(self, uid: int, text: str = "转发动态") -> bool:
+        if not self.credential or not uid or self.is_blocked():
+            return False
+        try:
+            data = await user.User(uid, credential=self.credential).get_dynamics_new()
+            for item in (data or {}).get('items') or []:
+                dynamic_id = item.get('id_str') or item.get('id')
+                if not dynamic_id:
+                    continue
+                await dynamic.Dynamic(
+                    int(dynamic_id), credential=self.credential
+                ).repost(text)
+                logger.info(f"转发动态成功: uid={uid} dynamic={dynamic_id}")
+                return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"转发动态失败 uid={uid}: {self._short_error(str(exc))}")
+        return False
+
+    async def repost_video_author_dynamic(self, bvid: str) -> bool:
+        info = await self.get_video_info(bvid)
+        if not info:
+            return False
+        return await self.repost_latest_user_dynamic(info.get('owner_mid') or 0)
 
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""

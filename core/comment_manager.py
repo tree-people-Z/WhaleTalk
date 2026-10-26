@@ -1,4 +1,4 @@
-﻿"""
+"""
 评论管理模块
 负责监听评论区的@提醒并回复
 """
@@ -476,6 +476,92 @@ class CommentManager:
             logger.error(f"回复评论异常: {e}")
             return False
 
+    async def check_private_messages(self) -> int:
+        """Reply to unread B站 private messages, with strict daily limits."""
+        if not self.config.get('interaction.reply_private_messages', True):
+            return 0
+        if getattr(self.bili, 'is_blocked', lambda: False)():
+            return 0
+        try:
+            max_per_check = int(self.config.get('limits.max_dm_per_check', 3))
+        except (TypeError, ValueError):
+            max_per_check = 3
+        try:
+            max_per_day = int(self.config.get('limits.max_dm_per_day', 10))
+        except (TypeError, ValueError):
+            max_per_day = 10
+        try:
+            if self.db.get_today_memory_event_count('dm') >= max_per_day:
+                return 0
+            sessions = await self.bili.get_private_sessions(session_type=1)
+            self_info = await self.bili.get_self_info()
+            self_uid = self_info.get('uid')
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"读取私信会话失败: {exc}")
+            return 0
+        persona = self._load_persona()
+        sent = 0
+        for session in sessions:
+            if sent >= max_per_check:
+                break
+            talker_id = session.get('talker_id')
+            if not talker_id:
+                continue
+            try:
+                messages = await self.bili.get_private_messages(talker_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"读取私信消息失败 {talker_id}: {exc}")
+                continue
+            incoming = [
+                message for message in messages
+                if message.get('sender_uid') != self_uid
+                and (message.get('content') or '').strip()
+                and message.get('content') != '[消息已撤回]'
+            ]
+            if not incoming:
+                continue
+            last = incoming[-1]
+            timestamp = int(last.get('timestamp') or 0)
+            if timestamp <= self.db.get_dm_state(talker_id):
+                continue
+            memory_context = self.db.get_memory_context(
+                user_mid=talker_id,
+                user_name=session.get('name') or '',
+                limit=5,
+            )
+            video_context = "B站私信（不是评论区）"
+            if memory_context:
+                video_context += f"\n\n# 你记得这位网友的事\n{memory_context}"
+            reply = await self.ai.generate_reply(
+                original_comment=last.get('content') or '',
+                video_context=video_context,
+                persona=persona,
+                user_name=session.get('name') or '',
+                memory_context=memory_context,
+                is_owner=bool(
+                    session.get('name')
+                    and session.get('name') == self.config.get('bilibili.owner_name', '')
+                ),
+            )
+            if not reply:
+                continue
+            if await self.bili.send_private_message(talker_id, reply):
+                self.db.set_dm_state(talker_id, timestamp)
+                try:
+                    self.db.add_memory_event(
+                        'dm',
+                        user_name=session.get('name') or '',
+                        user_mid=talker_id,
+                        content=last.get('content') or '',
+                        my_content=reply,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"记录私信记忆失败: {exc}")
+                sent += 1
+                logger.info(f"✅ 私信已回复: {session.get('name') or talker_id}")
+                await asyncio.sleep(3)
+        return sent
+
     async def check_and_reply(self) -> Dict[str, Any]:
         """检查新回复；自动回复开启时逐条回复，并返回检测到的回复列表。"""
         mentions = await self.check_mentions()
@@ -491,7 +577,8 @@ class CommentManager:
                 if await self.reply_to_mention(mention):
                     replied += 1
                 await asyncio.sleep(2)
-        return {'replied': replied, 'mentions': mentions}
+        dm_replied = await self.check_private_messages()
+        return {'replied': replied, 'dm_replied': dm_replied, 'mentions': mentions}
 
     async def monitor_loop(self):
         """

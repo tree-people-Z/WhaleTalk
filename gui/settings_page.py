@@ -181,10 +181,17 @@ class SettingsPage(QWidget):
         self.follow_up_check.stateChanged.connect(self.auto_save)
         self.like_up_dynamic_check.stateChanged.connect(self.auto_save)
         self.post_video_dynamic_check.stateChanged.connect(self.auto_save)
+        self.reply_private_messages_check.stateChanged.connect(self.auto_save)
+        self.coin_video_check.stateChanged.connect(self.auto_save)
+        self.share_video_check.stateChanged.connect(self.auto_save)
+        self.watch_later_check.stateChanged.connect(self.auto_save)
+        self.repost_dynamic_check.stateChanged.connect(self.auto_save)
         for spin in (
             self.prob_like_reply_spin, self.prob_report_watch_spin,
             self.prob_favorite_spin, self.prob_follow_spin,
             self.prob_like_dynamic_spin, self.prob_post_dynamic_spin,
+            self.prob_coin_spin, self.prob_share_spin,
+            self.prob_watch_later_spin, self.prob_repost_spin,
         ):
             spin.valueChanged.connect(self.auto_save)
             self.disable_wheel_event(spin)
@@ -196,6 +203,7 @@ class SettingsPage(QWidget):
         self.reply_to_others_check.stateChanged.connect(self.auto_save)
         self.frame_analysis_check.stateChanged.connect(self.auto_save)
         self.diary_check.stateChanged.connect(self.auto_save)
+        self.auto_apply_persona_check.stateChanged.connect(self.auto_save)
         self.deepseek_offpeak_check.stateChanged.connect(self.auto_save)
 
         # 下拉框
@@ -527,6 +535,17 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.post_video_dynamic_check)
 
+        self.reply_private_messages_check = QCheckBox("自动回复私信（低频，默认开启）")
+        layout.addWidget(self.reply_private_messages_check)
+        self.coin_video_check = QCheckBox("评论成功后偶尔投币（约5%）")
+        layout.addWidget(self.coin_video_check)
+        self.share_video_check = QCheckBox("评论成功后偶尔分享视频（默认关闭）")
+        layout.addWidget(self.share_video_check)
+        self.watch_later_check = QCheckBox("评论成功后偶尔加入稍后再看（约10%）")
+        layout.addWidget(self.watch_later_check)
+        self.repost_dynamic_check = QCheckBox("偶尔转发UP主的动态（默认关闭）")
+        layout.addWidget(self.repost_dynamic_check)
+
         prob_form = QFormLayout()
         self.prob_like_reply_spin = QSpinBox()
         self.prob_like_reply_spin.setRange(0, 100)
@@ -552,6 +571,22 @@ class SettingsPage(QWidget):
         self.prob_post_dynamic_spin.setRange(0, 100)
         self.prob_post_dynamic_spin.setSuffix("%")
         prob_form.addRow("发视频动态:", self.prob_post_dynamic_spin)
+        self.prob_coin_spin = QSpinBox()
+        self.prob_coin_spin.setRange(0, 100)
+        self.prob_coin_spin.setSuffix("%")
+        prob_form.addRow("评论后投币:", self.prob_coin_spin)
+        self.prob_share_spin = QSpinBox()
+        self.prob_share_spin.setRange(0, 100)
+        self.prob_share_spin.setSuffix("%")
+        prob_form.addRow("评论后分享:", self.prob_share_spin)
+        self.prob_watch_later_spin = QSpinBox()
+        self.prob_watch_later_spin.setRange(0, 100)
+        self.prob_watch_later_spin.setSuffix("%")
+        prob_form.addRow("加入稍后再看:", self.prob_watch_later_spin)
+        self.prob_repost_spin = QSpinBox()
+        self.prob_repost_spin.setRange(0, 100)
+        self.prob_repost_spin.setSuffix("%")
+        prob_form.addRow("转发UP动态:", self.prob_repost_spin)
         layout.addLayout(prob_form)
 
         # 自动回复
@@ -647,6 +682,14 @@ class SettingsPage(QWidget):
         self.apply_candidates_btn = QPushButton("查看并应用人设候选…")
         self.apply_candidates_btn.clicked.connect(self.apply_persona_candidates)
         layout.addWidget(self.apply_candidates_btn)
+
+        self.auto_apply_persona_check = QCheckBox(
+            "自动应用人设候选（带备份/回滚，每 7 天最多一次）"
+        )
+        layout.addWidget(self.auto_apply_persona_check)
+        self.rollback_persona_btn = QPushButton("回滚人设到上一版")
+        self.rollback_persona_btn.clicked.connect(self.rollback_persona)
+        layout.addWidget(self.rollback_persona_btn)
 
         group.setLayout(layout)
         return group
@@ -787,6 +830,21 @@ class SettingsPage(QWidget):
         self.post_video_dynamic_check.setChecked(
             self.config.get('interaction.post_video_dynamic', False)
         )
+        self.reply_private_messages_check.setChecked(
+            self.config.get('interaction.reply_private_messages', True)
+        )
+        self.coin_video_check.setChecked(
+            self.config.get('interaction.coin_commented_video', True)
+        )
+        self.share_video_check.setChecked(
+            self.config.get('interaction.share_commented_video', False)
+        )
+        self.watch_later_check.setChecked(
+            self.config.get('interaction.watch_later_commented_video', True)
+        )
+        self.repost_dynamic_check.setChecked(
+            self.config.get('interaction.repost_up_dynamic', False)
+        )
         self.prob_like_reply_spin.setValue(
             self.config.get('interaction.prob_like_reply', 50)
         )
@@ -804,6 +862,18 @@ class SettingsPage(QWidget):
         )
         self.prob_post_dynamic_spin.setValue(
             self.config.get('interaction.prob_post_dynamic', 5)
+        )
+        self.prob_coin_spin.setValue(
+            self.config.get('interaction.prob_coin_video', 5)
+        )
+        self.prob_share_spin.setValue(
+            self.config.get('interaction.prob_share_video', 2)
+        )
+        self.prob_watch_later_spin.setValue(
+            self.config.get('interaction.prob_watch_later', 10)
+        )
+        self.prob_repost_spin.setValue(
+            self.config.get('interaction.prob_repost_dynamic', 3)
         )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
@@ -831,6 +901,9 @@ class SettingsPage(QWidget):
         self._update_transcription_controls()
         self._refresh_transcription_state()
         self.diary_check.setChecked(self.config.get('diary.enabled', True))
+        self.auto_apply_persona_check.setChecked(
+            self.config.get('memory.auto_apply_persona', False)
+        )
 
         # 自动运行
         self.browse_interval_min_spin.setValue(
@@ -958,6 +1031,35 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.prob_post_dynamic', self.prob_post_dynamic_spin.value()
             )
+            self.config.set(
+                'interaction.prob_coin_video', self.prob_coin_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_share_video', self.prob_share_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_watch_later', self.prob_watch_later_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_repost_dynamic', self.prob_repost_spin.value()
+            )
+            self.config.set(
+                'interaction.reply_private_messages',
+                self.reply_private_messages_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.coin_commented_video', self.coin_video_check.isChecked()
+            )
+            self.config.set(
+                'interaction.share_commented_video', self.share_video_check.isChecked()
+            )
+            self.config.set(
+                'interaction.watch_later_commented_video',
+                self.watch_later_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.repost_up_dynamic', self.repost_dynamic_check.isChecked()
+            )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
                 'interaction.greet_other_whales', self.greet_whales_check.isChecked()
@@ -986,6 +1088,10 @@ class SettingsPage(QWidget):
                 self.cloud_stt_model_input.text().strip() or 'whisper-1',
             )
             self.config.set('diary.enabled', self.diary_check.isChecked())
+            self.config.set(
+                'memory.auto_apply_persona',
+                self.auto_apply_persona_check.isChecked(),
+            )
             self.analysis_settings_saved.emit()
 
             # 自动巡视与 DeepSeek 闲时调度
@@ -1030,6 +1136,25 @@ class SettingsPage(QWidget):
         self.self_review_btn.setEnabled(not running)
         if message:
             self.self_review_status.setText(message)
+
+    def rollback_persona(self):
+        from utils.persona_evolution import rollback_persona as do_rollback
+        reply = QMessageBox.question(
+            self,
+            "回滚人设",
+            "将 data/persona.md 恢复到上一版快照（当前版本也会先备份）。继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            snapshot = do_rollback(Path('data') / 'persona.md')
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "回滚失败", str(exc))
+            return
+        QMessageBox.information(
+            self, "已回滚", f"已恢复到快照：{snapshot.name}"
+        )
 
     def apply_persona_candidates(self):
         """Preview and manually apply AI candidates; always keep a backup."""

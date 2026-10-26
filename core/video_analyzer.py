@@ -1,4 +1,4 @@
-﻿"""
+"""
 视频分析器
 负责搜索、筛选、分析视频
 """
@@ -970,6 +970,38 @@ class VideoAnalyzer:
                         await self.bili.favorite_video(aid)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug(f"收藏视频失败: {exc}")
+                if (
+                    self.config.get('interaction.coin_commented_video', True)
+                    and self._roll_probability('prob_coin_video', 5)
+                ):
+                    try:
+                        await self.bili.coin_video(aid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"投币失败: {exc}")
+                if (
+                    self.config.get('interaction.share_commented_video', False)
+                    and self._roll_probability('prob_share_video', 2)
+                ):
+                    try:
+                        await self.bili.share_video(aid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"分享视频失败: {exc}")
+                if (
+                    self.config.get('interaction.watch_later_commented_video', True)
+                    and self._roll_probability('prob_watch_later', 10)
+                ):
+                    try:
+                        await self.bili.add_to_watch_later(aid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"稍后再看失败: {exc}")
+                if (
+                    self.config.get('interaction.repost_up_dynamic', False)
+                    and self._roll_probability('prob_repost_dynamic', 3)
+                ):
+                    try:
+                        await self.bili.repost_video_author_dynamic(bvid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"转发动态失败: {exc}")
                 if (
                     self.config.get('interaction.follow_commented_up', False)
                     and self._roll_probability('prob_follow_up', 10)
