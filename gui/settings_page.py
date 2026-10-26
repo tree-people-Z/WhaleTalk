@@ -19,6 +19,7 @@ from PyQt6.QtCore import QUrl
 from loguru import logger
 
 from utils.config_manager import ConfigManager
+from utils.reply_scope import apply_reply_scope, resolve_reply_scope
 from utils.subprocess_helpers import hidden_window_kwargs
 from utils.updater import APP_VERSION, REPOSITORY_URL
 
@@ -174,8 +175,7 @@ class SettingsPage(QWidget):
         self.mention_owner_check.stateChanged.connect(self.auto_save)
         self.persona_enabled_check.stateChanged.connect(self.auto_save)
         self.comment_monitor_check.stateChanged.connect(self.auto_save)
-        self.reply_own_video_check.stateChanged.connect(self.auto_save)
-        self.comment_requested_video_check.stateChanged.connect(self.auto_save)
+        self.reply_scope_combo.currentIndexChanged.connect(self.auto_save)
         self.like_replied_comment_check.stateChanged.connect(self.auto_save)
         self.report_watching_check.stateChanged.connect(self.auto_save)
         self.favorite_video_check.stateChanged.connect(self.auto_save)
@@ -200,11 +200,6 @@ class SettingsPage(QWidget):
             spin.valueChanged.connect(self.auto_save)
             self.disable_wheel_event(spin)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
-        self.greet_whales_check.stateChanged.connect(self.auto_save)
-        self.greet_whales_spin.valueChanged.connect(self.auto_save)
-        self.reply_interesting_check.stateChanged.connect(self.auto_save)
-        self.reply_only_owner_check.stateChanged.connect(self.auto_save)
-        self.reply_to_others_check.stateChanged.connect(self.auto_save)
         self.frame_analysis_check.stateChanged.connect(self.auto_save)
         self.diary_check.stateChanged.connect(self.auto_save)
         self.auto_apply_persona_check.stateChanged.connect(self.auto_save)
@@ -231,7 +226,6 @@ class SettingsPage(QWidget):
         self.disable_wheel_event(self.min_score_spin)
         self.disable_wheel_event(self.max_results_spin)
         self.disable_wheel_event(self.mention_threshold_spin)
-        self.disable_wheel_event(self.greet_whales_spin)
 
         # 禁用所有下拉框的鼠标滚轮
         self.disable_wheel_event(self.ai_provider_combo)
@@ -520,18 +514,18 @@ class SettingsPage(QWidget):
 
         # 评论监听
         layout.addWidget(self._section_header("评论与回复"))
+        scope_layout = QHBoxLayout()
+        scope_layout.addWidget(QLabel("回复范围:"))
+        self.reply_scope_combo = QComboBox()
+        self.reply_scope_combo.addItem("只回主人", "owner")
+        self.reply_scope_combo.addItem(
+            "所有人（宽范围：有趣评论 / 鲸鱼娘 / 指定视频）", "all"
+        )
+        scope_layout.addWidget(self.reply_scope_combo)
+        scope_layout.addStretch()
+        layout.addLayout(scope_layout)
         self.comment_monitor_check = QCheckBox("启用评论监听（检测回复和@）")
         layout.addWidget(self.comment_monitor_check)
-
-        # 回复自己视频下的评论
-        self.reply_own_video_check = QCheckBox("回复我自己视频下的评论（必回）")
-        layout.addWidget(self.reply_own_video_check)
-
-        # 对方让看视频时去视频下评论
-        self.comment_requested_video_check = QCheckBox(
-            "对方让我看视频时，去她的视频下面评论"
-        )
-        layout.addWidget(self.comment_requested_video_check)
 
         layout.addWidget(self._section_header("视频互动"))
         self.like_replied_comment_check = QCheckBox(
@@ -630,32 +624,6 @@ class SettingsPage(QWidget):
         layout.addWidget(self._section_header("回复规则"))
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
-
-        # 遇到其他鲸鱼娘时打招呼
-        greet_layout = QHBoxLayout()
-        self.greet_whales_check = QCheckBox("遇到其他鲸鱼娘时打招呼")
-        greet_layout.addWidget(self.greet_whales_check)
-        greet_layout.addWidget(QLabel("每视频最多:"))
-        self.greet_whales_spin = QSpinBox()
-        self.greet_whales_spin.setRange(0, 10)
-        greet_layout.addWidget(self.greet_whales_spin)
-        greet_layout.addWidget(QLabel("个（每轮上限 5 个）"))
-        greet_layout.addStretch()
-        layout.addLayout(greet_layout)
-
-        # 回复有趣评论
-        self.reply_interesting_check = QCheckBox("回复别人的有趣评论")
-        layout.addWidget(self.reply_interesting_check)
-
-        # 回复范围
-        reply_layout = QHBoxLayout()
-        reply_layout.addWidget(QLabel("  回复范围:"))
-        self.reply_only_owner_check = QCheckBox("仅处理主人发来的@提醒（不影响对我评论的回复）")
-        reply_layout.addWidget(self.reply_only_owner_check)
-        self.reply_to_others_check = QCheckBox("回复其他人")
-        reply_layout.addWidget(self.reply_to_others_check)
-        reply_layout.addStretch()
-        layout.addLayout(reply_layout)
 
         # 画面分析
         layout.addWidget(self._section_header("分析与转写"))
@@ -854,12 +822,10 @@ class SettingsPage(QWidget):
 
         # 高级功能设置
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
-        self.reply_own_video_check.setChecked(
-            self.config.get('interaction.reply_own_video_comments', True)
-        )
-        self.comment_requested_video_check.setChecked(
-            self.config.get('interaction.comment_requested_video', True)
-        )
+        scope = resolve_reply_scope(self.config)
+        scope_index = self.reply_scope_combo.findData(scope)
+        if scope_index >= 0:
+            self.reply_scope_combo.setCurrentIndex(scope_index)
         self.like_replied_comment_check.setChecked(
             self.config.get('interaction.like_replied_comments', True)
         )
@@ -933,15 +899,6 @@ class SettingsPage(QWidget):
             self.config.get('interaction.prob_repost_dynamic', 3)
         )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
-        self.greet_whales_check.setChecked(
-            self.config.get('interaction.greet_other_whales', True)
-        )
-        self.greet_whales_spin.setValue(
-            self.config.get('limits.max_greetings_per_video', 2)
-        )
-        self.reply_interesting_check.setChecked(self.config.get('interaction.reply_interesting_comments', False))
-        self.reply_only_owner_check.setChecked(self.config.get('interaction.reply_only_owner', True))
-        self.reply_to_others_check.setChecked(self.config.get('interaction.reply_to_others', False))
         self.frame_analysis_check.setChecked(self.config.get('analysis.enable_frame_analysis', True))
         mode = self.config.get('analysis.transcription_mode', 'off')
         mode_index = self.transcription_mode_combo.findData(mode)
@@ -1038,13 +995,8 @@ class SettingsPage(QWidget):
 
             # 高级功能设置
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
-            self.config.set(
-                'interaction.reply_own_video_comments',
-                self.reply_own_video_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.comment_requested_video',
-                self.comment_requested_video_check.isChecked(),
+            apply_reply_scope(
+                self.config, self.reply_scope_combo.currentData() or 'all'
             )
             self.config.set(
                 'interaction.like_replied_comments',
@@ -1128,15 +1080,6 @@ class SettingsPage(QWidget):
                 'interaction.like_danmaku', self.like_danmaku_check.isChecked()
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
-            self.config.set(
-                'interaction.greet_other_whales', self.greet_whales_check.isChecked()
-            )
-            self.config.set(
-                'limits.max_greetings_per_video', self.greet_whales_spin.value()
-            )
-            self.config.set('interaction.reply_interesting_comments', self.reply_interesting_check.isChecked())
-            self.config.set('interaction.reply_only_owner', self.reply_only_owner_check.isChecked())
-            self.config.set('interaction.reply_to_others', self.reply_to_others_check.isChecked())
             self.config.set('analysis.enable_frame_analysis', self.frame_analysis_check.isChecked())
             self.config.set(
                 'analysis.transcription_mode',

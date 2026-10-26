@@ -215,6 +215,7 @@ class ConfigManager:
                 "report_watching": False,
                 "comment_monitor": True,
                 "auto_reply": True,
+                "reply_scope": "all",
                 "reply_own_video_comments": True,
                 "own_video_count": 10,
                 "max_own_video_replies_per_check": 10,

@@ -25,6 +25,7 @@ hiddenimports += [
     "utils.media_library",
     "utils.persona_evolution",
     "utils.probability",
+    "utils.reply_scope",
 ]
 datas += collect_data_files("bilibili_api")
 if ONEFILE:
