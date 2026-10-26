@@ -67,10 +67,36 @@ analysis = Analysis(
         "scipy", "pandas", "gradio", "transformers", "librosa", "lightning",
         "sklearn", "tensorflow", "onnxruntime", "cv2", "numba", "sympy",
         "numpy", "pandas-stubs", "IPython", "matplotlib", "tkinter",
+        # Pulled in by optional dependency paths but unused by WhaleTalk.
+        "grpc", "google", "cryptography",
     ],
     noarchive=False,
     optimize=0,
 )
+
+# Qt ships PDF support, every locale and every plugin by default. WhaleTalk is a
+# widgets-only Chinese app: keep the platform/style/image plugins it needs and a
+# couple of Qt translations, but drop the unused PDF DLL and bulk locale data.
+_QT_ALLOWED_PLUGIN_DIRS = {"platforms", "styles", "imageformats", "iconengines"}
+_QT_KEPT_TRANSLATIONS = {"qtbase_zh_CN.qm", "qt_zh_CN.qm", "qtbase_en.qm"}
+
+
+def _keep_qt_entry(dest: str) -> bool:
+    normalized = dest.replace("\\", "/")
+    if normalized.endswith("/Qt6/bin/Qt6Pdf.dll"):
+        return False
+    if "/Qt6/translations/" in normalized:
+        return Path(normalized).name in _QT_KEPT_TRANSLATIONS
+    if "/Qt6/plugins/" in normalized:
+        category = normalized.split("/Qt6/plugins/", 1)[1].split("/", 1)[0]
+        return category in _QT_ALLOWED_PLUGIN_DIRS
+    return True
+
+
+analysis.datas = [entry for entry in analysis.datas if _keep_qt_entry(entry[0])]
+analysis.binaries = [
+    entry for entry in analysis.binaries if _keep_qt_entry(entry[0])
+]
 
 # Drop binaries that only exist on the build machine and must come from the OS.
 #
