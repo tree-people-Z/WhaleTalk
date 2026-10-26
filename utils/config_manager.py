@@ -187,6 +187,8 @@ class ConfigManager:
                 "like_replied_comments": True,
                 "favorite_commented_video": True,
                 "follow_commented_up": False,
+                "like_up_dynamics": False,
+                "post_video_dynamic": False,
                 "report_watching": False,
                 "comment_monitor": True,
                 "auto_reply": True,

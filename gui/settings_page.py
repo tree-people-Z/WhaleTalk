@@ -179,6 +179,8 @@ class SettingsPage(QWidget):
         self.report_watching_check.stateChanged.connect(self.auto_save)
         self.favorite_video_check.stateChanged.connect(self.auto_save)
         self.follow_up_check.stateChanged.connect(self.auto_save)
+        self.like_up_dynamic_check.stateChanged.connect(self.auto_save)
+        self.post_video_dynamic_check.stateChanged.connect(self.auto_save)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.greet_whales_check.stateChanged.connect(self.auto_save)
         self.greet_whales_spin.valueChanged.connect(self.auto_save)
@@ -511,6 +513,12 @@ class SettingsPage(QWidget):
         layout.addWidget(self.favorite_video_check)
         self.follow_up_check = QCheckBox("关注喜欢的UP主（低频，默认关闭）")
         layout.addWidget(self.follow_up_check)
+        self.like_up_dynamic_check = QCheckBox("偶尔给UP主的动态点赞（默认关闭）")
+        layout.addWidget(self.like_up_dynamic_check)
+        self.post_video_dynamic_check = QCheckBox(
+            "偶尔把喜欢的视频发成动态（默认关闭，请谨慎）"
+        )
+        layout.addWidget(self.post_video_dynamic_check)
 
         # 自动回复
         self.auto_reply_check = QCheckBox("启用自动回复")
@@ -735,6 +743,12 @@ class SettingsPage(QWidget):
         self.follow_up_check.setChecked(
             self.config.get('interaction.follow_commented_up', False)
         )
+        self.like_up_dynamic_check.setChecked(
+            self.config.get('interaction.like_up_dynamics', False)
+        )
+        self.post_video_dynamic_check.setChecked(
+            self.config.get('interaction.post_video_dynamic', False)
+        )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
             self.config.get('interaction.greet_other_whales', True)
@@ -861,6 +875,14 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.follow_commented_up',
                 self.follow_up_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.like_up_dynamics',
+                self.like_up_dynamic_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.post_video_dynamic',
+                self.post_video_dynamic_check.isChecked(),
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(

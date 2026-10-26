@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from bilibili_api import login_v2, search, video, comment, user
-from bilibili_api import favorite_list
+from bilibili_api import favorite_list, dynamic
 from bilibili_api import session as bili_session
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
@@ -1266,6 +1266,48 @@ class BilibiliAPI:
         if not info:
             return False
         return await self.follow_user(info.get('owner_mid') or 0)
+
+    async def like_latest_user_dynamic(self, uid: int) -> bool:
+        """给某个 UP 最近一条动态点赞（低频行为）。"""
+        if not self.credential or not uid or self.is_blocked():
+            return False
+        try:
+            data = await user.User(uid, credential=self.credential).get_dynamics_new()
+            for item in (data or {}).get('items') or []:
+                dynamic_id = item.get('id_str') or item.get('id')
+                if not dynamic_id:
+                    continue
+                await dynamic.Dynamic(
+                    int(dynamic_id), credential=self.credential
+                ).set_like(True)
+                logger.info(f"点赞动态成功: uid={uid} dynamic={dynamic_id}")
+                return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"点赞动态失败 uid={uid}: {self._short_error(str(exc))}")
+        return False
+
+    async def like_video_author_dynamic(self, bvid: str) -> bool:
+        info = await self.get_video_info(bvid)
+        if not info:
+            return False
+        return await self.like_latest_user_dynamic(info.get('owner_mid') or 0)
+
+    async def post_video_dynamic(self, bvid: str, title: str) -> bool:
+        """把视频分享成一条纯文本动态（低频、需显式开启）。"""
+        if not self.credential or self.is_blocked():
+            return False
+        try:
+            text = (
+                f"看到这个视频：{title}\n"
+                f"https://www.bilibili.com/video/{bvid}"
+            )
+            payload = dynamic.BuildDynamic.create_by_args(text=text)
+            await dynamic.send_dynamic(payload, self.credential)
+            logger.info(f"发布视频动态成功: {bvid}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"发布动态失败 {bvid}: {self._short_error(str(exc))}")
+            return False
 
     async def get_my_info(self) -> Optional[Dict[str, Any]]:
         """获取当前登录用户信息"""

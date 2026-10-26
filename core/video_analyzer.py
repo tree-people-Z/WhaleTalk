@@ -970,6 +970,22 @@ class VideoAnalyzer:
                         await self.bili.follow_video_author(bvid)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug(f"关注UP失败: {exc}")
+                if (
+                    self.config.get('interaction.like_up_dynamics', False)
+                    and random.random() < 0.1
+                ):
+                    try:
+                        await self.bili.like_video_author_dynamic(bvid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"点赞动态失败: {exc}")
+                if (
+                    self.config.get('interaction.post_video_dynamic', False)
+                    and random.random() < 0.05
+                ):
+                    try:
+                        await self.bili.post_video_dynamic(bvid, title)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"发布动态失败: {exc}")
                 try:
                     self.db.add_memory_event(
                         'comment',
