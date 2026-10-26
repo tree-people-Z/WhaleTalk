@@ -118,7 +118,33 @@ WhaleTalk\data\models\faster-whisper\medium\
 
 B 站返回 `12014 已达到当前评论发送上限` 时，程序会暂停发评论到次日 00:05，并把冷却状态持久化到 `data/posting_blocked.json`；重启后仍会继续冷却。
 
-实测账号的 B 站顶层评论上限约为 96 条/天，默认「每日最大评论数」也是 96。不要调得更高，也不要连续多轮评论。
+实测账号的 B 站发送上限包含评论与回复；默认「每日最大发送数（评论+回复）」为 60。不要调得更高，也不要连续多轮评论。
+
+## 长期记忆、日记与自进化
+
+- SQLite 新增 `memory_events`（每次互动）和 `user_memories`（按网友汇总）。
+- 回复前由 `Database.get_memory_context()` 取最近互动，注入 `AIClient.generate_reply(memory_context=...)`。
+- 每轮分析结束由 `VideoAnalyzer._write_daily_diary()` 写 `data/diaries/to_owner/` 与 `to_self/`。
+- `core/self_review.py` 读取统计、记忆和日记，生成：
+  - `data/diaries/self_review/YYYY-MM-DD_self_review.md`
+  - `data/persona_candidates.md`
+- **不会自动修改 `data/persona.md`**。设置页“查看并应用人设候选”会先备份 `persona.md.bak-<timestamp>`，再追加人工确认的内容。
+- 最近复盘的“下周建议”会作为私有提示注入回复，不会展示给网友。
+
+## 真人行为概率
+
+配置键在 `interaction` 下：
+
+| 键 | 默认 | 行为 |
+|---|---|---|
+| `prob_like_reply` | 50 | 回复后给网友评论点赞 |
+| `prob_report_watch` | 50 | 上报观看进度 |
+| `prob_favorite_video` | 20 | 评论成功后收藏视频 |
+| `prob_follow_up` | 10 | 关注 UP 主 |
+| `prob_like_dynamic` | 10 | 点赞 UP 动态 |
+| `prob_post_dynamic` | 5 | 发视频动态 |
+
+对应的总开关是 `like_replied_comments`、`report_watching`、`favorite_commented_video`、`follow_commented_up`、`like_up_dynamics`、`post_video_dynamic`。概率设 0 即关闭。
 
 ## 数据与隐私
 

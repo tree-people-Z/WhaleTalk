@@ -81,6 +81,18 @@ class SelfReview:
         logger.info(f'已应用人设候选，备份: {backup}')
         return backup
 
+    def has_data(self) -> bool:
+        """True when there is enough real interaction data to review."""
+        try:
+            if self.db.get_recent_memory_events(limit=1):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return bool(self.db.get_recent_comments(limit=1, include_replies=True))
+        except Exception:  # noqa: BLE001
+            return False
+
     def _recent_diaries(self) -> List[str]:
         base = self.review_dir.parent
         texts = []
@@ -135,6 +147,10 @@ class SelfReview:
 不要编造数据；没有数据就写“暂无”。"""
 
     async def generate(self) -> Dict[str, Any]:
+        if not self.has_data():
+            raise RuntimeError(
+                "暂无可复盘数据：先运行一轮分析或完成几次回复后再生成复盘。"
+            )
         prompt = self._build_prompt()
         text = ''
         if self.ai is not None:
