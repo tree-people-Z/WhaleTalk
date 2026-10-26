@@ -142,6 +142,7 @@ class SettingsPage(QWidget):
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
+    self_review_requested = pyqtSignal()
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -584,6 +585,16 @@ class SettingsPage(QWidget):
         self.diary_check = QCheckBox("启用双日记系统（记忆）")
         layout.addWidget(self.diary_check)
 
+        self.self_review_btn = QPushButton("生成每周自我复盘（不会自动改人设）")
+        self.self_review_btn.clicked.connect(self.self_review_requested.emit)
+        layout.addWidget(self.self_review_btn)
+        self.self_review_status = QLabel(
+            "复盘文件保存到 data/diaries/self_review/，候选调整写入 data/persona_candidates.md"
+        )
+        self.self_review_status.setWordWrap(True)
+        self.self_review_status.setStyleSheet("color: #6b7280; font-size: 12px;")
+        layout.addWidget(self.self_review_status)
+
         group.setLayout(layout)
         return group
 
@@ -897,6 +908,11 @@ class SettingsPage(QWidget):
         ):
             widget.setEnabled(is_cloud)
         self.transcription_setup_btn.setEnabled(is_local)
+
+    def set_self_review_running(self, running: bool, message: str = ""):
+        self.self_review_btn.setEnabled(not running)
+        if message:
+            self.self_review_status.setText(message)
 
     def open_local_model_dir(self):
         """Create and open the folder for manually downloaded model files."""

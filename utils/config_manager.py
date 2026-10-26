@@ -212,6 +212,10 @@ class ConfigManager:
             "diary": {
                 "enabled": True
             },
+            "memory": {
+                "enabled": True,
+                "auto_self_review": True
+            },
             "logging": {
                 "level": "INFO",
                 "file": "data/logs/bot.log",

@@ -27,6 +27,8 @@ from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
 from core.video_analyzer import VideoAnalyzer
 from core.scheduler import TaskScheduler
+from core.self_review import SelfReview
+from gui.self_review_worker import SelfReviewWorker
 from utils.database import Database
 from utils.config_manager import ConfigManager
 from utils.updater import launch_update_installer
@@ -113,11 +115,14 @@ class MainWindow(QMainWindow):
         self._update_download = None
         self._update_progress = None
         self.settings_page.check_update_requested.connect(self.check_updates_manually)
+        self.settings_page.self_review_requested.connect(self.generate_self_review)
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
         self._update_timer.setInterval(5000)
         self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_timer.start()
+        self._self_review_worker = None
+        QTimer.singleShot(15000, self._maybe_auto_self_review)
 
         # 运行期间每 6 小时复查一次更新。
         self._update_recheck_timer = QTimer(self)
@@ -810,6 +815,51 @@ class MainWindow(QMainWindow):
         self._force_quit = True
         self.close()
         QApplication.instance().quit()
+
+    def generate_self_review(self):
+        """Generate a weekly review; never applies persona changes automatically."""
+        if self._self_review_worker is not None and self._self_review_worker.isRunning():
+            return
+        if self.ai_client is None:
+            QMessageBox.warning(self, "无法复盘", "请先在设置里配置 AI API Key。")
+            return
+        self.settings_page.set_self_review_running(True, "正在生成自我复盘…")
+        worker = SelfReviewWorker(SelfReview(self.db, self.ai_client), self)
+        self._self_review_worker = worker
+        worker.done.connect(self._on_self_review_done)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_self_review_done(self, success: bool, message: str):
+        self.settings_page.set_self_review_running(False)
+        if success:
+            self.settings_page.self_review_status.setText(
+                f"复盘已生成：{message}（候选文件 data/persona_candidates.md）"
+            )
+            self.log(f"✅ 自我复盘已生成: {message}")
+            QMessageBox.information(
+                self,
+                "自我复盘完成",
+                f"复盘文件：\n{message}\n\n候选调整：\ndata/persona_candidates.md\n\n"
+                "不会自动修改人设，请确认后手动应用。",
+            )
+        else:
+            self.settings_page.self_review_status.setText(f"复盘失败：{message}")
+            QMessageBox.warning(self, "自我复盘失败", message)
+
+    def _maybe_auto_self_review(self):
+        if not self.config.get('memory.auto_self_review', True):
+            return
+        if self.ai_client is None:
+            return
+        try:
+            if not self.db.get_recent_memory_events(limit=1):
+                return
+            review = SelfReview(self.db, self.ai_client)
+            if review.is_due(7):
+                self.generate_self_review()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"自动复盘检查失败: {exc}")
 
     def _update_failed(self, message, dialog):
         dialog.close()
