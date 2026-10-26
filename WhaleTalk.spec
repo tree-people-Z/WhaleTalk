@@ -26,6 +26,7 @@ hiddenimports += [
     "core.daily_diary",
     "core.agent_protocol",
     "core.comment_events",
+    "core.comment_images",
     "core.bilibili_dm",
     "core.bilibili_comment",
     "core.bilibili_interact",

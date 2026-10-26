@@ -221,6 +221,9 @@ class ConversationAgent:
 
     async def handle(self, event: Dict[str, Any]) -> bool:
         """Return True when a reply was sent."""
+        if event.get('images'):
+            from core.comment_images import describe_comment_images
+            await describe_comment_images([event], self.ai, max_images=2)
         messages = [
             {'role': 'system', 'content': self._system_prompt(event)},
             {

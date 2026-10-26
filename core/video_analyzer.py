@@ -469,7 +469,16 @@ class VideoAnalyzer:
 
             # 获取热门评论
             comments = await self.bili.get_comments(video['aid'], count=15)
-            comment_texts = [c['content'] for c in comments if c['content']]
+            from core.comment_images import describe_comment_images
+            await describe_comment_images(comments, self.ai, max_images=3)
+            comment_texts = []
+            for item in comments:
+                text = item.get('content') or ''
+                descriptions = item.get('image_descriptions') or []
+                if descriptions:
+                    text = (text + '\n[评论图片：' + '；'.join(descriptions) + ']').strip()
+                if text:
+                    comment_texts.append(text)
 
             # 加载人设
             persona = self._load_persona()

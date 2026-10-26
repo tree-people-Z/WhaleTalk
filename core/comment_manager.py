@@ -116,6 +116,7 @@ class CommentManager:
                 'content': mention.get('content') or '',
                 'parent_content': mention.get('parent_content') or '',
                 'root_content': mention.get('root_content') or '',
+                'images': mention.get('images') or [],
                 'aid': mention.get('aid'),
                 'bvid': mention.get('bvid') or '',
                 'video_title': mention.get('video_title') or '',
