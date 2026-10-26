@@ -1,4 +1,4 @@
-"""
+﻿"""
 视频分析器
 负责搜索、筛选、分析视频
 """
@@ -155,6 +155,14 @@ class VideoAnalyzer:
         if candidates:
             logger.info(f"发现 {len(candidates)} 个其他鲸鱼娘评论，可打招呼")
         return candidates
+
+    def _roll_probability(self, key: str, default: float) -> bool:
+        try:
+            probability = float(self.config.get(f'interaction.{key}', default))
+        except (TypeError, ValueError):
+            probability = default
+        probability = max(0.0, min(100.0, probability))
+        return random.random() * 100 < probability
 
     def _daily_send_quota_remaining(self) -> int:
         """Remaining daily sends, counting top-level comments and replies together."""
@@ -948,7 +956,7 @@ class VideoAnalyzer:
                 self.db.mark_commented(bvid, comment_text, comment_rpid)
                 if (
                     self.config.get('interaction.report_watching', False)
-                    and random.random() < 0.5
+                    and self._roll_probability('prob_report_watch', 50)
                 ):
                     try:
                         await self.bili.report_watch(bvid)
@@ -956,7 +964,7 @@ class VideoAnalyzer:
                         logger.debug(f"上报观看进度失败: {exc}")
                 if (
                     self.config.get('interaction.favorite_commented_video', True)
-                    and random.random() < 0.2
+                    and self._roll_probability('prob_favorite_video', 20)
                 ):
                     try:
                         await self.bili.favorite_video(aid)
@@ -964,7 +972,7 @@ class VideoAnalyzer:
                         logger.debug(f"收藏视频失败: {exc}")
                 if (
                     self.config.get('interaction.follow_commented_up', False)
-                    and random.random() < 0.1
+                    and self._roll_probability('prob_follow_up', 10)
                 ):
                     try:
                         await self.bili.follow_video_author(bvid)
@@ -972,7 +980,7 @@ class VideoAnalyzer:
                         logger.debug(f"关注UP失败: {exc}")
                 if (
                     self.config.get('interaction.like_up_dynamics', False)
-                    and random.random() < 0.1
+                    and self._roll_probability('prob_like_dynamic', 10)
                 ):
                     try:
                         await self.bili.like_video_author_dynamic(bvid)
@@ -980,7 +988,7 @@ class VideoAnalyzer:
                         logger.debug(f"点赞动态失败: {exc}")
                 if (
                     self.config.get('interaction.post_video_dynamic', False)
-                    and random.random() < 0.05
+                    and self._roll_probability('prob_post_dynamic', 5)
                 ):
                     try:
                         await self.bili.post_video_dynamic(bvid, title)

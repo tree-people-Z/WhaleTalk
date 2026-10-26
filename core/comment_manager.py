@@ -1,4 +1,4 @@
-"""
+﻿"""
 评论管理模块
 负责监听评论区的@提醒并回复
 """
@@ -140,6 +140,14 @@ class CommentManager:
             import traceback
             logger.error(traceback.format_exc())
             return []
+
+    def _roll_probability(self, key: str, default: float) -> bool:
+        try:
+            probability = float(self.config.get(f'interaction.{key}', default))
+        except (TypeError, ValueError):
+            probability = default
+        probability = max(0.0, min(100.0, probability))
+        return random.random() * 100 < probability
 
     def _daily_send_quota_remaining(self) -> int:
         try:
@@ -439,7 +447,7 @@ class CommentManager:
                 self.processed_rpids.add(rpid)
                 if (
                     self.config.get('interaction.like_replied_comments', True)
-                    and random.random() < 0.5
+                    and self._roll_probability('prob_like_reply', 50)
                 ):
                     try:
                         await self.bili.like_comment(aid, rpid)

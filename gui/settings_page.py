@@ -181,6 +181,13 @@ class SettingsPage(QWidget):
         self.follow_up_check.stateChanged.connect(self.auto_save)
         self.like_up_dynamic_check.stateChanged.connect(self.auto_save)
         self.post_video_dynamic_check.stateChanged.connect(self.auto_save)
+        for spin in (
+            self.prob_like_reply_spin, self.prob_report_watch_spin,
+            self.prob_favorite_spin, self.prob_follow_spin,
+            self.prob_like_dynamic_spin, self.prob_post_dynamic_spin,
+        ):
+            spin.valueChanged.connect(self.auto_save)
+            self.disable_wheel_event(spin)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.greet_whales_check.stateChanged.connect(self.auto_save)
         self.greet_whales_spin.valueChanged.connect(self.auto_save)
@@ -520,6 +527,33 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(self.post_video_dynamic_check)
 
+        prob_form = QFormLayout()
+        self.prob_like_reply_spin = QSpinBox()
+        self.prob_like_reply_spin.setRange(0, 100)
+        self.prob_like_reply_spin.setSuffix("%")
+        prob_form.addRow("回复后点赞网友评论:", self.prob_like_reply_spin)
+        self.prob_report_watch_spin = QSpinBox()
+        self.prob_report_watch_spin.setRange(0, 100)
+        self.prob_report_watch_spin.setSuffix("%")
+        prob_form.addRow("上报观看进度:", self.prob_report_watch_spin)
+        self.prob_favorite_spin = QSpinBox()
+        self.prob_favorite_spin.setRange(0, 100)
+        self.prob_favorite_spin.setSuffix("%")
+        prob_form.addRow("评论后收藏视频:", self.prob_favorite_spin)
+        self.prob_follow_spin = QSpinBox()
+        self.prob_follow_spin.setRange(0, 100)
+        self.prob_follow_spin.setSuffix("%")
+        prob_form.addRow("关注UP主:", self.prob_follow_spin)
+        self.prob_like_dynamic_spin = QSpinBox()
+        self.prob_like_dynamic_spin.setRange(0, 100)
+        self.prob_like_dynamic_spin.setSuffix("%")
+        prob_form.addRow("点赞UP动态:", self.prob_like_dynamic_spin)
+        self.prob_post_dynamic_spin = QSpinBox()
+        self.prob_post_dynamic_spin.setRange(0, 100)
+        self.prob_post_dynamic_spin.setSuffix("%")
+        prob_form.addRow("发视频动态:", self.prob_post_dynamic_spin)
+        layout.addLayout(prob_form)
+
         # 自动回复
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
@@ -753,6 +787,24 @@ class SettingsPage(QWidget):
         self.post_video_dynamic_check.setChecked(
             self.config.get('interaction.post_video_dynamic', False)
         )
+        self.prob_like_reply_spin.setValue(
+            self.config.get('interaction.prob_like_reply', 50)
+        )
+        self.prob_report_watch_spin.setValue(
+            self.config.get('interaction.prob_report_watch', 50)
+        )
+        self.prob_favorite_spin.setValue(
+            self.config.get('interaction.prob_favorite_video', 20)
+        )
+        self.prob_follow_spin.setValue(
+            self.config.get('interaction.prob_follow_up', 10)
+        )
+        self.prob_like_dynamic_spin.setValue(
+            self.config.get('interaction.prob_like_dynamic', 10)
+        )
+        self.prob_post_dynamic_spin.setValue(
+            self.config.get('interaction.prob_post_dynamic', 5)
+        )
         self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.greet_whales_check.setChecked(
             self.config.get('interaction.greet_other_whales', True)
@@ -887,6 +939,24 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.post_video_dynamic',
                 self.post_video_dynamic_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.prob_like_reply', self.prob_like_reply_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_report_watch', self.prob_report_watch_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_favorite_video', self.prob_favorite_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_follow_up', self.prob_follow_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_like_dynamic', self.prob_like_dynamic_spin.value()
+            )
+            self.config.set(
+                'interaction.prob_post_dynamic', self.prob_post_dynamic_spin.value()
             )
             self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
