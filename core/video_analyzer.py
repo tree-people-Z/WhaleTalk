@@ -592,8 +592,6 @@ class VideoAnalyzer:
         self, worthy_videos: List[Dict[str, Any]], comments_sent: int
     ) -> None:
         """Write the day's diary from real statistics and interactions."""
-        if not self.config.get('diary.enabled', True):
-            return
         try:
             stats = self.db.get_statistics()
             events = self.db.get_recent_memory_events(limit=30)
@@ -1080,25 +1078,22 @@ class VideoAnalyzer:
             return False
 
     def _load_persona(self) -> str:
-        """加载角色人设"""
+        """加载核心人设 + 自动进化风格"""
+        from utils.persona_evolution import load_effective_persona
+
         if not self.config.get('persona.enabled', True):
             return ""
 
         persona_file = self.config.get('persona.persona_file', 'data/persona.md')
-        persona_path = Path(persona_file)
-
-        if not persona_path.exists():
-            # 返回基本人设
+        try:
+            content = load_effective_persona(Path(persona_file))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"加载人设文件失败: {exc}")
+            content = ""
+        if not content:
             name = self.config.get('persona.name', 'AI助手')
             return f"你是 {name}，一个友好的AI助手。"
-
-        try:
-            with open(persona_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return content[:3000]  # 限制长度
-        except Exception as e:
-            logger.warning(f"加载人设文件失败: {e}")
-            return ""
+        return content[:4000]
 
 
 # 同步包装器

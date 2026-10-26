@@ -58,51 +58,56 @@ class SelfReview:
         except OSError:
             return ''
 
-    @staticmethod
-    def apply_candidates_to_persona(
-        persona_path: Optional[Path] = None,
-        candidates_path: Optional[Path] = None,
-    ) -> Path:
-        """Append confirmed candidates to the persona with a versioned backup."""
-        from utils.persona_evolution import apply_candidates
-        persona = Path(persona_path or (Path('data') / 'persona.md'))
-        candidates = SelfReview.read_candidates(candidates_path)
-        result = apply_candidates(persona, candidates, auto=False)
-        return result['backup']
+    def check_style_health(self) -> str:
+        from utils.persona_evolution import evaluate_style_health
+        try:
+            return evaluate_style_health(self.db)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'人设风格健康检查失败: {exc}')
+            return ''
 
     def _maybe_auto_apply(self) -> str:
-        """Apply candidates automatically when enabled, once per interval."""
-        if self.config is None or not self.config.get('memory.auto_apply_persona', False):
-            return ''
+        """Always auto-apply style candidates, at most once per interval."""
+        from utils.persona_evolution import (
+            apply_style,
+            evaluate_style_health,
+            read_state,
+        )
         try:
-            interval_days = int(self.config.get('memory.auto_apply_interval_days', 7))
+            health = evaluate_style_health(self.db)
+            if health:
+                return health
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'人设风格健康检查失败: {exc}')
+        try:
+            interval_days = int(
+                self.config.get('memory.auto_apply_interval_days', 7)
+            ) if self.config is not None else 7
         except (TypeError, ValueError):
             interval_days = 7
-        stamp_path = Path('data') / 'persona_last_auto_apply.txt'
         now = datetime.datetime.now()
-        if stamp_path.is_file():
+        state = read_state()
+        cooldown = state.get('cooldown_until')
+        if cooldown:
             try:
-                last = datetime.datetime.fromisoformat(
-                    stamp_path.read_text(encoding='utf-8').strip()
-                )
-                if (now - last).days < interval_days:
+                if now < datetime.datetime.fromisoformat(cooldown):
+                    return '人设风格冷却中，本次候选仅保存'
+            except ValueError:
+                pass
+        last_apply = state.get('last_apply')
+        if last_apply:
+            try:
+                if (now - datetime.datetime.fromisoformat(last_apply)).days < interval_days:
                     return '自动应用间隔未到，本次候选仅保存'
-            except (OSError, ValueError):
+            except ValueError:
                 pass
         try:
-            from utils.persona_evolution import apply_candidates
-            apply_candidates(
-                Path('data') / 'persona.md',
-                self.read_candidates(self.candidates_path),
-                auto=True,
-            )
-            stamp_path.parent.mkdir(parents=True, exist_ok=True)
-            stamp_path.write_text(now.isoformat(), encoding='utf-8')
-            logger.info('人设候选已自动应用')
-            return '人设候选已自动应用（已备份，可回滚）'
+            apply_style(self.read_candidates(self.candidates_path))
+            logger.info('人设风格已自动替换')
+            return '人设风格已自动更新'
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f'人设候选自动应用失败: {exc}')
-            return f'人设候选未自动应用：{exc}'
+            logger.warning(f'人设风格自动更新失败: {exc}')
+            return f'人设风格未更新：{exc}'
 
     def has_data(self) -> bool:
         """True when there is enough real interaction data to review."""
@@ -166,8 +171,8 @@ class SelfReview:
 ## 有效的表达
 ## 机械感与风险
 ## 下周建议
-## 人设候选调整（最多3条，必须人工确认）
-不要编造数据；没有数据就写“暂无”。"""
+## 风格候选（最多5条，只写表达风格，每条以 - 开头）
+不要写身份、平台规则或代码建议；没有就写“- 暂无”。"""
 
     async def generate(self) -> Dict[str, Any]:
         if not self.has_data():
@@ -199,7 +204,7 @@ class SelfReview:
         candidates = self._extract_candidates(text)
         self.candidates_path.write_text(
             f'# 人设候选调整 {today}\n\n'
-            '> 自动生成；是否应用由 memory.auto_apply_persona 决定。\n\n'
+            '> 自动生成；风格会自动应用。\n\n'
             f'{candidates}\n',
             encoding='utf-8',
         )
@@ -222,12 +227,15 @@ class SelfReview:
             '## 有效的表达\n- 暂无足够数据，下周继续积累。\n\n'
             '## 机械感与风险\n- 注意不要连续使用同一个傲娇开头，也不要对每条评论都秒回。\n\n'
             '## 下周建议\n- 优先回复认识的人和自己视频下的评论；评论长度保持 20–50 字。\n\n'
-            '## 人设候选调整（最多3条，必须人工确认）\n- 暂无。\n'
+            '## 风格候选（最多5条，只写表达风格）\n- 暂无。\n'
         )
 
     @staticmethod
     def _extract_candidates(text: str) -> str:
-        marker = '## 人设候选调整'
-        if marker in text:
-            return text.split(marker, 1)[1].strip()
-        return '- 暂无。'
+        marker = '## 风格候选'
+        section = text.split(marker, 1)[1] if marker in text else text
+        bullets = [
+            line.strip() for line in section.splitlines()
+            if line.strip().startswith(('-', '•'))
+        ]
+        return '\n'.join(bullets[:5]) if bullets else '- 暂无。'

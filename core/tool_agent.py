@@ -17,13 +17,12 @@ MAX_OBSERVATION_CHARS = 2400
 
 
 def _persona_text() -> str:
-    path = Path('data') / 'persona.md'
+    from utils.persona_evolution import load_effective_persona
     try:
-        if path.is_file():
-            return path.read_text(encoding='utf-8')[:6000]
-    except OSError:
-        pass
-    return '我是鲸鱼娘，一只蓝色的大肥鱼女仆；傲娇、心软、爱摸鱼。'
+        text = load_effective_persona()
+    except Exception:  # noqa: BLE001
+        text = ''
+    return text[:6000] or '我是鲸鱼娘，一只蓝色的大肥鱼女仆；傲娇、心软、爱摸鱼。'
 
 
 class ReadOnlyTools:

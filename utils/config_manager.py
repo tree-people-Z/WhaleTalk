@@ -237,14 +237,7 @@ class ConfigManager:
                     "model": "whisper-1"
                 }
             },
-            "diary": {
-                "enabled": True
-            },
             "memory": {
-                "enabled": True,
-                "use_self_review": True,
-                "auto_self_review": True,
-                "auto_apply_persona": False,
                 "auto_apply_interval_days": 7
             },
             "logging": {

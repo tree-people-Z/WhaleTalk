@@ -387,18 +387,17 @@ class CommentManager:
                     f"{memory_context}\n"
                 )
 
-            if self.config.get('memory.use_self_review', True):
-                try:
-                    from core.self_review import SelfReview
-                    hints = SelfReview(self.db).load_review_hints(600)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug(f"读取自我复盘提醒失败: {exc}")
-                    hints = ""
-                if hints:
-                    video_context += (
-                        "\n# 最近自我复盘的提醒（避免机械感，不要提到复盘）\n"
-                        f"{hints}\n"
-                    )
+            try:
+                from core.self_review import SelfReview
+                hints = SelfReview(self.db).load_review_hints(600)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"读取自我复盘提醒失败: {exc}")
+                hints = ""
+            if hints:
+                video_context += (
+                    "\n# 最近自我复盘的提醒（避免机械感，不要提到复盘）\n"
+                    f"{hints}\n"
+                )
 
             # 生成回复
             reply_text = await self.ai.generate_reply(
@@ -622,26 +621,23 @@ class CommentManager:
                 await asyncio.sleep(60)  # 出错后等待1分钟
 
     def _load_persona(self) -> str:
-        """加载角色人设"""
+        """加载核心人设 + 自动进化风格"""
         from pathlib import Path
+        from utils.persona_evolution import load_effective_persona
 
         if not self.config.get('persona.enabled', True):
             return ""
 
         persona_file = self.config.get('persona.persona_file', 'data/persona.md')
-        persona_path = Path(persona_file)
-
-        if not persona_path.exists():
+        try:
+            content = load_effective_persona(Path(persona_file))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"加载人设文件失败: {exc}")
+            content = ""
+        if not content:
             name = self.config.get('persona.name', 'AI助手')
             return f"你是 {name}，一个友好的AI助手。"
-
-        try:
-            with open(persona_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return content[:3000]
-        except Exception as e:
-            logger.warning(f"加载人设文件失败: {e}")
-            return ""
+        return content[:4000]
 
 
 # 使用示例

@@ -515,6 +515,20 @@ class Database:
             VideoRecord.analyzed_at >= cutoff,
         ).first() is not None
 
+    def get_comment_outcomes_since(self, since: datetime) -> List[Dict[str, Any]]:
+        """Read success/failure outcomes since a timestamp (for style health)."""
+        records = self.session.query(CommentRecord).filter(
+            CommentRecord.created_at >= since
+        ).all()
+        return [
+            {
+                'success': bool(record.success),
+                'error': record.error_message or '',
+                'created_at': record.created_at,
+            }
+            for record in records
+        ]
+
     def get_recent_comments(
         self, limit: int = 20, include_replies: bool = False
     ) -> List[Dict[str, Any]]:

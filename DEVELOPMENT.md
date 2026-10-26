@@ -128,7 +128,11 @@ B 站返回 `12014 已达到当前评论发送上限` 时，程序会暂停发�
 - `core/self_review.py` 读取统计、记忆和日记，生成：
   - `data/diaries/self_review/YYYY-MM-DD_self_review.md`
   - `data/persona_candidates.md`
-- 默认只生成候选。开启 `memory.auto_apply_persona` 后每周最多自动应用一次；应用前快照到 `data/persona_versions/`，可在设置页回滚，候选会校验大小并拒绝身份/安全类改动。
+- 自动进化：`data/persona.md` 只作为核心人设，**不会被自动修改**；自动生成只写 `data/persona_style.md`。
+- 运行时由 `load_effective_persona()` 拼接“核心 + 风格”。
+- 每 7 天最多替换一次风格，旧风格快照在 `data/persona_versions/style-*.md`。
+- 候选只允许最多 5 条表达风格，长度/关键词校验；不写身份或平台规则。
+- 应用后 72 小时评估；失败率 >20%、412≥3 或出现 12014 时自动回滚并冷却 7 天。
 - 最近复盘的“下周建议”会作为私有提示注入回复，不会展示给网友。
 
 ## 只读工具 Agent（2.0）
@@ -137,8 +141,8 @@ B 站返回 `12014 已达到当前评论发送上限` 时，程序会暂停发�
 - 工具清单：搜索视频、视频详情、读评论、自己投稿、最近评论、回忆、统计、复盘建议、日记。
 - AI 每步只输出 JSON：`{"action":"tool",...}` 或 `{"action":"finish",...}`；最多 6 步。
 - 只读，不提供评论/点赞/私信/发动态等写工具。
-- 运行记录写入 `data/agent_traces/`，GUI 设置页按钮“让她自主观察一轮（只读）”触发，后台线程执行。
-- 新增模块需要加入 `WhaleTalk.spec` 的 `hiddenimports`（`gui.agent_worker`、`core.tool_agent`、`utils.media_library`、`utils.persona_evolution`、`utils.probability`）。
+- 运行记录写入 `data/agent_traces/`，GUI 设置页按钮“自主观察一轮”触发，后台线程执行。
+- 新增模块需要加入 `WhaleTalk.spec` 的 `hiddenimports`（`gui.agent_worker`、`core.tool_agent`、`utils.media_library`、`utils.persona_evolution`、`utils.probability`、`utils.reply_scope`）。
 
 ## 真人行为概率
 

@@ -116,7 +116,6 @@ class MainWindow(QMainWindow):
         self._update_download = None
         self._update_progress = None
         self.settings_page.check_update_requested.connect(self.check_updates_manually)
-        self.settings_page.self_review_requested.connect(self.generate_self_review)
         self.settings_page.agent_requested.connect(self.run_agent_observation)
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
@@ -126,6 +125,10 @@ class MainWindow(QMainWindow):
         self._self_review_worker = None
         self._agent_worker = None
         QTimer.singleShot(15000, self._maybe_auto_self_review)
+        self._review_check_timer = QTimer(self)
+        self._review_check_timer.setInterval(6 * 60 * 60 * 1000)
+        self._review_check_timer.timeout.connect(self._maybe_auto_self_review)
+        self._review_check_timer.start()
 
         # 运行期间每 6 小时复查一次更新。
         self._update_recheck_timer = QTimer(self)
@@ -881,16 +884,18 @@ class MainWindow(QMainWindow):
             self.log(f"⚠️ 自主观察失败: {message}")
 
     def _maybe_auto_self_review(self):
-        if not self.config.get('memory.auto_self_review', True):
-            return
         if self.ai_client is None:
             return
         try:
+            review = SelfReview(self.db, self.ai_client, config=self.config)
+            health = review.check_style_health()
+            if health:
+                self.log(f"🐋 {health}")
+            if not review.is_due(7):
+                return
             if not self.db.get_recent_memory_events(limit=1):
                 return
-            review = SelfReview(self.db, self.ai_client, config=self.config)
-            if review.is_due(7):
-                self.generate_self_review()
+            self.generate_self_review()
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"自动复盘检查失败: {exc}")
 

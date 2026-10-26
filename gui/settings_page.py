@@ -143,7 +143,6 @@ class SettingsPage(QWidget):
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
-    self_review_requested = pyqtSignal()
     agent_requested = pyqtSignal()
 
     def __init__(self, config: ConfigManager):
@@ -201,8 +200,6 @@ class SettingsPage(QWidget):
             self.disable_wheel_event(spin)
         self.auto_reply_check.stateChanged.connect(self.auto_save)
         self.frame_analysis_check.stateChanged.connect(self.auto_save)
-        self.diary_check.stateChanged.connect(self.auto_save)
-        self.auto_apply_persona_check.stateChanged.connect(self.auto_save)
         self.deepseek_offpeak_check.stateChanged.connect(self.auto_save)
 
         # 下拉框
@@ -248,7 +245,7 @@ class SettingsPage(QWidget):
     def _toggle_probability_panel(self, expanded: bool):
         self.prob_panel.setVisible(expanded)
         self.prob_toggle_btn.setText(
-            "收起行为概率设置" if expanded else "展开行为概率设置"
+            "收起概率" if expanded else "行为概率"
         )
 
     def auto_save(self):
@@ -518,9 +515,7 @@ class SettingsPage(QWidget):
         scope_layout.addWidget(QLabel("回复范围:"))
         self.reply_scope_combo = QComboBox()
         self.reply_scope_combo.addItem("只回主人", "owner")
-        self.reply_scope_combo.addItem(
-            "所有人（宽范围：有趣评论 / 鲸鱼娘 / 指定视频）", "all"
-        )
+        self.reply_scope_combo.addItem("所有人", "all")
         scope_layout.addWidget(self.reply_scope_combo)
         scope_layout.addStretch()
         layout.addLayout(scope_layout)
@@ -614,7 +609,7 @@ class SettingsPage(QWidget):
         self.prob_repost_spin.setSuffix("%")
         prob_form.addRow("转发UP动态:", self.prob_repost_spin)
         self.prob_panel.setVisible(False)
-        self.prob_toggle_btn = QPushButton("展开行为概率设置")
+        self.prob_toggle_btn = QPushButton("行为概率")
         self.prob_toggle_btn.setCheckable(True)
         self.prob_toggle_btn.toggled.connect(self._toggle_probability_panel)
         layout.addWidget(self.prob_toggle_btn)
@@ -672,40 +667,14 @@ class SettingsPage(QWidget):
         self.transcription_state_label.setWordWrap(True)
         layout.addWidget(self.transcription_state_label)
 
-        # 双日记系统
-        self.diary_check = QCheckBox("启用双日记系统（记忆）")
-        layout.addWidget(self.diary_check)
+        # 记忆与人格进化全自动，不提供开关
 
-        layout.addWidget(self._section_header("人格与自我进化"))
-        self.self_review_btn = QPushButton("生成每周自我复盘")
-        self.self_review_btn.clicked.connect(self.self_review_requested.emit)
-        layout.addWidget(self.self_review_btn)
-        self.self_review_status = QLabel(
-            "复盘文件保存到 data/diaries/self_review/，候选调整写入 data/persona_candidates.md"
-        )
-        self.self_review_status.setWordWrap(True)
-        self.self_review_status.setStyleSheet("color: #6b7280; font-size: 12px;")
-        layout.addWidget(self.self_review_status)
-
-        self.apply_candidates_btn = QPushButton("查看并应用人设候选…")
-        self.apply_candidates_btn.clicked.connect(self.apply_persona_candidates)
-        layout.addWidget(self.apply_candidates_btn)
-
-        self.auto_apply_persona_check = QCheckBox(
-            "自动应用人设候选（带备份/回滚，每 7 天最多一次）"
-        )
-        layout.addWidget(self.auto_apply_persona_check)
-        self.rollback_persona_btn = QPushButton("回滚人设到上一版")
-        self.rollback_persona_btn.clicked.connect(self.rollback_persona)
-        layout.addWidget(self.rollback_persona_btn)
-
-        self.agent_btn = QPushButton("让她自主观察一轮（只读，不发任何内容）")
+        layout.addWidget(self._section_header("自主观察"))
+        self.agent_btn = QPushButton("自主观察一轮")
         self.agent_btn.clicked.connect(self.agent_requested.emit)
         layout.addWidget(self.agent_btn)
-        self.agent_status = QLabel("她会自己选择看哪些视频、读哪些评论，只读不写。")
-        self.agent_status.setWordWrap(True)
-        self.agent_status.setStyleSheet("color: #6b7280; font-size: 12px;")
-        layout.addWidget(self.agent_status)
+        self.agent_status = QLabel()
+        self.agent_status.setVisible(False)
 
         group.setLayout(layout)
         return group
@@ -914,10 +883,6 @@ class SettingsPage(QWidget):
         )
         self._update_transcription_controls()
         self._refresh_transcription_state()
-        self.diary_check.setChecked(self.config.get('diary.enabled', True))
-        self.auto_apply_persona_check.setChecked(
-            self.config.get('memory.auto_apply_persona', False)
-        )
 
         # 自动运行
         self.browse_interval_min_spin.setValue(
@@ -1097,11 +1062,6 @@ class SettingsPage(QWidget):
                 'analysis.cloud_transcription.model',
                 self.cloud_stt_model_input.text().strip() or 'whisper-1',
             )
-            self.config.set('diary.enabled', self.diary_check.isChecked())
-            self.config.set(
-                'memory.auto_apply_persona',
-                self.auto_apply_persona_check.isChecked(),
-            )
             self.analysis_settings_saved.emit()
 
             # 自动巡视与 DeepSeek 闲时调度
@@ -1143,64 +1103,13 @@ class SettingsPage(QWidget):
         self.transcription_setup_btn.setEnabled(is_local)
 
     def set_self_review_running(self, running: bool, message: str = ""):
-        self.self_review_btn.setEnabled(not running)
-        if message:
-            self.self_review_status.setText(message)
+        """自动复盘没有可见控件，仅用于兼容后台回调。"""
+        pass
 
     def set_agent_running(self, running: bool, message: str = ""):
         self.agent_btn.setEnabled(not running)
         if message:
             self.agent_status.setText(message)
-
-    def rollback_persona(self):
-        from utils.persona_evolution import rollback_persona as do_rollback
-        reply = QMessageBox.question(
-            self,
-            "回滚人设",
-            "将 data/persona.md 恢复到上一版快照（当前版本也会先备份）。继续吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            snapshot = do_rollback(Path('data') / 'persona.md')
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "回滚失败", str(exc))
-            return
-        QMessageBox.information(
-            self, "已回滚", f"已恢复到快照：{snapshot.name}"
-        )
-
-    def apply_persona_candidates(self):
-        """Preview and manually apply AI candidates; always keep a backup."""
-        from core.self_review import SelfReview
-        text = SelfReview.read_candidates()
-        if not text:
-            QMessageBox.information(
-                self, "暂无人设候选",
-                "先生成每周自我复盘，候选会写入 data/persona_candidates.md。",
-            )
-            return
-        preview = text[:1800]
-        reply = QMessageBox.question(
-            self,
-            "应用人设候选",
-            "以下内容将追加到 data/persona.md：\n\n"
-            f"{preview}\n\n"
-            "应用前会自动备份 persona.md。确定应用吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            backup = SelfReview.apply_candidates_to_persona()
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "应用失败", str(exc))
-            return
-        QMessageBox.information(
-            self, "已应用",
-            f"人设候选已追加到 data/persona.md。\n旧文件备份：{backup}",
-        )
 
     def open_local_model_dir(self):
         """Create and open the folder for manually downloaded model files."""
