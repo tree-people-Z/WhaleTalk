@@ -52,8 +52,6 @@ class VideoAnalyzer:
         self.db = database
         self.config = config
         self._stop_requested = threading.Event()
-        self._greetings_sent_this_run = 0
-        self._interactions_sent_this_run = 0
         self._search_page = 1
 
         # 初始化双日记系统
@@ -94,69 +92,6 @@ class VideoAnalyzer:
     _WHALE_NAME_KEYWORDS = ('鲸鱼娘', '大肥鱼', 'DeepSeek娘', '鲸语娘')
     _WHALE_CONTENT_KEYWORDS = ('大肥鱼', '软乎乎', '女仆')
 
-    @classmethod
-    def _looks_like_whale(cls, comment: Dict[str, Any]) -> bool:
-        """Heuristically detect comments from another 鲸鱼娘-style bot."""
-        name = str(comment.get('user') or '')
-        content = str(comment.get('content') or '')
-        if any(keyword in name for keyword in cls._WHALE_NAME_KEYWORDS):
-            return True
-        return (
-            '鲸鱼娘' in content
-            and any(keyword in content for keyword in cls._WHALE_CONTENT_KEYWORDS)
-        )
-
-    async def _find_greeting_candidates(self, comments) -> List[Dict[str, Any]]:
-        """Collect a few other-whale comments to greet on this video."""
-        if not self.config.get('interaction.greet_other_whales', True):
-            return []
-        try:
-            self_info = await self.bili.get_self_info()
-        except Exception:  # noqa: BLE001
-            self_info = {}
-        if not isinstance(self_info, dict):
-            self_info = {}
-        self_uid = self_info.get('uid')
-        self_name = self_info.get('name') or ''
-        owner_name = self.config.get('bilibili.owner_name', '')
-        try:
-            already_replied = set(self.db.get_replied_comment_ids())
-        except Exception:  # noqa: BLE001
-            already_replied = set()
-        try:
-            max_candidates = int(self.config.get('limits.max_greetings_per_video', 2))
-        except (TypeError, ValueError):
-            max_candidates = 2
-        if max_candidates <= 0:
-            return []
-
-        candidates = []
-        for comment in comments or []:
-            rpid = comment.get('rpid')
-            if not rpid or rpid in already_replied:
-                continue
-            if self_uid is not None and comment.get('mid') == self_uid:
-                continue
-            user = comment.get('user') or ''
-            if self_name and user == self_name:
-                continue
-            if owner_name and user == owner_name:
-                continue
-            if not self._looks_like_whale(comment):
-                continue
-            candidates.append({
-                'rpid': rpid,
-                'user': user,
-                'content': comment.get('content') or '',
-                'root': comment.get('root') or rpid,
-                'parent': comment.get('parent') or rpid,
-            })
-            if len(candidates) >= max_candidates:
-                break
-        if candidates:
-            logger.info(f"发现 {len(candidates)} 个其他鲸鱼娘评论，可打招呼")
-        return candidates
-
     def _roll_probability(self, key: str, default: float) -> bool:
         return roll_probability(self.config, key, default)
 
@@ -171,222 +106,6 @@ class VideoAnalyzer:
         except (TypeError, ValueError, AttributeError):
             used = 0
         return max(0, max_total - used)
-
-    async def _greet_other_whales(
-        self, video: Dict[str, Any], analysis: Dict[str, Any]
-    ) -> int:
-        """Reply briefly to other 鲸鱼娘 comments, with per-run limits."""
-        if not self.config.get('interaction.greet_other_whales', True):
-            return 0
-        if not self.config.get('interaction.auto_comment', False):
-            return 0
-        candidates = analysis.get('greeting_candidates') or []
-        if not candidates:
-            return 0
-        try:
-            per_run = int(self.config.get('limits.max_greetings_per_run', 5))
-        except (TypeError, ValueError):
-            per_run = 5
-        remaining = max(0, per_run - self._greetings_sent_this_run)
-        if remaining <= 0:
-            return 0
-
-        persona = self._load_persona()
-        sent = 0
-        for target in candidates[:remaining]:
-            try:
-                reply = await self.ai.generate_reply(
-                    original_comment=(
-                        f"另一位鲸鱼娘/同好说：{target.get('content', '')}"
-                    ),
-                    video_context=f"视频: {video.get('title', '')}",
-                    persona=persona,
-                    user_name=target.get('user') or '',
-                    is_owner=bool(
-                        target.get('user')
-                        and target.get('user') == self.config.get(
-                            'bilibili.owner_name', ''
-                        )
-                    ),
-                )
-                if not reply:
-                    continue
-                if self._daily_send_quota_remaining() <= 0:
-                    logger.info("今日发送配额已用完，停止打招呼")
-                    break
-                success = await self.bili.post_comment(
-                    aid=video['aid'],
-                    text=reply,
-                    root_rpid=target.get('root') or target.get('rpid'),
-                    parent_rpid=target.get('rpid'),
-                )
-                if success:
-                    self.db.add_comment_record(
-                        bvid=video.get('bvid', ''),
-                        aid=video.get('aid'),
-                        content=reply,
-                        comment_type='reply',
-                        success=True,
-                        rpid=getattr(self.bili, 'last_comment_rpid', None),
-                        parent_rpid=target.get('rpid'),
-                        thread_root=target.get('root') or target.get('rpid'),
-                        target_user=target.get('user') or '',
-                        parent_content=target.get('content') or '',
-                    )
-                    self._greetings_sent_this_run += 1
-                    sent += 1
-                    logger.info(f"👋 已向其他鲸鱼娘打招呼: {target.get('user')}")
-                await asyncio.sleep(2)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"向其他鲸鱼娘打招呼失败: {exc}")
-        return sent
-
-    @staticmethod
-    def _looks_like_reply_invitation(content: str) -> bool:
-        """Detect comments that invite a reply, e.g. '鱼会回复吗'."""
-        text = (content or '').strip()
-        if not text or len(text) > 200:
-            return False
-        bot_terms = (
-            '鲸鱼娘', '大肥鱼', '鱼', '回复', '回我', '理我',
-            '在吗', '冒泡', '机器人', 'AI娘', '主播',
-        )
-        if not any(term in text for term in bot_terms):
-            return False
-        asks = any(mark in text for mark in ('?', '？', '吗', '么', '呢', '嘛'))
-        return asks or '回复' in text
-
-    async def _find_reply_invitations(self, comments) -> List[Dict[str, Any]]:
-        """Collect a few top-level comments that invite a reply."""
-        if not self.config.get('interaction.reply_interesting_comments', True):
-            return []
-        only_owner = bool(self.config.get('interaction.reply_only_owner', False))
-        reply_to_others = self.config.get('interaction.reply_to_others', True)
-        owner_name = self.config.get('bilibili.owner_name', '')
-        if only_owner and not owner_name:
-            return []
-        if not only_owner and not reply_to_others:
-            return []
-        try:
-            self_info = await self.bili.get_self_info()
-        except Exception:  # noqa: BLE001
-            self_info = {}
-        if not isinstance(self_info, dict):
-            self_info = {}
-        self_uid = self_info.get('uid')
-        self_name = self_info.get('name') or ''
-        try:
-            already_replied = set(self.db.get_replied_comment_ids())
-        except Exception:  # noqa: BLE001
-            already_replied = set()
-        try:
-            max_candidates = int(
-                self.config.get('limits.max_interactions_per_video', 1)
-            )
-        except (TypeError, ValueError):
-            max_candidates = 1
-        if max_candidates <= 0:
-            return []
-
-        candidates = []
-        for comment in comments or []:
-            rpid = comment.get('rpid')
-            if not rpid or rpid in already_replied:
-                continue
-            # 只处理顶层评论；楼中楼回复由回复检查处理。
-            if comment.get('root') not in (0, None):
-                continue
-            if self_uid is not None and comment.get('mid') == self_uid:
-                continue
-            user = comment.get('user') or ''
-            if self_name and user == self_name:
-                continue
-            if only_owner and user != owner_name:
-                continue
-            content = comment.get('content') or ''
-            if not self._looks_like_reply_invitation(content):
-                continue
-            candidates.append({
-                'rpid': rpid,
-                'user': user,
-                'content': content,
-                'root': rpid,
-                'parent': rpid,
-            })
-            if len(candidates) >= max_candidates:
-                break
-        if candidates:
-            logger.info(f"发现 {len(candidates)} 条可互动评论，准备回复")
-        return candidates
-
-    async def _reply_to_invitations(
-        self, video: Dict[str, Any], analysis: Dict[str, Any]
-    ) -> int:
-        """Reply to viewer comments such as '鱼会回复吗', with per-run limits."""
-        if not self.config.get('interaction.reply_interesting_comments', True):
-            return 0
-        if not self.config.get('interaction.auto_comment', False):
-            return 0
-        if self.bili.is_blocked():
-            return 0
-        candidates = analysis.get('reply_invitations') or []
-        if not candidates:
-            return 0
-        try:
-            per_run = int(self.config.get('limits.max_interactions_per_run', 3))
-        except (TypeError, ValueError):
-            per_run = 3
-        remaining = max(0, per_run - self._interactions_sent_this_run)
-        if remaining <= 0:
-            return 0
-
-        persona = self._load_persona()
-        sent = 0
-        for target in candidates[:remaining]:
-            try:
-                reply = await self.ai.generate_reply(
-                    original_comment=target.get('content', ''),
-                    video_context=f"视频: {video.get('title', '')}",
-                    persona=persona,
-                    user_name=target.get('user') or '',
-                    is_owner=bool(
-                        target.get('user')
-                        and target.get('user') == self.config.get(
-                            'bilibili.owner_name', ''
-                        )
-                    ),
-                )
-                if not reply:
-                    continue
-                if self._daily_send_quota_remaining() <= 0:
-                    logger.info("今日发送配额已用完，停止互动回复")
-                    break
-                success = await self.bili.post_comment(
-                    aid=video['aid'],
-                    text=reply,
-                    root_rpid=target.get('rpid'),
-                    parent_rpid=target.get('rpid'),
-                )
-                if success:
-                    self.db.add_comment_record(
-                        bvid=video.get('bvid', ''),
-                        aid=video.get('aid'),
-                        content=reply,
-                        comment_type='reply',
-                        success=True,
-                        rpid=getattr(self.bili, 'last_comment_rpid', None),
-                        parent_rpid=target.get('rpid'),
-                        thread_root=target.get('root') or target.get('rpid'),
-                        target_user=target.get('user') or '',
-                        parent_content=target.get('content') or '',
-                    )
-                    self._interactions_sent_this_run += 1
-                    sent += 1
-                    logger.info(f"💬 已回复评论互动: {target.get('user')}")
-                await asyncio.sleep(2)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"回复评论互动失败: {exc}")
-        return sent
 
     async def check_replies(self) -> Dict[str, Any]:
         """单独检查并回复评论，供高频调度使用。"""
@@ -424,8 +143,6 @@ class VideoAnalyzer:
         logger.info("=" * 60)
         logger.info("开始新一轮视频分析")
         logger.info("=" * 60)
-        self._greetings_sent_this_run = 0
-        self._interactions_sent_this_run = 0
         self._raise_if_stopping()
 
         if self.bili.is_blocked():
@@ -524,8 +241,6 @@ class VideoAnalyzer:
                     analysis=analysis
                 )
                 self.db.increment_videos()
-
-                await self._reply_to_invitations(video, analysis)
 
                 # 符合评分/置信度且当天配额未用完才评论；没有合适视频就少发或不发。
                 if analysis['score'] >= min_comment_score or analysis.get('owner_directive'):
@@ -755,8 +470,6 @@ class VideoAnalyzer:
             # 获取热门评论
             comments = await self.bili.get_comments(video['aid'], count=15)
             comment_texts = [c['content'] for c in comments if c['content']]
-            greeting_candidates = await self._find_greeting_candidates(comments)
-            reply_invitations = await self._find_reply_invitations(comments)
 
             # 加载人设
             persona = self._load_persona()
@@ -801,8 +514,6 @@ class VideoAnalyzer:
                 analysis.get('score', 0) >= min_comment_score
                 or analysis['owner_directive']
             )
-            analysis['greeting_candidates'] = greeting_candidates
-            analysis['reply_invitations'] = reply_invitations
 
             logger.info(
                 f"分析结果: 评分={analysis['score']}, 值得={analysis['worthy']}, "
@@ -1067,7 +778,6 @@ class VideoAnalyzer:
                     logger.debug(f"写入评论记忆失败: {exc}")
                 logger.info(f"✅ 评论成功: {title}")
                 await self._like_commented_video(video, analysis)
-                await self._greet_other_whales(video, analysis)
             else:
                 logger.error(f"❌ 评论失败: {title}")
 
@@ -1078,22 +788,9 @@ class VideoAnalyzer:
             return False
 
     def _load_persona(self) -> str:
-        """加载核心人设 + 自动进化风格"""
-        from utils.persona_evolution import load_effective_persona
-
-        if not self.config.get('persona.enabled', True):
-            return ""
-
-        persona_file = self.config.get('persona.persona_file', 'data/persona.md')
-        try:
-            content = load_effective_persona(Path(persona_file))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"加载人设文件失败: {exc}")
-            content = ""
-        if not content:
-            name = self.config.get('persona.name', 'AI助手')
-            return f"你是 {name}，一个友好的AI助手。"
-        return content[:4000]
+        """加载用户填写的核心人格"""
+        from utils.persona_defaults import load_configured_persona
+        return load_configured_persona(self.config, 4000)
 
 
 # 同步包装器

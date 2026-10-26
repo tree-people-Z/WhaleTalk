@@ -10,6 +10,30 @@ DEFAULT_PERSONA_ASSET = PROJECT_ROOT / "assets" / "default_persona.md"
 DEFAULT_PERSONA_FILE = "data/persona.md"
 
 
+def load_persona(persona_file: str = DEFAULT_PERSONA_FILE, max_chars: int = 4000) -> str:
+    """Read the user-owned core persona; never modify it automatically."""
+    try:
+        path = Path(persona_file)
+        if path.is_file():
+            return path.read_text(encoding='utf-8').strip()[:max_chars]
+    except OSError:
+        pass
+    return ''
+
+
+def load_configured_persona(config, max_chars: int = 4000) -> str:
+    """Load the persona configured by the user, with a small fallback."""
+    if config is None or not config.get('persona.enabled', True):
+        return ''
+    content = load_persona(
+        config.get('persona.persona_file', DEFAULT_PERSONA_FILE), max_chars
+    )
+    if content:
+        return content
+    name = config.get('persona.name', 'AI助手')
+    return f"你是 {name}，一个友好的AI助手。"
+
+
 def ensure_default_persona(persona_file: str = DEFAULT_PERSONA_FILE) -> Optional[Path]:
     """Copy the bundled default persona when the user's persona file is missing.
 

@@ -27,8 +27,7 @@ from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
 from core.video_analyzer import VideoAnalyzer
 from core.scheduler import TaskScheduler
-from core.self_review import SelfReview
-from gui.self_review_worker import SelfReviewWorker
+from gui.memory_worker import MemoryWorker
 from gui.agent_worker import AgentWorker
 from utils.database import Database
 from utils.config_manager import ConfigManager
@@ -122,13 +121,13 @@ class MainWindow(QMainWindow):
         self._update_timer.setInterval(5000)
         self._update_timer.timeout.connect(lambda: self.check_updates(silent=True))
         self._update_timer.start()
-        self._self_review_worker = None
         self._agent_worker = None
-        QTimer.singleShot(15000, self._maybe_auto_self_review)
-        self._review_check_timer = QTimer(self)
-        self._review_check_timer.setInterval(6 * 60 * 60 * 1000)
-        self._review_check_timer.timeout.connect(self._maybe_auto_self_review)
-        self._review_check_timer.start()
+        self._memory_worker = None
+        QTimer.singleShot(20000, self._maybe_consolidate_memory)
+        self._memory_check_timer = QTimer(self)
+        self._memory_check_timer.setInterval(6 * 60 * 60 * 1000)
+        self._memory_check_timer.timeout.connect(self._maybe_consolidate_memory)
+        self._memory_check_timer.start()
 
         # 运行期间每 6 小时复查一次更新。
         self._update_recheck_timer = QTimer(self)
@@ -822,40 +821,21 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.instance().quit()
 
-    def generate_self_review(self):
-        """Generate a weekly review; never applies persona changes automatically."""
-        if self._self_review_worker is not None and self._self_review_worker.isRunning():
-            return
+    def _maybe_consolidate_memory(self):
         if self.ai_client is None:
-            QMessageBox.warning(self, "无法复盘", "请先在设置里配置 AI API Key。")
             return
-        self.settings_page.set_self_review_running(True, "正在生成自我复盘…")
-        worker = SelfReviewWorker(
-            SelfReview(self.db, self.ai_client, config=self.config), self
-        )
-        self._self_review_worker = worker
-        worker.done.connect(self._on_self_review_done)
-        worker.finished.connect(worker.deleteLater)
-        worker.start()
+        if self._memory_worker is not None and self._memory_worker.isRunning():
+            return
+        self._memory_worker = MemoryWorker(self.ai_client, self.db, self)
+        self._memory_worker.done.connect(self._on_memory_done)
+        self._memory_worker.finished.connect(self._memory_worker.deleteLater)
+        self._memory_worker.start()
 
-    def _on_self_review_done(self, success: bool, message: str):
-        self.settings_page.set_self_review_running(False)
-        if success:
-            self.settings_page.self_review_status.setText(
-                f"复盘已生成：{message}（候选文件 data/persona_candidates.md）"
-            )
-            self.log(f"✅ 自我复盘已生成: {message}")
-            QMessageBox.information(
-                self,
-                "自我复盘完成",
-                f"复盘文件：\n{message}\n\n候选调整：\ndata/persona_candidates.md\n\n"
-                "不会自动修改人设，请确认后手动应用。",
-            )
-        else:
-            self.settings_page.self_review_status.setText(f"复盘失败：{message}")
-            QMessageBox.warning(self, "自我复盘失败", message)
-
-    def run_agent_observation(self):
+    def _on_memory_done(self, success: bool, message: str):
+        if success and message:
+            self.log("🧠 长期记忆已更新")
+        elif message:
+            logger.debug(f"长期记忆整理: {message}")
         """只读自主观察：她自己选工具，不发任何内容。"""
         if self._agent_worker is not None and self._agent_worker.isRunning():
             return
@@ -882,22 +862,6 @@ class MainWindow(QMainWindow):
         else:
             self.settings_page.agent_status.setText(f"观察失败：{message}")
             self.log(f"⚠️ 自主观察失败: {message}")
-
-    def _maybe_auto_self_review(self):
-        if self.ai_client is None:
-            return
-        try:
-            review = SelfReview(self.db, self.ai_client, config=self.config)
-            health = review.check_style_health()
-            if health:
-                self.log(f"🐋 {health}")
-            if not review.is_due(7):
-                return
-            if not self.db.get_recent_memory_events(limit=1):
-                return
-            self.generate_self_review()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"自动复盘检查失败: {exc}")
 
     def _update_failed(self, message, dialog):
         dialog.close()

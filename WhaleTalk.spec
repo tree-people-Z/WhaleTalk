@@ -21,9 +21,13 @@ datas = [
 hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
 hiddenimports += [
     "gui.agent_worker",
+    "gui.memory_worker",
     "core.tool_agent",
+    "core.conversation_agent",
+    "core.long_term_memory",
+    "core.daily_diary",
+    "core.agent_protocol",
     "utils.media_library",
-    "utils.persona_evolution",
     "utils.probability",
     "utils.reply_scope",
 ]

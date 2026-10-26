@@ -49,7 +49,6 @@ class CommentManagerFilteringTests(unittest.TestCase):
             config = Mock()
             config.get = lambda key, default=None: {
                 'interaction.comment_monitor': True,
-                'interaction.reply_own_video_comments': True,
                 'interaction.own_video_count': 1,
                 'interaction.max_own_video_replies_per_check': 5,
             }.get(key, default)

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QGroupBox, QComboBox, QTextEdit, QLabel,
-    QMessageBox, QFileDialog, QScrollArea
+    QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal, QThread
@@ -732,8 +732,6 @@ class SettingsPage(QWidget):
 
         # 人设设置
         self.persona_name_input.setText(self.config.get('persona.name', 'AI娘'))
-        self.persona_self_ref_input.setText(self.config.get('persona.self_reference', '我'))
-        self.persona_user_ref_input.setText(self.config.get('persona.user_reference', '主人'))
 
         # 加载人设描述
         persona_file = self.config.get('persona.persona_file', 'data/persona.md')
@@ -913,8 +911,6 @@ class SettingsPage(QWidget):
 
             # 人设设置
             self.config.set('persona.name', self.persona_name_input.text())
-            self.config.set('persona.self_reference', self.persona_self_ref_input.text())
-            self.config.set('persona.user_reference', self.persona_user_ref_input.text())
             self.config.set('persona.enabled', self.persona_enabled_check.isChecked())
 
             # 保存人设描述到文件
@@ -1102,10 +1098,6 @@ class SettingsPage(QWidget):
             widget.setEnabled(is_cloud)
         self.transcription_setup_btn.setEnabled(is_local)
 
-    def set_self_review_running(self, running: bool, message: str = ""):
-        """自动复盘没有可见控件，仅用于兼容后台回调。"""
-        pass
-
     def set_agent_running(self, running: bool, message: str = ""):
         self.agent_btn.setEnabled(not running)
         if message:
@@ -1206,22 +1198,6 @@ class SettingsPage(QWidget):
         self.persona_name_input.setPlaceholderText("例如: AI娘")
         name_layout.addWidget(self.persona_name_input)
         layout.addLayout(name_layout)
-
-        # 自称
-        self_ref_layout = QHBoxLayout()
-        self_ref_layout.addWidget(QLabel("自称:"))
-        self.persona_self_ref_input = QLineEdit()
-        self.persona_self_ref_input.setPlaceholderText("例如: 我")
-        self_ref_layout.addWidget(self.persona_self_ref_input)
-        layout.addLayout(self_ref_layout)
-
-        # 对用户的称呼
-        user_ref_layout = QHBoxLayout()
-        user_ref_layout.addWidget(QLabel("对用户称呼:"))
-        self.persona_user_ref_input = QLineEdit()
-        self.persona_user_ref_input.setPlaceholderText("例如: 主人")
-        user_ref_layout.addWidget(self.persona_user_ref_input)
-        layout.addLayout(user_ref_layout)
 
         # 人设描述
         layout.addWidget(QLabel("人设描述:"))

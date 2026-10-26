@@ -6,7 +6,7 @@ from utils.database import Database
 
 
 class MemoryTests(unittest.TestCase):
-    def test_memory_event_and_context(self):
+    def test_memory_event_is_stored(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'history.db'))
             try:
@@ -20,10 +20,10 @@ class MemoryTests(unittest.TestCase):
                     content='上次聊到剪辑',
                     my_content='记得，卡点确实麻烦',
                 )
-                context = db.get_memory_context(42, 'viewer', limit=5)
-                self.assertIn('上次聊到剪辑', context)
-                self.assertIn('记得，卡点确实麻烦', context)
-                self.assertEqual(len(db.get_recent_memory_events()), 1)
+                events = db.get_recent_memory_events()
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]['content'], '上次聊到剪辑')
+                self.assertEqual(events[0]['my_content'], '记得，卡点确实麻烦')
             finally:
                 db.session.close()
                 db.engine.dispose()

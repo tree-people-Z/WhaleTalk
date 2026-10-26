@@ -23,8 +23,6 @@ from bilibili_api.search import SearchObjectType, OrderVideo
 from bilibili_api.comment import OrderType
 from bilibili_api.user import RelationType
 from loguru import logger
-import qrcode
-from io import BytesIO
 
 
 class BilibiliAPI:
@@ -288,33 +286,6 @@ class BilibiliAPI:
             self._self_info = {}
         return self._self_info
 
-    async def get_user_videos(self, uid: int, limit: int = 5) -> List[Dict[str, Any]]:
-        """获取指定用户的最近投稿视频。"""
-        if not uid:
-            return []
-        try:
-            data = await user.User(int(uid), credential=self.credential).get_videos(
-                pn=1, ps=max(1, min(int(limit), 30))
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"获取用户 {uid} 投稿视频失败: {exc}")
-            return []
-        payload = data.get('list') if isinstance(data, dict) else None
-        items = (payload or {}).get('vlist') if isinstance(payload, dict) else None
-        if not items and isinstance(data, dict):
-            items = data.get('vlist') or []
-        videos = []
-        for item in items or []:
-            bvid = item.get('bvid')
-            aid = item.get('aid')
-            if bvid and aid:
-                videos.append({
-                    'bvid': bvid,
-                    'aid': aid,
-                    'title': item.get('title') or bvid,
-                })
-        return videos
-
     async def get_own_videos(self, limit: int = 10) -> List[Dict[str, Any]]:
         """获取当前账号最近投稿的视频，用于回复自己视频下的评论。"""
         cache = getattr(self, '_own_videos_cache', None)
@@ -344,6 +315,45 @@ class BilibiliAPI:
                     return value.strip()
             return '[非文本消息]'
         return '' if content is None else str(content)
+
+    async def get_at_messages(self, since_time: int = 0) -> List[Dict[str, Any]]:
+        """Read B站 @ notifications, including comments in new threads."""
+        if not self.credential:
+            return []
+        try:
+            data = await bili_session.get_at(self.credential)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"获取@消息失败: {exc}")
+            return []
+        results = []
+        for entry in (data or {}).get('items') or []:
+            inner = entry.get('item') or {}
+            user = entry.get('user') or {}
+            at_time = int(entry.get('at_time') or 0)
+            if at_time <= since_time:
+                continue
+            uri = inner.get('uri') or inner.get('native_uri') or ''
+            match = re.search(r'(BV[0-9A-Za-z]+)', uri)
+            if not match:
+                continue
+            bvid = match.group(1)
+            source_id = inner.get('source_id') or inner.get('target_id')
+            if not source_id:
+                continue
+            root_id = inner.get('root_id') or 0
+            content = inner.get('source_content') or inner.get('title') or ''
+            results.append({
+                'rpid': int(source_id),
+                'root_rpid': int(root_id) if root_id else int(source_id),
+                'bvid': bvid,
+                'aid': int(inner.get('subject_id') or 0),
+                'user': user.get('nickname') or '',
+                'mid': user.get('mid'),
+                'content': content,
+                'at_time': at_time,
+                'type': 'at',
+            })
+        return results
 
     async def get_private_sessions(self, session_type: int = 1) -> List[Dict[str, Any]]:
         """获取私信会话列表。session_type: 1 私信, 4 全部。"""
@@ -667,74 +677,6 @@ class BilibiliAPI:
         except Exception as e:
             logger.error(f"获取视频信息失败 {bvid}: {e}")
             return None
-
-    async def resolve_requested_video(
-        self, text: str, commenter_mid: Optional[int] = None
-    ) -> Optional[Dict[str, Any]]:
-        """解析评论里“看看我的视频/这个视频”的请求，返回可读的视频资料。"""
-        if not text:
-            return None
-        bvid = None
-        bv_match = re.search(r'(BV[0-9A-Za-z]{10})', text)
-        av_match = re.search(r'av(\d+)', text, re.I)
-        b23_match = re.search(r'https?://b23\.tv/\S+', text, re.I)
-
-        if b23_match:
-            try:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        b23_match.group(0),
-                        allow_redirects=True,
-                        headers={'User-Agent': 'Mozilla/5.0'},
-                    ) as response:
-                        final_url = str(response.url)
-                resolved = re.search(r'(BV[0-9A-Za-z]{10})', final_url)
-                if resolved:
-                    bvid = resolved.group(1)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"解析 b23 短链失败: {exc}")
-
-        if not bvid and bv_match:
-            bvid = bv_match.group(1)
-        if not bvid and av_match:
-            try:
-                info = await video.Video(
-                    aid=int(av_match.group(1)), credential=self.credential
-                ).get_info()
-                bvid = info.get('bvid')
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"解析 av 号失败: {exc}")
-
-        wants_my_video = bool(re.search(
-            r'(看|瞧|瞅).{0,8}(我|俺).{0,6}(视频|投稿|作品)|'
-            r'我(的|发的|做的|拍的).{0,4}(视频|投稿|作品)',
-            text,
-        ))
-        if not bvid and wants_my_video and commenter_mid:
-            videos = await self.get_user_videos(commenter_mid, limit=3)
-            if videos:
-                bvid = videos[0].get('bvid')
-
-        if not bvid:
-            return None
-        info = await self.get_video_info(bvid)
-        if not info:
-            return None
-        subtitle = await self.get_subtitle(bvid) or ''
-        subtitle = re.sub(r'\s+', ' ', subtitle).strip()[:1200]
-        return {
-            'bvid': bvid,
-            'aid': info.get('aid'),
-            'title': info.get('title') or bvid,
-            'desc': (info.get('desc') or '').strip()[:600],
-            'owner': info.get('owner') or '',
-            'owner_mid': info.get('owner_mid'),
-            'duration': info.get('duration') or 0,
-            'url': f'https://www.bilibili.com/video/{bvid}',
-            'subtitle': subtitle,
-            'requested_by': 'commenter_upload' if wants_my_video else 'explicit_link',
-        }
 
     async def get_subtitle(self, bvid: str, cid: int = None) -> Optional[str]:
         """

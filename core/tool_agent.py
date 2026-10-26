@@ -6,7 +6,6 @@ send messages or change the persona.
 
 import datetime
 import json
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,12 +16,8 @@ MAX_OBSERVATION_CHARS = 2400
 
 
 def _persona_text() -> str:
-    from utils.persona_evolution import load_effective_persona
-    try:
-        text = load_effective_persona()
-    except Exception:  # noqa: BLE001
-        text = ''
-    return text[:6000] or '我是鲸鱼娘，一只蓝色的大肥鱼女仆；傲娇、心软、爱摸鱼。'
+    from utils.persona_defaults import load_persona
+    return load_persona('data/persona.md', 6000) or '我是鲸鱼娘，一只蓝色的大肥鱼女仆；傲娇、心软、爱摸鱼。'
 
 
 class ReadOnlyTools:
@@ -61,17 +56,12 @@ class ReadOnlyTools:
             },
             {
                 'name': 'recall_memory',
-                'description': '回忆和某个网友过去聊过什么；也可以读最近的互动记忆。',
-                'parameters': {'user_name': 'string(可选)', 'limit': 'int(1-20)'},
+                'description': '读取长期记忆（事件、经验、风格）。',
+                'parameters': {},
             },
             {
                 'name': 'get_stats',
                 'description': '读取今天的发送数量、分析视频数、运行次数。',
-                'parameters': {},
-            },
-            {
-                'name': 'read_self_review',
-                'description': '读取最近一次自我复盘里的“下周建议”。',
                 'parameters': {},
             },
             {
@@ -138,19 +128,10 @@ class ReadOnlyTools:
                 for record in records
             ]
         if name == 'recall_memory':
-            limit = max(1, min(int(args.get('limit') or 10), 20))
-            user_name = str(args.get('user_name') or '').strip()
-            if user_name:
-                context = self.db.get_memory_context(
-                    user_name=user_name, limit=limit
-                )
-                return {'memory': context or '没有相关记忆'}
-            return self.db.get_recent_memory_events(limit=limit)
+            from core.long_term_memory import load_memory
+            return {'memory': load_memory(3000) or '（暂无长期记忆）'}
         if name == 'get_stats':
             return self.db.get_statistics()
-        if name == 'read_self_review':
-            from core.self_review import SelfReview
-            return {'hints': SelfReview(self.db, self.ai).load_review_hints(900)}
         if name == 'read_diary':
             days = max(1, min(int(args.get('days') or 1), 7))
             base = Path('data') / 'diaries' / 'to_self'
@@ -176,18 +157,8 @@ class ToolAgent:
 
     @staticmethod
     def _parse_decision(text: str) -> Optional[Dict[str, Any]]:
-        text = (text or '').strip()
-        text = re.sub(r'^```(?:json)?', '', text).strip()
-        text = re.sub(r'```$', '', text).strip()
-        start = text.find('{')
-        end = text.rfind('}')
-        if start < 0 or end <= start:
-            return None
-        try:
-            data = json.loads(text[start:end + 1])
-        except (TypeError, ValueError):
-            return None
-        return data if isinstance(data, dict) else None
+        from core.agent_protocol import parse_json_decision
+        return parse_json_decision(text)
 
     def _system_prompt(self) -> str:
         tool_list = json.dumps(self.tools.specs(), ensure_ascii=False, indent=2)

@@ -10,8 +10,6 @@ class AnalysisCycleTests(unittest.TestCase):
     def _analyzer(self):
         analyzer = VideoAnalyzer.__new__(VideoAnalyzer)
         analyzer._stop_requested = threading.Event()
-        analyzer._greetings_sent_this_run = 0
-        analyzer._interactions_sent_this_run = 0
         analyzer._search_page = 1
 
         values = {
@@ -44,9 +42,7 @@ class AnalysisCycleTests(unittest.TestCase):
             'confidence': 'high',
             'summary': '内容',
             'owner_directive': False,
-            'reply_invitations': [],
         })
-        analyzer._reply_to_invitations = AsyncMock(return_value=0)
         analyzer._post_comment_for_video = AsyncMock(return_value=True)
         return analyzer
 

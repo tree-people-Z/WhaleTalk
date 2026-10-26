@@ -4,10 +4,11 @@
 """
 
 import asyncio
-import random
+import json
 import re
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Dict, Any
+from datetime import datetime
 from loguru import logger
 
 from core.bilibili_api import BilibiliAPI
@@ -49,6 +50,7 @@ class CommentManager:
             mentions = []
             already_replied = self.db.get_replied_comment_ids()
             self.processed_rpids.update(already_replied)
+            self.processed_rpids.update(self._load_skipped())
             # 自己发过的评论/回复不能当作“别人回复我”，否则会自问自答刷屏。
             own_rpids = self.db.get_own_comment_rpids()
             self.processed_rpids.update(own_rpids)
@@ -126,8 +128,9 @@ class CommentManager:
 
                 await asyncio.sleep(0.5)  # 避免请求过快
 
-            # 2. 自己投稿视频下的评论（必回）
-            if self.config.get('interaction.reply_own_video_comments', True):
+            # 2. 自己投稿视频下的评论（仅在“所有人”范围）
+            from utils.reply_scope import REPLY_SCOPE_ALL, resolve_reply_scope
+            if resolve_reply_scope(self.config) == REPLY_SCOPE_ALL:
                 own_mentions = await self._check_own_video_comments(
                     self_uid, self_name, found_rpids
                 )
@@ -242,233 +245,127 @@ class CommentManager:
             logger.info(f"自己视频下发现 {len(results)} 条待回复评论")
         return results
 
-    async def _comment_on_requested_video(
-        self, requested_video: Dict[str, Any], mention: Dict[str, Any], persona: str
-    ) -> Optional[str]:
-        """对方让看视频时，去她的视频下面留一条真实评论。"""
-        if not requested_video:
-            return None
-        if not self.config.get('interaction.comment_requested_video', True):
-            return None
-        aid = requested_video.get('aid')
-        bvid = requested_video.get('bvid', '')
-        if not aid or not bvid:
-            return None
-        if mention.get('aid') == aid:
-            return None
-        if getattr(self.bili, 'is_blocked', lambda: False)():
-            return None
-        if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
-            return None
+    async def reply_to_mention(self, mention: Dict[str, Any]) -> bool:
+        """Let the model decide whether/how to reply in own or other threads."""
         try:
-            self_info = await self.bili.get_self_info()
-            if requested_video.get('owner_mid') == self_info.get('uid'):
-                return None
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            if self.db.has_commented_video(bvid):
-                logger.debug(f"已经在她视频下评论过，跳过: {bvid}")
-                return None
-            max_comments = int(self.config.get('limits.max_comments_per_day', 60))
-            if self.db.get_today_comment_count(include_replies=True) >= max_comments:
-                logger.info("今日发送配额已用完（评论+回复），跳过对方视频下的评论")
-                return None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"检查视频评论记录失败: {exc}")
-
-        video_content = (
-            f"简介：{requested_video.get('desc', '')}\n"
-            f"字幕片段：{requested_video.get('subtitle', '')}"
-        )
-        comment_text = await self.ai.generate_comment(
-            requested_video.get('title', ''),
-            video_content,
-            persona,
-        )
-        if not comment_text:
-            return None
-        success = await self.bili.post_comment(aid=aid, text=comment_text)
-        if not success:
-            logger.warning(f"在她视频下评论失败: {bvid}")
-            return None
-        try:
-            self.db.add_comment_record(
-                bvid=bvid,
-                aid=aid,
-                content=comment_text,
-                comment_type='post',
-                success=True,
-                rpid=getattr(self.bili, 'last_comment_rpid', None),
-                thread_root=getattr(self.bili, 'last_comment_rpid', None),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"记录视频评论失败: {exc}")
-        logger.info(f"✅ 已在她视频下评论: {requested_video.get('title')} - {comment_text}")
-        return comment_text
-
-    async def reply_to_mention(
-        self,
-        mention: Dict[str, Any]
-    ) -> bool:
-        """
-        回复@提醒
-
-        Args:
-            mention: @提醒信息
-
-        Returns:
-            是否成功
-        """
-        try:
-            # 提取信息
             rpid = mention.get('rpid')
-            user = mention.get('user')
-            content = mention.get('content')
-            video_title = mention.get('video_title', '')
-            aid = mention.get('aid')
-
-            # 检查是否已处理
-            if rpid in self.processed_rpids:
-                logger.info(f"已处理过该评论: {rpid}")
+            if not rpid or rpid in self.processed_rpids:
                 return False
             if self._daily_send_quota_remaining() <= 0:
-                logger.info("今日发送配额已用完（评论+回复），跳过回复")
+                logger.info("今日发送配额已用完，跳过回复")
+                return False
+            if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
                 return False
 
-            # 加载人设
-            persona = self._load_persona()
-
-            # 对方让你“看看我的视频/这个视频”时，先取视频资料再回复。
-            video_context = f"视频: {video_title}"
-            try:
-                requested_video = await self.bili.resolve_requested_video(
-                    content or '', mention.get('mid')
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"解析对方请求的视频失败: {exc}")
-                requested_video = None
-            if requested_video:
-                video_context += (
-                    "\n\n# 对方让你看的视频\n"
-                    f"标题：{requested_video.get('title', '')}\n"
-                    f"UP主：{requested_video.get('owner', '')}\n"
-                    f"简介：{requested_video.get('desc', '')}\n"
-                    f"链接：{requested_video.get('url', '')}\n"
-                    f"字幕片段：{requested_video.get('subtitle') or '（无字幕）'}\n"
-                )
-                logger.info(
-                    f"准备回应对方请求的视频: {requested_video.get('title')} "
-                    f"({requested_video.get('bvid')})"
-                )
-                posted_video_comment = await self._comment_on_requested_video(
-                    requested_video, mention, persona
-                )
-                if getattr(self.bili, 'is_posting_blocked', lambda: False)() is True:
-                    return False
-                if posted_video_comment:
-                    video_context += (
-                        "\n# 你已经在她的视频下评论过\n"
-                        f"{posted_video_comment}\n"
-                    )
-
-            memory_context = ""
-            try:
-                memory_context = self.db.get_memory_context(
-                    user_mid=mention.get('mid'),
-                    user_name=user or '',
-                    limit=5,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"读取长期记忆失败: {exc}")
-            if memory_context:
-                video_context += (
-                    "\n# 你记得这位网友的事（自然地用，不要逐字复述）\n"
-                    f"{memory_context}\n"
-                )
-
-            try:
-                from core.self_review import SelfReview
-                hints = SelfReview(self.db).load_review_hints(600)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"读取自我复盘提醒失败: {exc}")
-                hints = ""
-            if hints:
-                video_context += (
-                    "\n# 最近自我复盘的提醒（避免机械感，不要提到复盘）\n"
-                    f"{hints}\n"
-                )
-
-            # 生成回复
-            reply_text = await self.ai.generate_reply(
-                original_comment=content,
-                video_context=video_context,
-                persona=persona,
-                user_name=user or '',
-                memory_context=memory_context,
-                is_owner=bool(
-                    user and user == self.config.get('bilibili.owner_name', '')
-                ),
+            root = mention.get('root_rpid') or rpid
+            from core.conversation_agent import (
+                MAX_REPLIES_PER_THREAD_DAY,
+                THREAD_COOLDOWN_MINUTES,
+                ConversationAgent,
             )
-
-            if not reply_text:
-                logger.error("生成回复失败")
+            try:
+                own_rpids = self.db.get_own_comment_rpids()
+            except Exception:  # noqa: BLE001
+                own_rpids = set()
+            scope = 'own_thread' if int(root) in own_rpids else 'other_thread'
+            state = self.db.get_thread_state(root)
+            now = datetime.now()
+            reply_count = int(state.get('reply_count') or 0)
+            last = state.get('last_reply_at')
+            if last and last.date() != now.date():
+                reply_count = 0
+            if reply_count >= MAX_REPLIES_PER_THREAD_DAY:
+                logger.info(f"同一楼今日回复已达上限: {root}")
+                return False
+            if last and (now - last).total_seconds() < THREAD_COOLDOWN_MINUTES * 60:
+                logger.info(f"同一楼回复冷却中: {root}")
                 return False
 
-            logger.info(f"准备回复 @{user}: {reply_text}")
+            event = {
+                'rpid': rpid,
+                'root_rpid': root,
+                'scope': scope,
+                'root_owner_is_me': scope == 'own_thread',
+                'bot_participated': bool(state.get('bot_participated')),
+                'bot_reply_count': reply_count,
+                'last_bot_reply_at': last.isoformat() if last else '',
+                'is_reply_to_bot': True,
+                'is_direct_at': bool(mention.get('is_direct_at')),
+                'user': mention.get('user') or '',
+                'mid': mention.get('mid'),
+                'content': mention.get('content') or '',
+                'aid': mention.get('aid'),
+                'bvid': mention.get('bvid') or '',
+                'video_title': mention.get('video_title') or '',
+            }
+            agent = ConversationAgent(
+                self.bili, self.db, self.ai, self.config, self._send_agent_reply
+            )
+            success = await agent.handle(event)
+            self.processed_rpids.add(rpid)
+            self._mark_skipped(rpid)
+            if success:
+                self.db.record_thread_reply(root)
+            return success
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"对话 Agent 处理失败: {exc}")
+            return False
 
-            # 发送回复
+    async def _send_agent_reply(self, event: Dict[str, Any], text: str) -> bool:
+        """Execute a model-selected reply after policy checks."""
+        try:
+            aid = int(event.get('aid') or 0)
+            rpid = event.get('rpid')
+            root = event.get('root_rpid') or rpid
+            if not aid or not rpid or not text.strip():
+                return False
+            if self._daily_send_quota_remaining() <= 0:
+                return False
             success = await self.bili.post_comment(
                 aid=aid,
-                text=reply_text,
-                root_rpid=mention.get('root_rpid') or rpid,
-                parent_rpid=rpid
+                text=text,
+                root_rpid=root,
+                parent_rpid=rpid,
             )
-
-            if success:
-                # 记录到数据库
-                self.db.add_comment_record(
-                    bvid=mention.get('bvid', ''),
+            if not success:
+                return False
+            self.db.add_comment_record(
+                bvid=event.get('bvid', ''),
+                aid=aid,
+                content=text,
+                comment_type='reply',
+                success=True,
+                rpid=getattr(self.bili, 'last_comment_rpid', None),
+                parent_rpid=rpid,
+                thread_root=root,
+                target_user=event.get('user') or '',
+                parent_content=event.get('content') or '',
+            )
+            try:
+                self.db.add_memory_event(
+                    'reply',
+                    user_name=event.get('user') or '',
+                    user_mid=event.get('mid'),
                     aid=aid,
-                    content=reply_text,
-                    comment_type='reply',
-                    success=True,
-                    rpid=getattr(self.bili, 'last_comment_rpid', None),
-                    parent_rpid=rpid,
-                    thread_root=mention.get('root_rpid') or rpid,
-                    target_user=user or '',
-                    parent_content=content or '',
+                    bvid=event.get('bvid', ''),
+                    video_title=event.get('video_title') or '',
+                    content=event.get('content') or '',
+                    my_content=text,
                 )
-                self.processed_rpids.add(rpid)
-                if (
-                    self.config.get('interaction.like_replied_comments', True)
-                    and self._roll_probability('prob_like_reply', 50)
-                ):
-                    try:
-                        await self.bili.like_comment(aid, rpid)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug(f"给网友评论点赞失败: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"记录回复记忆失败: {exc}")
+            if (
+                self.config.get('interaction.like_replied_comments', True)
+                and self._roll_probability('prob_like_reply', 50)
+            ):
                 try:
-                    self.db.add_memory_event(
-                        'reply',
-                        user_name=user or '',
-                        user_mid=mention.get('mid'),
-                        aid=aid,
-                        bvid=mention.get('bvid', ''),
-                        video_title=video_title,
-                        content=content or '',
-                        my_content=reply_text,
-                    )
+                    await self.bili.like_comment(aid, rpid)
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug(f"写入长期记忆失败: {exc}")
-                logger.info(f"✅ 回复成功: @{user}")
-            else:
-                logger.error(f"❌ 回复失败: @{user}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"回复评论异常: {e}")
+                    logger.debug(f"给网友评论点赞失败: {exc}")
+            logger.info(f"✅ 对话回复成功: @{event.get('user')}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"发送对话回复失败: {exc}")
             return False
 
     async def check_private_messages(self) -> int:
@@ -494,7 +391,6 @@ class CommentManager:
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"读取私信会话失败: {exc}")
             return 0
-        persona = self._load_persona()
         sent = 0
         for session in sessions:
             if sent >= max_per_check:
@@ -519,12 +415,7 @@ class CommentManager:
             timestamp = int(last.get('timestamp') or 0)
             if timestamp <= self.db.get_dm_state(talker_id):
                 continue
-            memory_context = self.db.get_memory_context(
-                user_mid=talker_id,
-                user_name=session.get('name') or '',
-                limit=5,
-            )
-            video_context = "B站私信（不是评论区）"
+            image_description = ''
             image_url = last.get('image_url') or ''
             if image_url:
                 try:
@@ -539,49 +430,169 @@ class CommentManager:
                     logger.debug(f"收集私信图片失败: {exc}")
                     asset = None
                 if asset:
-                    video_context += (
-                        "\n# 对方发来的图片\n"
-                        f"{asset.get('description') or '收到一张图片，内容未能识别'}\n"
+                    image_description = (
+                        asset.get('description') or '收到一张图片，内容未能识别'
                     )
-                    video_context += "这张图已收进你的图片库，之后可以用于动态或私信。\n"
-            if memory_context:
-                video_context += f"\n\n# 你记得这位网友的事\n{memory_context}"
-            reply = await self.ai.generate_reply(
-                original_comment=last.get('content') or '',
-                video_context=video_context,
-                persona=persona,
-                user_name=session.get('name') or '',
-                memory_context=memory_context,
-                is_owner=bool(
-                    session.get('name')
-                    and session.get('name') == self.config.get('bilibili.owner_name', '')
-                ),
+            event = {
+                'scope': 'dm',
+                'talker_id': talker_id,
+                'user': session.get('name') or '',
+                'mid': talker_id,
+                'content': last.get('content') or '',
+                'image_description': image_description,
+            }
+            from core.conversation_agent import ConversationAgent
+            agent = ConversationAgent(
+                self.bili,
+                self.db,
+                self.ai,
+                self.config,
+                self._send_agent_reply,
+                self._send_agent_dm,
+                self._send_agent_dm_image,
             )
-            if not reply:
-                continue
-            if await self.bili.send_private_message(talker_id, reply):
-                self.db.set_dm_state(talker_id, timestamp)
-                try:
-                    self.db.add_memory_event(
-                        'dm',
-                        user_name=session.get('name') or '',
-                        user_mid=talker_id,
-                        content=last.get('content') or '',
-                        my_content=reply,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug(f"记录私信记忆失败: {exc}")
+            replied_now = await agent.handle(event)
+            self.db.set_dm_state(talker_id, timestamp)
+            if replied_now:
                 sent += 1
                 logger.info(f"✅ 私信已回复: {session.get('name') or talker_id}")
                 await asyncio.sleep(3)
         return sent
 
+    async def _send_agent_dm(self, event: Dict[str, Any], text: str) -> bool:
+        talker_id = int(event.get('talker_id') or 0)
+        if not talker_id or not text.strip():
+            return False
+        if not await self.bili.send_private_message(talker_id, text):
+            return False
+        try:
+            self.db.add_memory_event(
+                'dm',
+                user_name=event.get('user') or '',
+                user_mid=talker_id,
+                content=event.get('content') or '',
+                my_content=text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"记录私信记忆失败: {exc}")
+        return True
+
+    async def _send_agent_dm_image(self, event: Dict[str, Any], caption: str = '') -> bool:
+        talker_id = int(event.get('talker_id') or 0)
+        if not talker_id:
+            return False
+        asset = self.db.get_random_media_asset()
+        if not asset:
+            return False
+        path = Path(asset.get('path') or '')
+        if not path.is_file():
+            return False
+        if not await self.bili.send_private_picture(talker_id, str(path)):
+            return False
+        if caption:
+            await self.bili.send_private_message(talker_id, caption)
+        self.db.mark_media_asset_used(asset['id'])
+        try:
+            self.db.add_memory_event(
+                'dm_image',
+                user_name=event.get('user') or '',
+                user_mid=talker_id,
+                content=event.get('content') or '',
+                my_content=caption or '[图片]',
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"记录发图记忆失败: {exc}")
+        return True
+
+    def _load_skipped(self) -> set:
+        try:
+            path = Path('data') / 'skipped_mentions.json'
+            if path.is_file():
+                return set(int(item) for item in json.loads(path.read_text(encoding='utf-8')))
+        except (OSError, ValueError, TypeError):
+            pass
+        return set()
+
+    def _mark_skipped(self, rpid: int) -> None:
+        skipped = self._load_skipped()
+        skipped.add(int(rpid))
+        try:
+            path = Path('data') / 'skipped_mentions.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(sorted(skipped)[-1000:]), encoding='utf-8')
+        except OSError:
+            pass
+
+    def _load_at_seen(self) -> set:
+        try:
+            path = Path('data') / 'at_seen.json'
+            if path.is_file():
+                return set(int(item) for item in json.loads(path.read_text(encoding='utf-8')))
+        except (OSError, ValueError, TypeError):
+            pass
+        return set()
+
+    def _mark_at_seen(self, rpid: int) -> None:
+        seen = self._load_at_seen()
+        seen.add(int(rpid))
+        try:
+            path = Path('data') / 'at_seen.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(sorted(seen)[-500:]), encoding='utf-8'
+            )
+        except OSError:
+            pass
+
+    async def check_at_messages(self) -> List[Dict[str, Any]]:
+        """Read direct @ notifications, including comments in new threads."""
+        if not self.config.get('interaction.comment_monitor', False):
+            return []
+        try:
+            seen = self._load_at_seen()
+            items = await self.bili.get_at_messages(since_time=0)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"读取@消息失败: {exc}")
+            return []
+        results = []
+        for item in items or []:
+            rpid = item.get('rpid')
+            if not rpid or rpid in seen or rpid in self.processed_rpids:
+                continue
+            item['is_direct_at'] = True
+            results.append(item)
+            if len(results) >= 5:
+                break
+        return results
+
+    @staticmethod
+    def _is_owner_event(event: Dict[str, Any], owner_name: str, owner_uid: str) -> bool:
+        mid = str(event.get('mid') or '')
+        user = event.get('user') or ''
+        return bool(
+            (owner_uid and mid == str(owner_uid))
+            or (owner_name and user == owner_name)
+        )
+
     async def check_and_reply(self) -> Dict[str, Any]:
-        """检查新回复；自动回复开启时逐条回复，并返回检测到的回复列表。"""
+        """检查新回复；自动回复开启时逐条交给对话模型处理。"""
         mentions = await self.check_mentions()
+        at_messages = await self.check_at_messages()
+        from utils.reply_scope import REPLY_SCOPE_OWNER, resolve_reply_scope
+        if resolve_reply_scope(self.config) == REPLY_SCOPE_OWNER:
+            owner_name = self.config.get('bilibili.owner_name', '')
+            owner_uid = self.config.get('bilibili.owner_uid', '')
+            mentions = [
+                item for item in mentions
+                if self._is_owner_event(item, owner_name, owner_uid)
+            ]
+            at_messages = [
+                item for item in at_messages
+                if self._is_owner_event(item, owner_name, owner_uid)
+            ]
         replied = 0
         if self.config.get('interaction.auto_reply', True):
-            for mention in mentions:
+            for mention in mentions + at_messages:
                 if self._daily_send_quota_remaining() <= 0:
                     logger.warning("今日发送配额已用完（评论+回复），停止本轮回复")
                     break
@@ -590,73 +601,13 @@ class CommentManager:
                     break
                 if await self.reply_to_mention(mention):
                     replied += 1
+                if mention.get('type') == 'at':
+                    self._mark_at_seen(mention.get('rpid'))
                 await asyncio.sleep(2)
         dm_replied = await self.check_private_messages()
-        return {'replied': replied, 'dm_replied': dm_replied, 'mentions': mentions}
-
-    async def monitor_loop(self):
-        """
-        评论监听循环
-        """
-        interval = self.config.get('interaction.monitor_interval_minutes', 10)
-        logger.info(f"启动评论监听，检查间隔: {interval}分钟")
-
-        while True:
-            try:
-                # 检查@提醒
-                mentions = await self.check_mentions()
-
-                if mentions:
-                    logger.info(f"发现 {len(mentions)} 条@提醒")
-
-                    for mention in mentions:
-                        await self.reply_to_mention(mention)
-                        await asyncio.sleep(3)  # 避免频繁操作
-
-                # 等待下一次检查
-                await asyncio.sleep(interval * 60)
-
-            except Exception as e:
-                logger.error(f"监听循环异常: {e}")
-                await asyncio.sleep(60)  # 出错后等待1分钟
-
-    def _load_persona(self) -> str:
-        """加载核心人设 + 自动进化风格"""
-        from pathlib import Path
-        from utils.persona_evolution import load_effective_persona
-
-        if not self.config.get('persona.enabled', True):
-            return ""
-
-        persona_file = self.config.get('persona.persona_file', 'data/persona.md')
-        try:
-            content = load_effective_persona(Path(persona_file))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"加载人设文件失败: {exc}")
-            content = ""
-        if not content:
-            name = self.config.get('persona.name', 'AI助手')
-            return f"你是 {name}，一个友好的AI助手。"
-        return content[:4000]
-
-
-# 使用示例
-if __name__ == "__main__":
-    async def test():
-        from core.bilibili_api import BilibiliAPI
-        from core.ai_client import AIClient
-        from utils.database import Database
-        from utils.config_manager import ConfigManager
-
-        config = ConfigManager()
-        db = Database()
-        bili = BilibiliAPI()
-        ai = AIClient(provider="openai", api_key="your-key")
-
-        manager = CommentManager(bili, ai, db, config)
-
-        # 检查@提醒
-        mentions = await manager.check_mentions()
-        print(f"发现 {len(mentions)} 条@提醒")
-
-    asyncio.run(test())
+        return {
+            'replied': replied,
+            'dm_replied': dm_replied,
+            'mentions': mentions,
+            'at_messages': at_messages,
+        }

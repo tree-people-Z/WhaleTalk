@@ -92,16 +92,16 @@ class MemoryEvent(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
-class UserMemory(Base):
-    """长期记忆：对某个网友的摘要。"""
-    __tablename__ = 'user_memories'
+class ThreadState(Base):
+    """Per-thread conversation state for model-driven replies."""
+    __tablename__ = 'thread_states'
 
     id = Column(Integer, primary_key=True)
-    user_mid = Column(Integer, unique=True, index=True)
-    user_name = Column(String(100))
-    summary = Column(Text)
-    interaction_count = Column(Integer, default=1)
-    last_seen = Column(DateTime, default=datetime.now)
+    thread_root = Column(Integer, unique=True, index=True)
+    bot_participated = Column(Boolean, default=False)
+    reply_count = Column(Integer, default=0)
+    last_reply_at = Column(DateTime)
+    updated_at = Column(DateTime, default=datetime.now)
 
 
 class MediaAsset(Base):
@@ -285,57 +285,8 @@ class Database:
             outcome=outcome,
         )
         self.session.add(event)
-        if user_mid or user_name:
-            memory = None
-            if user_mid:
-                memory = self.session.query(UserMemory).filter_by(
-                    user_mid=user_mid
-                ).first()
-            if memory is None and user_name:
-                memory = self.session.query(UserMemory).filter_by(
-                    user_name=user_name
-                ).first()
-            if memory is None:
-                memory = UserMemory(
-                    user_mid=user_mid,
-                    user_name=user_name or "",
-                    summary="",
-                    interaction_count=0,
-                )
-                self.session.add(memory)
-            memory.user_name = user_name or memory.user_name
-            memory.interaction_count = int(memory.interaction_count or 0) + 1
-            memory.last_seen = datetime.now()
-            recent = [event.content, event.my_content]
-            summary_line = " | ".join(part for part in recent if part)[:300]
-            if summary_line:
-                old = (memory.summary or "").splitlines()
-                memory.summary = "\n".join(([summary_line] + old)[:20])
         self.session.commit()
         return event
-
-    def get_memory_context(
-        self, user_mid: Optional[int] = None, user_name: str = "", limit: int = 5
-    ) -> str:
-        """Format recent interactions with this user for the reply prompt."""
-        query = self.session.query(MemoryEvent)
-        if user_mid:
-            query = query.filter(MemoryEvent.user_mid == user_mid)
-        elif user_name:
-            query = query.filter(MemoryEvent.user_name == user_name)
-        else:
-            return ""
-        events = query.order_by(MemoryEvent.created_at.desc()).limit(limit).all()
-        if not events:
-            return ""
-        lines = []
-        for event in reversed(events):
-            when = event.created_at.strftime('%m-%d %H:%M') if event.created_at else ''
-            if event.content:
-                lines.append(f"- {when} 对方说：{event.content[:120]}")
-            if event.my_content:
-                lines.append(f"  你上次回：{event.my_content[:120]}")
-        return "\n".join(lines)
 
     def add_media_asset(
         self, path: str, source: str = '', source_url: str = '',
@@ -514,6 +465,38 @@ class Database:
             VideoRecord.analyzed_at.isnot(None),
             VideoRecord.analyzed_at >= cutoff,
         ).first() is not None
+
+    def get_thread_state(self, thread_root: int) -> Dict[str, Any]:
+        state = self.session.query(ThreadState).filter_by(
+            thread_root=int(thread_root)
+        ).first()
+        if state is None:
+            return {
+                'bot_participated': False,
+                'reply_count': 0,
+                'last_reply_at': None,
+            }
+        return {
+            'bot_participated': bool(state.bot_participated),
+            'reply_count': int(state.reply_count or 0),
+            'last_reply_at': state.last_reply_at,
+        }
+
+    def record_thread_reply(self, thread_root: int) -> None:
+        state = self.session.query(ThreadState).filter_by(
+            thread_root=int(thread_root)
+        ).first()
+        now = datetime.now()
+        if state is None:
+            state = ThreadState(thread_root=int(thread_root))
+            self.session.add(state)
+        elif state.last_reply_at and state.last_reply_at.date() != now.date():
+            state.reply_count = 0
+        state.bot_participated = True
+        state.reply_count = int(state.reply_count or 0) + 1
+        state.last_reply_at = now
+        state.updated_at = now
+        self.session.commit()
 
     def get_comment_outcomes_since(self, since: datetime) -> List[Dict[str, Any]]:
         """Read success/failure outcomes since a timestamp (for style health)."""

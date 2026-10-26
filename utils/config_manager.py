@@ -125,8 +125,7 @@ class ConfigManager:
         return {
             "bilibili": {
                 "owner_uid": "",
-                "owner_name": "",
-                "credential_path": "data/cookies.json"
+                "owner_name": ""
             },
             "ai": {
                 "provider": "deepseek",
@@ -136,8 +135,6 @@ class ConfigManager:
             },
             "persona": {
                 "name": "鲸鱼娘",
-                "self_reference": "我",
-                "user_reference": "主人",
                 "persona_file": "data/persona.md",
                 "enabled": True
             },
@@ -147,8 +144,6 @@ class ConfigManager:
                     [12, 14],  # 中午12-14点
                     [18, 21]   # 晚上18-21点
                 ],
-                "wake_probability": 0.7,
-                "random_delay_minutes": 30,
                 "browse_interval_min_minutes": 5,
                 "browse_interval_max_minutes": 30,
                 "reply_check_interval_minutes": 1,
@@ -173,19 +168,13 @@ class ConfigManager:
                 "max_dm_per_day": 10,
                 "max_videos_per_run": 20,
                 "skip_analyzed_within_hours": 2,
-                "max_greetings_per_video": 2,
-                "max_greetings_per_run": 5,
-                "max_interactions_per_video": 1,
-                "max_interactions_per_run": 3,
                 "same_video_cooldown_days": 7,
                 "min_score_to_comment": 10,
-                "min_score_to_mention_owner": 13,
-                "mention_owner_on_interesting": False
+                "min_score_to_mention_owner": 13
             },
             "interaction": {
                 "auto_comment": True,
                 "auto_like_commented_video": False,
-                "comment_requested_video": True,
                 "like_replied_comments": True,
                 "favorite_commented_video": True,
                 "follow_commented_up": False,
@@ -216,14 +205,8 @@ class ConfigManager:
                 "comment_monitor": True,
                 "auto_reply": True,
                 "reply_scope": "all",
-                "reply_own_video_comments": True,
                 "own_video_count": 10,
                 "max_own_video_replies_per_check": 10,
-                "greet_other_whales": True,
-                "monitor_interval_minutes": 1,
-                "reply_to_others": True,
-                "reply_only_owner": False,
-                "reply_interesting_comments": True,
                 "mention_owner_on_interesting": False
             },
             "analysis": {
@@ -236,15 +219,6 @@ class ConfigManager:
                     "api_key": "",
                     "model": "whisper-1"
                 }
-            },
-            "memory": {
-                "auto_apply_interval_days": 7
-            },
-            "logging": {
-                "level": "INFO",
-                "file": "data/logs/bot.log",
-                "max_file_size_mb": 10,
-                "backup_count": 5
             }
         }
 
