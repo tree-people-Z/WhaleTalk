@@ -454,11 +454,17 @@ class FreeAgent:
                 logger.info(f'收到评论 [{user}]: {content}')
         elif method == 'post_comment' and result is True:
             kind = '回复' if params.get('root_rpid') or params.get('parent_rpid') else '评论'
-            logger.info(f'发送{kind}: {str(params.get("text") or "")[:80]}')
+            title = self._video_title(
+                str(params.get('bvid') or ''), int(params.get('aid') or 0)
+            )
+            target = f'《{title}》' if title else f' aid={params.get("aid")}'
+            logger.info(
+                f'发送{kind}{target}：{str(params.get("text") or "")[:120]}'
+            )
         elif method == 'send_private_message' and result is True:
             logger.info(
                 f'发送私信 -> {params.get("talker_id")}: '
-                f'{str(params.get("text") or "")[:80]}'
+                f'{str(params.get("text") or "")[:120]}'
             )
 
     @staticmethod
@@ -469,32 +475,107 @@ class FreeAgent:
             return False
         return True
 
-    @staticmethod
-    def _describe_action(tool: str, args: dict, result: Any) -> str:
+    def _video_title(self, bvid: str = '', aid: int = 0) -> str:
+        try:
+            for item in getattr(self.bili_tool, 'video_refs', []) or []:
+                if bvid and item.get('bvid') == bvid:
+                    return str(item.get('title') or '')
+                if aid and int(item.get('aid') or 0) == int(aid):
+                    return str(item.get('title') or '')
+        except Exception:  # noqa: BLE001
+            pass
+        return ''
+
+    def _describe_action(self, tool: str, args: dict, result: Any) -> str:
+        ok = self._action_ok(result)
         if tool == 'inspect_video':
             bvid = str(args.get('bvid') or '')
-            return f'inspect_video {bvid} {"成功" if FreeAgent._action_ok(result) else "失败"}'
-        if tool == 'bili_api':
-            method = str(args.get('method') or '') or '(缺少 method)'
-            params = args.get('arguments') or args.get('params') or {}
-            target = ''
-            for key in ('keyword', 'bvid', 'aid', 'talker_id', 'uid'):
-                if params.get(key) not in (None, ''):
-                    target = f' {params[key]}'
-                    break
-            detail = f'{method}{target}'
-            if method in {'post_comment', 'send_private_message', 'send_danmaku'}:
-                text = str(params.get('text') or '')[:24]
-                if text:
-                    detail += f'：{text}'
-            return f'{detail} {"成功" if FreeAgent._action_ok(result) else "失败"}'
+            if not isinstance(result, dict) or result.get('error'):
+                return f'读取视频素材 {bvid}：失败'
+            title = str(result.get('title') or self._video_title(bvid))
+            subtitle_len = len(str(result.get('subtitle') or ''))
+            comments = len(result.get('comments') or [])
+            frames = len(result.get('frames') or [])
+            return (
+                f'读取视频素材 {bvid}《{title or "未知标题"}》：'
+                f'字幕 {subtitle_len} 字，评论 {comments} 条，抽帧 {frames} 张'
+            )
         if tool == 'write_diary':
             content = str(args.get('content') or '')
-            return f'写日记（{len(content)} 字）{"成功" if FreeAgent._action_ok(result) else "失败"}'
+            return f'写日记（{len(content)} 字）：{"成功" if ok else "失败"}'
         if tool == 'read_diary':
             day = str(args.get('day') or '')
             return f'读日记（{day or "列出日期"}）'
-        return f'{tool} {"成功" if FreeAgent._action_ok(result) else "失败"}'
+        if tool != 'bili_api':
+            return f'{tool}：{"成功" if ok else "失败"}'
+
+        method = str(args.get('method') or '')
+        params = args.get('arguments') or args.get('params') or {}
+        if not isinstance(params, dict):
+            params = {}
+        if method == 'is_blocked':
+            if isinstance(result, dict) and result.get('error'):
+                return '检查风控状态：调用失败'
+            return f'检查风控状态：{"风控中" if result is True else "正常"}'
+        if method == 'is_posting_blocked':
+            if isinstance(result, dict) and result.get('error'):
+                return '检查评论冷却：调用失败'
+            return f'检查评论冷却：{"冷却中" if result is True else "正常"}'
+
+        labels = {
+            'search_videos': '搜索视频',
+            'get_video_info': '获取视频信息',
+            'get_video_info_by_aid': '获取视频信息',
+            'get_subtitle': '读取字幕',
+            'get_media_urls': '获取视频流',
+            'get_at_messages': '检查@消息',
+            'get_private_sessions': '读取私信会话',
+            'get_private_messages': '读取私信',
+            'get_comments': '读取评论',
+            'get_comment_thread': '读取评论楼',
+            'get_own_videos': '读取自己的投稿',
+            'get_user_videos': '读取UP主投稿',
+            'get_self_info': '读取账号信息',
+            'get_user_info': '读取用户信息',
+            'post_comment': '发送评论',
+            'like_comment': '点赞评论',
+            'like_video': '点赞视频',
+            'favorite_video': '收藏视频',
+            'coin_video': '投币视频',
+            'share_video': '分享视频',
+            'follow_video_author': '关注UP主',
+            'add_to_watch_later': '稍后再看',
+            'send_private_message': '发送私信',
+            'send_danmaku': '发送弹幕',
+            'like_danmaku': '点赞弹幕',
+        }
+        label = labels.get(method, f'调用 {method}' if method else '缺少方法名')
+        target = ''
+        for key in ('keyword', 'bvid', 'aid', 'talker_id', 'uid', 'rpid'):
+            value = params.get(key)
+            if value not in (None, ''):
+                target = f' {value}'
+                break
+        if method in {'get_video_info', 'get_video_info_by_aid'} and isinstance(result, dict):
+            title = str(result.get('title') or '')
+            bvid = str(result.get('bvid') or params.get('bvid') or '')
+            if bvid:
+                target = f' {bvid}'
+            if title:
+                target += f'《{title}》'
+        elif method in {'post_comment', 'get_comments', 'get_comment_thread'}:
+            aid = params.get('aid') or (result.get('aid') if isinstance(result, dict) else 0)
+            title = self._video_title(str(params.get('bvid') or ''), int(aid or 0))
+            if title:
+                target += f'《{title}》'
+        detail = f'{label}{target}'
+        if method in {'post_comment', 'send_private_message', 'send_danmaku'}:
+            text = str(params.get('text') or '')[:40]
+            if text:
+                detail += f'：{text}'
+        if isinstance(result, list):
+            detail += f'（{len(result)} 条）'
+        return f'{detail}：{"成功" if ok else "失败"}'
 
     @staticmethod
     def _log_actions(actions: list[str]) -> None:

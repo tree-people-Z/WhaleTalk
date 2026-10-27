@@ -223,7 +223,8 @@ class FreeAgentTests(unittest.TestCase):
         agent = FreeAgent(FakeBili(), ai, Mock(), Mock())
         with patch('core.free_agent.build_agent_context', return_value='ctx'):
             result = asyncio.run(agent.run_analysis_cycle())
-        self.assertIn('get_x 成功', result['actions'][0])
+        self.assertIn('get_x', result['actions'][0])
+        self.assertIn('成功', result['actions'][0])
 
     def test_session_history_is_saved(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -33,9 +33,32 @@ class ThreadLoadWorker(QThread):
 
     def run(self):
         try:
-            replies = asyncio.run(
-                self.bili_api.get_comment_thread(self.aid, self.root_rpid)
-            )
+            async def load():
+                replies = await self.bili_api.get_comment_thread(
+                    self.aid, self.root_rpid
+                )
+                replies = list(replies or [])
+                if not any(
+                    item.get('rpid') == self.root_rpid for item in replies
+                ):
+                    try:
+                        comments = await self.bili_api.get_comments(
+                            self.aid, count=50
+                        )
+                        root = next(
+                            (
+                                item for item in (comments or [])
+                                if item.get('rpid') == self.root_rpid
+                            ),
+                            None,
+                        )
+                        if root:
+                            replies.append(root)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"读取原评论失败: {exc}")
+                return replies
+
+            replies = asyncio.run(load())
             self._cache_images(replies)
             self.loaded.emit(replies)
         except Exception as exc:  # noqa: BLE001
