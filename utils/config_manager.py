@@ -28,6 +28,7 @@ class ConfigManager:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
+                self._migrate_legacy()
                 self._merge_defaults()
                 self._normalize_secrets()
                 self._normalize_transcription()
@@ -38,6 +39,14 @@ class ConfigManager:
         else:
             logger.info("配置文件不存在，使用默认配置")
             self.config = self.get_default_config()
+
+    def _migrate_legacy(self):
+        """Migrate old keys before defaults fill in the new keys."""
+        interaction = self.config.get('interaction')
+        if not isinstance(interaction, dict):
+            return
+        if 'reply_scope' not in interaction and interaction.get('reply_only_owner') is True:
+            interaction['reply_scope'] = 'owner'
 
     def _merge_defaults(self):
         """把新增默认配置项补进旧配置文件，避免设置缺失。"""

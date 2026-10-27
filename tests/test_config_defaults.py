@@ -1,4 +1,5 @@
-﻿import tempfile
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -38,6 +39,17 @@ class ConfigDefaultTests(unittest.TestCase):
         self.assertEqual(config.get('analysis.cloud_transcription.api_key'), '')
         self.assertEqual(config.get('ai.api_key'), '')
         self.assertEqual(config.get('bilibili.owner_uid'), '')
+
+    def test_old_owner_only_setting_survives_default_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'config.json'
+            path.write_text(
+                json.dumps({'interaction': {'reply_only_owner': True}}),
+                encoding='utf-8',
+            )
+            config = ConfigManager(path)
+            from utils.reply_scope import REPLY_SCOPE_OWNER, resolve_reply_scope
+            self.assertEqual(resolve_reply_scope(config), REPLY_SCOPE_OWNER)
 
 
 if __name__ == '__main__':

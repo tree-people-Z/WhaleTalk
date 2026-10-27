@@ -635,6 +635,22 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
             logger.error(f"获取视频信息失败 {bvid}: {e}")
             return None
 
+    async def get_video_info_by_aid(self, aid: int) -> Optional[Dict[str, Any]]:
+        """通过 aid 读取视频信息；自由 Agent 发评论时只有 aid。"""
+        try:
+            v = video.Video(aid=int(aid), credential=self.credential)
+            info = await v.get_info()
+            return {
+                'bvid': info.get('bvid') or '',
+                'aid': info.get('aid') or int(aid),
+                'title': info.get('title') or '',
+                'owner': info.get('owner', {}).get('name') or '',
+                'pubdate': info.get('pubdate'),
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"通过 aid 获取视频信息失败 {aid}: {e}")
+            return None
+
     async def get_subtitle(self, bvid: str, cid: int = None) -> Optional[str]:
         """
         获取视频字幕

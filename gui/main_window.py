@@ -4,6 +4,7 @@
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -294,15 +295,15 @@ class MainWindow(QMainWindow):
         self.history_table = QTableWidget()
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setShowGrid(False)
-        self.history_table.setColumnCount(4)
+        self.history_table.setColumnCount(5)
         self.history_table.setHorizontalHeaderLabels([
-            "时间", "本轮总结", "实际动作", "发送数"
+            "时间", "来源", "本轮总结", "实际动作", "发送数"
         ])
 
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self.history_table)
 
@@ -397,8 +398,8 @@ class MainWindow(QMainWindow):
         self.stats_label.setText(
             f"今日: {stats['today_comments']}条发送"
             f"（{stats.get('today_posts', 0)}评论+{stats.get('today_replies', 0)}回复） | "
-            f"总计: {stats['total_videos_analyzed']}个视频 | "
-            f"{stats['total_comments_sent']}条评论"
+            f"总计: {stats.get('total_agent_runs', 0)}轮 Agent | "
+            f"{stats['total_comments_sent']}条发送"
         )
 
     def show_login_dialog(self):
@@ -592,30 +593,43 @@ class MainWindow(QMainWindow):
         return True
 
     def load_history(self):
-        """加载自由 Agent 的运行历史。"""
-        sessions = self.db.get_recent_agent_sessions(limit=200)
-        self.history_table.setRowCount(len(sessions))
+        """加载新旧两种运行历史，旧视频记录继续可见。"""
+        rows = []
+        for session in self.db.get_recent_agent_sessions(limit=200):
+            rows.append({
+                'time': session.get('created_at'),
+                'source': '自由 Agent',
+                'summary': session.get('summary') or '',
+                'actions': '；'.join(str(item) for item in (session.get('actions') or [])),
+                'count': session.get('comments_sent') or 0,
+            })
+        for record in self.db.get_recent_videos(limit=200):
+            rows.append({
+                'time': record.analyzed_at,
+                'source': '旧流水线',
+                'summary': record.title or '',
+                'actions': record.comment_text or record.reason or '',
+                'count': 1 if record.commented else 0,
+            })
+        rows.sort(key=lambda row: row['time'] or datetime.min, reverse=True)
 
-        for i, session in enumerate(sessions):
-            created = session.get('created_at')
-            time_item = QTableWidgetItem(
-                created.strftime('%m-%d %H:%M') if created else ''
-            )
-            self.history_table.setItem(i, 0, time_item)
-
-            summary_item = QTableWidgetItem(session.get('summary') or '')
-            summary_item.setToolTip(session.get('summary') or '')
-            self.history_table.setItem(i, 1, summary_item)
-
-            actions = session.get('actions') or []
-            actions_text = '；'.join(str(item) for item in actions)
-            action_item = QTableWidgetItem(actions_text)
-            action_item.setToolTip(actions_text)
-            self.history_table.setItem(i, 2, action_item)
-
+        self.history_table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            when = row['time']
             self.history_table.setItem(
-                i, 3, QTableWidgetItem(str(session.get('comments_sent') or 0))
+                i, 0, QTableWidgetItem(when.strftime('%m-%d %H:%M') if when else '')
             )
+            self.history_table.setItem(i, 1, QTableWidgetItem(row['source']))
+
+            summary_item = QTableWidgetItem(row['summary'])
+            summary_item.setToolTip(row['summary'])
+            self.history_table.setItem(i, 2, summary_item)
+
+            action_item = QTableWidgetItem(row['actions'])
+            action_item.setToolTip(row['actions'])
+            self.history_table.setItem(i, 3, action_item)
+
+            self.history_table.setItem(i, 4, QTableWidgetItem(str(row['count'])))
 
     def _open_history_video(self, row: int, column: int):
         """打开历史记录对应的视频页面。"""

@@ -126,31 +126,56 @@ class BiliTool:
         blocked = self._check_write(method, args)
         if blocked:
             return {'error': blocked}
+        extra_bvid = str(args.get('bvid') or '')
+        call_args = {
+            key: value for key, value in args.items()
+            if key not in {'bvid', 'video_title'}
+        }
         try:
-            result = getattr(self.bili, method)(**args)
+            result = getattr(self.bili, method)(**call_args)
             if inspect.isawaitable(result):
                 result = await result
             if method in _WRITE_METHODS:
                 self.writes += 1
                 if method == 'post_comment' and self.db is not None:
-                    try:
-                        self.db.add_comment_record(
-                            bvid=str(args.get('bvid') or ''),
-                            aid=int(args.get('aid') or 0),
-                            content=str(args.get('text') or ''),
-                            comment_type='reply' if args.get('root_rpid') or args.get('parent_rpid') else 'post',
-                            success=bool(result),
-                            rpid=getattr(self.bili, 'last_comment_rpid', None),
-                            thread_root=args.get('root_rpid'),
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug(f'记录自由 Agent 评论失败: {exc}')
+                    await self._record_comment(call_args, extra_bvid, bool(result))
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}
         except Exception as exc:  # noqa: BLE001
             logger.warning(f'自由 Agent 调用 {method} 失败: {exc}')
             return {'error': str(exc)}
+
+    async def _record_comment(self, args: dict, bvid: str, success: bool) -> None:
+        aid = int(args.get('aid') or 0)
+        title = ''
+        author = ''
+        if not bvid and aid and hasattr(self.bili, 'get_video_info_by_aid'):
+            try:
+                info = await self.bili.get_video_info_by_aid(aid) or {}
+                bvid = str(info.get('bvid') or '')
+                title = str(info.get('title') or '')
+                author = str(info.get('owner') or '')
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'补全视频信息失败 aid={aid}: {exc}')
+        try:
+            self.db.add_comment_record(
+                bvid=bvid,
+                aid=aid,
+                content=str(args.get('text') or ''),
+                comment_type='reply' if args.get('root_rpid') or args.get('parent_rpid') else 'post',
+                success=success,
+                rpid=getattr(self.bili, 'last_comment_rpid', None),
+                parent_rpid=args.get('parent_rpid'),
+                thread_root=args.get('root_rpid'),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'记录自由 Agent 评论失败: {exc}')
+        if bvid and title:
+            try:
+                self.db.ensure_video_record(bvid, aid, title, author)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'补全视频记录失败: {exc}')
 
     @staticmethod
     def dump(result: Any, limit: int = 4000) -> str:

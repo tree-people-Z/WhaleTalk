@@ -450,6 +450,27 @@ class Database:
             .limit(limit)\
             .all()
 
+    def ensure_video_record(
+        self, bvid: str, aid: int, title: str = '', author: str = ''
+    ) -> VideoRecord:
+        """Create a title-only video row for comments sent by the free agent."""
+        bvid = (bvid or '').strip()
+        if not bvid:
+            raise ValueError('bvid 为空')
+        record = self.session.query(VideoRecord).filter_by(bvid=bvid).first()
+        if record is not None:
+            return record
+        record = VideoRecord(
+            bvid=bvid,
+            aid=aid,
+            title=title or '',
+            author=author or '',
+            analyzed_at=None,
+        )
+        self.session.add(record)
+        self.session.commit()
+        return record
+
     def add_agent_session(
         self, summary: str, actions: List[str], comments_sent: int = 0
     ) -> None:
@@ -593,8 +614,9 @@ class Database:
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         total_videos = self.session.query(VideoRecord).count()
-        total_comments = self.session.query(VideoRecord)\
-            .filter_by(commented=True).count()
+        total_comments = self.session.query(CommentRecord)\
+            .filter(CommentRecord.success == True).count()  # noqa: E712
+        total_agent_runs = self.session.query(AgentSession).count()
 
         today_quota = self.get_today_quota()
         today_posts = self.get_today_comment_count()
@@ -603,6 +625,7 @@ class Database:
         return {
             'total_videos_analyzed': total_videos,
             'total_comments_sent': total_comments,
+            'total_agent_runs': total_agent_runs,
             'today_comments': today_total,
             'today_posts': today_posts,
             'today_replies': max(0, today_total - today_posts),
