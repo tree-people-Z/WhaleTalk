@@ -178,6 +178,7 @@ class SettingsPage(QWidget):
         self.reply_scope_combo.currentIndexChanged.connect(self.auto_save)
         self.ai_provider_combo.currentIndexChanged.connect(self.auto_save)
         self.video_keywords_input.textChanged.connect(self.auto_save)
+        self.transcription_mode_combo.currentIndexChanged.connect(self.auto_save)
         self.deepseek_offpeak_windows_input.editingFinished.connect(self.auto_save)
 
         self.disable_wheel_event(self.ai_provider_combo)
@@ -398,7 +399,16 @@ class SettingsPage(QWidget):
         self.max_videos_spin.setRange(1, 50)
         layout.addRow("每轮看视频数量:", self.max_videos_spin)
 
-        hint = QLabel("这些是偏好，不是固定流程；AI 可以自己决定看多少、看什么。")
+        self.transcription_mode_combo = QComboBox()
+        self.transcription_mode_combo.addItem("关闭", "off")
+        self.transcription_mode_combo.addItem("本地 Whisper", "local")
+        self.transcription_mode_combo.addItem("云端 Whisper", "cloud")
+        layout.addRow("无字幕时语音转写:", self.transcription_mode_combo)
+
+        hint = QLabel(
+            "关键词和每轮数量是偏好，不是固定流程；AI 可以自己决定看多少、看什么。"
+            "语音转写用于视频没有 B站字幕时。"
+        )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 12px;")
         layout.addRow("", hint)
@@ -563,6 +573,10 @@ class SettingsPage(QWidget):
         except (TypeError, ValueError):
             max_videos = 20
         self.max_videos_spin.setValue(max(1, min(50, max_videos)))
+        mode = self.config.get('analysis.transcription_mode', 'off')
+        index = self.transcription_mode_combo.findData(mode)
+        if index >= 0:
+            self.transcription_mode_combo.setCurrentIndex(index)
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
         scope = resolve_reply_scope(self.config)
         scope_index = self.reply_scope_combo.findData(scope)
@@ -621,6 +635,10 @@ class SettingsPage(QWidget):
                 if line.strip()
             ]
             self.config.set('search.keywords', keywords)
+            self.config.set(
+                'analysis.transcription_mode',
+                self.transcription_mode_combo.currentData() or 'off',
+            )
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
             apply_reply_scope(
                 self.config, self.reply_scope_combo.currentData() or 'all'

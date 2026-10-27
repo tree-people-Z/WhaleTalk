@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -86,6 +87,66 @@ class FreeAgent:
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
 
+    async def _transcribe_audio(
+        self, bvid: str, media_urls: dict
+    ) -> tuple[str, str]:
+        """Transcribe the audio stream when B站 has no subtitle."""
+        mode = str(self.config.get('analysis.transcription_mode', 'off')) if self.config else 'off'
+        if mode not in ('local', 'cloud'):
+            return '', ''
+        audio_url = (media_urls or {}).get('audio')
+        if not audio_url and hasattr(self.bili, 'get_media_urls'):
+            try:
+                media_urls = await self.bili.get_media_urls(bvid) or {}
+                audio_url = media_urls.get('audio')
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'获取音频流失败 {bvid}: {exc}')
+        if not audio_url:
+            return '', ''
+        try:
+            from core.frame_analyzer import FrameAnalyzer
+            analyzer = FrameAnalyzer()
+            if not analyzer.ffmpeg_available:
+                return '', ''
+            with tempfile.TemporaryDirectory(prefix='bili-audio-') as audio_dir:
+                if mode == 'cloud':
+                    from core.cloud_transcriber import CloudAudioTranscriber
+                    transcriber = CloudAudioTranscriber(
+                        base_url=self.config.get(
+                            'analysis.cloud_transcription.base_url',
+                            'https://api.openai.com/v1',
+                        ),
+                        api_key=self.config.get('analysis.cloud_transcription.api_key', ''),
+                        model=self.config.get(
+                            'analysis.cloud_transcription.model', 'whisper-1'
+                        ),
+                    )
+                    text = await transcriber.transcribe_url(
+                        audio_url,
+                        str(Path(audio_dir) / 'audio.mp3'),
+                        ffmpeg_path=analyzer.ffmpeg_path,
+                    )
+                    source = '云端语音转写'
+                else:
+                    from core.audio_transcriber import LocalAudioTranscriber
+                    transcriber = LocalAudioTranscriber(
+                        model_name=self.config.get(
+                            'analysis.local_transcription_model', 'medium'
+                        )
+                    )
+                    text = await transcriber.transcribe_url(
+                        audio_url,
+                        str(Path(audio_dir) / 'audio.wav'),
+                        ffmpeg_path=analyzer.ffmpeg_path,
+                    )
+                    source = '本地语音转写'
+                if text:
+                    logger.info(f'{source}成功 {bvid}, 长度: {len(text)}')
+                    return str(text), source
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f'音频转写失败 {bvid}: {exc}')
+        return '', ''
+
     async def inspect_video(self, bvid: str, frames: int = 3, comments: int = 10) -> dict:
         """Read title/subtitle/comments and optionally describe sampled frames."""
         bvid = (bvid or '').strip()
@@ -102,11 +163,16 @@ class FreeAgent:
 
         aid = int(info.get('aid') or 0)
         subtitle = ''
+        subtitle_source = ''
         if hasattr(self.bili, 'get_subtitle'):
             try:
                 subtitle = str(await self.bili.get_subtitle(bvid) or '')
+                if subtitle:
+                    subtitle_source = 'B站字幕'
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f'读取字幕失败 {bvid}: {exc}')
+        if not subtitle:
+            subtitle, subtitle_source = await self._transcribe_audio(bvid, {})
 
         comment_items = []
         count = max(0, min(int(comments or 0), 20))
@@ -169,6 +235,7 @@ class FreeAgent:
             'duration': info.get('duration'),
             'description': str(info.get('desc') or '')[:1000],
             'subtitle': subtitle[:4000],
+            'subtitle_source': subtitle_source,
             'comments': comment_items,
             'frames': frame_items,
             'frame_note': frame_note,
