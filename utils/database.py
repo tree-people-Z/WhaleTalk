@@ -4,6 +4,7 @@
 """
 
 from pathlib import Path
+import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, inspect, text
@@ -126,6 +127,17 @@ class PrivateChatState(Base):
     talker_id = Column(Integer, unique=True, index=True)
     last_replied_ts = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.now)
+
+
+class AgentSession(Base):
+    """One free-agent run and the actions it actually performed."""
+    __tablename__ = 'agent_sessions'
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    summary = Column(Text, default='')
+    actions_json = Column(Text, default='[]')
+    comments_sent = Column(Integer, default=0)
 
 
 class DailyQuota(Base):
@@ -437,6 +449,35 @@ class Database:
             .order_by(VideoRecord.created_at.desc())\
             .limit(limit)\
             .all()
+
+    def add_agent_session(
+        self, summary: str, actions: List[str], comments_sent: int = 0
+    ) -> None:
+        self.session.add(AgentSession(
+            summary=summary or '',
+            actions_json=json.dumps(actions or [], ensure_ascii=False),
+            comments_sent=int(comments_sent or 0),
+        ))
+        self.session.commit()
+
+    def get_recent_agent_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
+        rows = self.session.query(AgentSession)\
+            .order_by(AgentSession.created_at.desc())\
+            .limit(limit)\
+            .all()
+        results = []
+        for row in rows:
+            try:
+                actions = json.loads(row.actions_json or '[]')
+            except (TypeError, ValueError):
+                actions = []
+            results.append({
+                'created_at': row.created_at,
+                'summary': row.summary or '',
+                'actions': actions if isinstance(actions, list) else [],
+                'comments_sent': row.comments_sent or 0,
+            })
+        return results
 
     def is_video_analyzed_recently(self, bvid: str, hours: float = 2) -> bool:
         """检查视频是否在最近一段时间内分析过。"""

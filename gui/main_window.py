@@ -294,16 +294,15 @@ class MainWindow(QMainWindow):
         self.history_table = QTableWidget()
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setShowGrid(False)
-        self.history_table.setColumnCount(7)
+        self.history_table.setColumnCount(4)
         self.history_table.setHorizontalHeaderLabels([
-            "时间", "标题", "作者", "评分", "已评论", "评论内容", "视频链接"
+            "时间", "本轮总结", "实际动作", "发送数"
         ])
-        self.history_table.cellClicked.connect(self._open_history_video)
 
         header = self.history_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self.history_table)
 
@@ -593,48 +592,30 @@ class MainWindow(QMainWindow):
         return True
 
     def load_history(self):
-        """加载历史记录"""
-        records = self.db.get_recent_videos(limit=500)
+        """加载自由 Agent 的运行历史。"""
+        sessions = self.db.get_recent_agent_sessions(limit=200)
+        self.history_table.setRowCount(len(sessions))
 
-        self.history_table.setRowCount(len(records))
-
-        for i, record in enumerate(records):
-            # 时间
+        for i, session in enumerate(sessions):
+            created = session.get('created_at')
             time_item = QTableWidgetItem(
-                record.analyzed_at.strftime('%m-%d %H:%M') if record.analyzed_at else ""
+                created.strftime('%m-%d %H:%M') if created else ''
             )
             self.history_table.setItem(i, 0, time_item)
 
-            # 标题
-            title_item = QTableWidgetItem(record.title or "")
-            self.history_table.setItem(i, 1, title_item)
+            summary_item = QTableWidgetItem(session.get('summary') or '')
+            summary_item.setToolTip(session.get('summary') or '')
+            self.history_table.setItem(i, 1, summary_item)
 
-            # 作者
-            author_item = QTableWidgetItem(record.author or "")
-            self.history_table.setItem(i, 2, author_item)
+            actions = session.get('actions') or []
+            actions_text = '；'.join(str(item) for item in actions)
+            action_item = QTableWidgetItem(actions_text)
+            action_item.setToolTip(actions_text)
+            self.history_table.setItem(i, 2, action_item)
 
-            # 评分
-            score_item = QTableWidgetItem(str(record.score or 0))
-            self.history_table.setItem(i, 3, score_item)
-
-            # 已评论
-            commented_item = QTableWidgetItem("✅" if record.commented else "")
-            self.history_table.setItem(i, 4, commented_item)
-
-            # 评论内容
-            comment_item = QTableWidgetItem(record.comment_text or "")
-            self.history_table.setItem(i, 5, comment_item)
-
-            # 视频链接
-            link_item = QTableWidgetItem("打开视频 ↗" if record.bvid else "")
-            if record.bvid:
-                link_item.setData(
-                    Qt.ItemDataRole.UserRole,
-                    f"https://www.bilibili.com/video/{record.bvid}"
-                )
-                link_item.setForeground(Qt.GlobalColor.blue)
-                link_item.setToolTip("点击打开B站视频")
-            self.history_table.setItem(i, 6, link_item)
+            self.history_table.setItem(
+                i, 3, QTableWidgetItem(str(session.get('comments_sent') or 0))
+            )
 
     def _open_history_video(self, row: int, column: int):
         """打开历史记录对应的视频页面。"""

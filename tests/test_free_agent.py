@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from core.bili_tool import BiliTool
 from core.free_agent import FreeAgent
 from core import free_context
+from utils.database import Database
 
 
 class FakeBili:
@@ -97,6 +98,20 @@ class FreeAgentTests(unittest.TestCase):
         self.assertEqual(len(result['actions']), 1)
         self.assertIn('get_x', result['actions'][0])
         self.assertIn('成功', result['actions'][0])
+
+    def test_session_history_is_saved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'history.db'))
+            try:
+                db.add_agent_session('这一轮做了什么', ['get_x 成功'], 1)
+                rows = db.get_recent_agent_sessions()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]['summary'], '这一轮做了什么')
+                self.assertEqual(rows[0]['actions'], ['get_x 成功'])
+                self.assertEqual(rows[0]['comments_sent'], 1)
+            finally:
+                db.session.close()
+                db.engine.dispose()
 
 
 if __name__ == '__main__':

@@ -216,6 +216,11 @@ class FreeAgent:
             self._log_actions(actions)
         if summary:
             logger.info(f'🐋 模型总结：{summary}')
+        if self.db is not None:
+            try:
+                self.db.add_agent_session(summary, actions, comments)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'记录 Agent 运行历史失败: {exc}')
         return {
             'status': 'success',
             'videos_found': 0,
