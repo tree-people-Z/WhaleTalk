@@ -454,8 +454,6 @@ class MainWindow(QMainWindow):
         status = result.get('status', 'unknown')
 
         if status == 'success':
-            if result.get('summary'):
-                self.log(f"🐋 自由 Agent：{result['summary']}")
             self.log("✅ 自由 Agent 本轮结束")
             if result.get('comments_sent'):
                 self.log(f"  - 发送评论: {result['comments_sent']}条")

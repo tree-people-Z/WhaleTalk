@@ -34,6 +34,18 @@ class FakeAI:
         return '{"action":"finish","reason":"本轮不操作"}'
 
 
+class SequenceAI:
+    def __init__(self):
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return ('{"action":"tool","tool":"bili_api","arguments":'
+                    '{"method":"get_x","arguments":{"value":3}}}')
+        return '{"action":"finish","reason":"查了一个值"}'
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -76,6 +88,15 @@ class FreeAgentTests(unittest.TestCase):
             result = asyncio.run(agent.run_analysis_cycle())
         self.assertEqual(result['status'], 'success')
         self.assertEqual(result['summary'], '本轮不操作')
+        self.assertEqual(result['actions'], [])
+
+    def test_action_log_records_tool_call(self):
+        agent = FreeAgent(FakeBili(), SequenceAI(), Mock(), Mock())
+        with patch('core.free_agent.build_agent_context', return_value='人设/日记/记忆'):
+            result = asyncio.run(agent.run_analysis_cycle())
+        self.assertEqual(len(result['actions']), 1)
+        self.assertIn('get_x', result['actions'][0])
+        self.assertIn('成功', result['actions'][0])
 
 
 if __name__ == '__main__':

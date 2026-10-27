@@ -64,6 +64,46 @@ class FreeAgent:
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
 
+    @staticmethod
+    def _action_ok(result: Any) -> bool:
+        if result is False:
+            return False
+        if isinstance(result, dict) and result.get('error'):
+            return False
+        return True
+
+    @staticmethod
+    def _describe_action(tool: str, args: dict, result: Any) -> str:
+        if tool == 'bili_api':
+            method = str(args.get('method') or '')
+            params = args.get('arguments') or args.get('params') or {}
+            target = ''
+            for key in ('keyword', 'bvid', 'aid', 'talker_id', 'uid'):
+                if params.get(key) not in (None, ''):
+                    target = f' {params[key]}'
+                    break
+            detail = f'{method}{target}'
+            if method in {'post_comment', 'send_private_message', 'send_danmaku'}:
+                text = str(params.get('text') or '')[:24]
+                if text:
+                    detail += f'：{text}'
+            return f'{detail} {"成功" if FreeAgent._action_ok(result) else "失败"}'
+        if tool == 'write_diary':
+            content = str(args.get('content') or '')
+            return f'写日记（{len(content)} 字）{"成功" if FreeAgent._action_ok(result) else "失败"}'
+        if tool == 'read_diary':
+            day = str(args.get('day') or '')
+            return f'读日记（{day or "列出日期"}）'
+        return f'{tool} {"成功" if FreeAgent._action_ok(result) else "失败"}'
+
+    @staticmethod
+    def _log_actions(actions: list[str]) -> None:
+        if actions:
+            logger.info('🐋 本轮动作：' + '；'.join(actions))
+        else:
+            logger.info('🐋 本轮动作：没有调用工具')
+
+
     async def run_analysis_cycle(self) -> Dict[str, Any]:
         self._stop = asyncio.Event()
         messages = [
@@ -78,6 +118,7 @@ class FreeAgent:
         ]
         comments = 0
         summary = ''
+        actions: list[str] = []
         try:
             for _ in range(MAX_STEPS):
                 if self._stop.is_set():
@@ -98,7 +139,11 @@ class FreeAgent:
                 args = decision.get('arguments') or {}
                 if not isinstance(args, dict):
                     args = {}
-                result = await self._call_tool(tool, args)
+                try:
+                    result = await self._call_tool(tool, args)
+                except Exception as exc:  # noqa: BLE001
+                    result = {'error': str(exc)}
+                actions.append(self._describe_action(tool, args, result))
                 if (tool == 'bili_api'
                         and str(args.get('method')) == 'post_comment'
                         and result is True):
@@ -111,8 +156,9 @@ class FreeAgent:
                 })
         finally:
             self._stop = None
+            self._log_actions(actions)
         if summary:
-            logger.info(f'自由 Agent 本轮结束: {summary}')
+            logger.info(f'🐋 模型总结：{summary}')
         return {
             'status': 'success',
             'videos_found': 0,
@@ -120,6 +166,7 @@ class FreeAgent:
             'worthy_count': 0,
             'comments_sent': comments,
             'summary': summary,
+            'actions': actions,
         }
 
     async def check_replies(self) -> Dict[str, Any]:
