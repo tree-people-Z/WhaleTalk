@@ -113,8 +113,24 @@ def build_agent_context(config, diary_days: int = 3) -> str:
     persona = load_configured_persona(config, 5000)
     diaries = load_recent_diaries(diary_days)
     memory = load_memory(4000)
+    keywords = config.get('search.keywords', []) if config is not None else []
+    if isinstance(keywords, str):
+        keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
+    if not isinstance(keywords, (list, tuple)):
+        keywords = []
+    keywords = [str(item).strip() for item in keywords if str(item).strip()]
+    max_videos = config.get('limits.max_videos_per_run', 20) if config is not None else 20
+    try:
+        max_videos = int(max_videos)
+    except (TypeError, ValueError):
+        max_videos = 20
+    preference = (
+        f'# 刷视频偏好\n关键词：{"、".join(keywords) if keywords else "（未设置）"}\n'
+        f'每轮大致看 {max_videos} 个视频；最终看多少由你决定。'
+    )
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
-        f'# 长期记忆\n{memory or "（暂无长期记忆）"}'
+        f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
+        f'{preference}'
     )

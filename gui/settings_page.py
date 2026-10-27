@@ -157,6 +157,7 @@ class SettingsPage(QWidget):
         """连接信号实现实时保存"""
         for spin in (
             self.max_comments_spin,
+            self.max_videos_spin,
             self.browse_interval_min_spin,
             self.browse_interval_max_spin,
             self.reply_check_interval_spin,
@@ -176,6 +177,7 @@ class SettingsPage(QWidget):
 
         self.reply_scope_combo.currentIndexChanged.connect(self.auto_save)
         self.ai_provider_combo.currentIndexChanged.connect(self.auto_save)
+        self.video_keywords_input.textChanged.connect(self.auto_save)
         self.deepseek_offpeak_windows_input.editingFinished.connect(self.auto_save)
 
         self.disable_wheel_event(self.ai_provider_combo)
@@ -242,6 +244,10 @@ class SettingsPage(QWidget):
         # AI设置
         ai_group = self._create_ai_section()
         layout.addWidget(ai_group)
+
+        # 刷视频偏好
+        video_group = self._create_video_preferences_section()
+        layout.addWidget(video_group)
 
         # 限制设置
         limits_group = self._create_limits_section()
@@ -372,6 +378,30 @@ class SettingsPage(QWidget):
             "stow (最多收藏)"
         ])
         layout.addRow("排序方式:", self.order_combo)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_video_preferences_section(self) -> QGroupBox:
+        """刷视频偏好：关键词和每轮浏览数量，供 AI 参考。"""
+        group = QGroupBox("刷视频偏好")
+        layout = QFormLayout()
+
+        self.video_keywords_input = QTextEdit()
+        self.video_keywords_input.setPlaceholderText(
+            "每行一个关键词，例如：\nAI鲸鱼娘\nDeepSeek\n二次元"
+        )
+        self.video_keywords_input.setMaximumHeight(96)
+        layout.addRow("关键词:", self.video_keywords_input)
+
+        self.max_videos_spin = QSpinBox()
+        self.max_videos_spin.setRange(1, 50)
+        layout.addRow("每轮看视频数量:", self.max_videos_spin)
+
+        hint = QLabel("这些是偏好，不是固定流程；AI 可以自己决定看多少、看什么。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addRow("", hint)
 
         group.setLayout(layout)
         return group
@@ -520,6 +550,19 @@ class SettingsPage(QWidget):
         self.base_url_input.setText(self.config.get('ai.base_url', ''))
 
         self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 60))
+        keywords = self.config.get('search.keywords', [])
+        if isinstance(keywords, str):
+            keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
+        if not isinstance(keywords, (list, tuple)):
+            keywords = []
+        self.video_keywords_input.setPlainText(
+            '\n'.join(str(item).strip() for item in keywords if str(item).strip())
+        )
+        try:
+            max_videos = int(self.config.get('limits.max_videos_per_run', 20))
+        except (TypeError, ValueError):
+            max_videos = 20
+        self.max_videos_spin.setValue(max(1, min(50, max_videos)))
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
         scope = resolve_reply_scope(self.config)
         scope_index = self.reply_scope_combo.findData(scope)
@@ -571,6 +614,13 @@ class SettingsPage(QWidget):
             self.config.set('ai.base_url', self.base_url_input.text())
 
             self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
+            self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
+            keywords = [
+                line.strip()
+                for line in self.video_keywords_input.toPlainText().splitlines()
+                if line.strip()
+            ]
+            self.config.set('search.keywords', keywords)
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
             apply_reply_scope(
                 self.config, self.reply_scope_combo.currentData() or 'all'
