@@ -188,10 +188,26 @@ class FreeAgent:
             '不要复述日记或之前的轮次。'
         )
 
+    @staticmethod
+    def _unwrap_arguments(params: Any) -> dict:
+        """Strip accidental extra arguments/params wrappers from model output."""
+        for _ in range(3):
+            if not isinstance(params, dict):
+                return {}
+            nested = params.get('arguments')
+            if not isinstance(nested, dict):
+                nested = params.get('params')
+            if not isinstance(nested, dict):
+                break
+            params = nested
+        return params if isinstance(params, dict) else {}
+
     async def _call_tool(self, name: str, args: dict) -> Any:
         if name == 'bili_api':
             method = str(args.get('method') or '')
-            params = args.get('arguments') or args.get('params') or {}
+            params = self._unwrap_arguments(
+                args.get('arguments') or args.get('params') or {}
+            )
             result = await self.bili_tool.call(method, params)
             return self._filter_agent_events(method, params, result)
         if name == 'inspect_video':
@@ -422,6 +438,7 @@ class FreeAgent:
                 params = {}
         if not isinstance(params, dict):
             params = {}
+        params = self._unwrap_arguments(params)
 
         # Handle malformed shapes such as {"search_videos": {...}} or
         # {"arguments": {"method": "search_videos", ...}}.

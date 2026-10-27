@@ -116,6 +116,12 @@ class BiliToolTests(unittest.TestCase):
         result = asyncio.run(tool.call('get_x', {'value': 7}))
         self.assertEqual(result, {'value': 7})
         self.assertIn('error', asyncio.run(tool.call('missing', {})))
+        event_bili = EventBili()
+        event_tool = BiliTool(event_bili, Mock(), Mock())
+        self.assertEqual(
+            len(asyncio.run(event_tool.call('get_at_messages', {'arguments': {}}))),
+            1,
+        )
 
     def test_write_cap(self):
         bili = FakeBili()
@@ -259,6 +265,13 @@ class FreeAgentTests(unittest.TestCase):
                 'bili_api', {'talker_id': 1, 'text': 'hi'}
             )[1]['method'],
             'send_private_message',
+        )
+        self.assertEqual(
+            agent._normalize_call(
+                'bili_api',
+                {'method': 'is_blocked', 'arguments': {'arguments': {}}},
+            ),
+            ('bili_api', {'method': 'is_blocked', 'arguments': {}}),
         )
 
     def test_top_level_method_is_normalized(self):

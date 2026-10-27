@@ -186,6 +186,11 @@ class BiliTool:
         args = arguments or {}
         if not isinstance(args, dict):
             return {'error': 'arguments 必须是对象'}
+        for _ in range(3):
+            nested = args.get('arguments')
+            if not isinstance(nested, dict):
+                break
+            args = nested
         blocked = self._check_write(method, args)
         if blocked:
             return {'error': blocked}
