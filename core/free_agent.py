@@ -575,7 +575,28 @@ class FreeAgent:
                 detail += f'：{text}'
         if isinstance(result, list):
             detail += f'（{len(result)} 条）'
+        if isinstance(result, dict) and result.get('error'):
+            return f'{detail}：失败（{str(result.get("error"))[:100]}）'
         return f'{detail}：{"成功" if ok else "失败"}'
+
+    @staticmethod
+    def _summary_mismatch(summary: str, actions: list[str]) -> list[str]:
+        actual = '；'.join(actions)
+        claims = {
+            '点赞': ('点赞',),
+            '收藏': ('收藏',),
+            '评论/留言': ('发送评论',),
+            '私信': ('发送私信',),
+            '关注': ('关注',),
+            '弹幕': ('发送弹幕',),
+        }
+        missing = []
+        for claim, markers in claims.items():
+            if claim.split('/')[0] not in summary and '留言' not in summary:
+                continue
+            if not any(marker in actual for marker in markers):
+                missing.append(claim)
+        return missing
 
     @staticmethod
     def _log_actions(actions: list[str]) -> None:
@@ -673,7 +694,16 @@ class FreeAgent:
             self._stop = None
             self._log_actions(actions)
         if summary:
-            logger.info(f'🐋 模型总结：{summary}')
+            missing = self._summary_mismatch(summary, actions)
+            if missing:
+                logger.warning(
+                    '🐋 模型总结与实际动作不符：提到 '
+                    + '、'.join(missing)
+                    + '，但本轮没有对应动作'
+                )
+                logger.info(f'🐋 模型自述（未核验）：{summary}')
+            else:
+                logger.info(f'🐋 模型总结：{summary}')
         if not actions:
             logger.warning('🐋 本轮没有实际调用工具，模型总结不代表已执行操作')
         if self.db is not None:
