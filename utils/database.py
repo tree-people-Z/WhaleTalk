@@ -479,6 +479,32 @@ class Database:
         self.session.commit()
         return int(count or 0)
 
+    def get_recent_comment_history(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Sent comments/replies with video title and link for the history tab."""
+        rows = self.session.query(CommentRecord, VideoRecord).outerjoin(
+            VideoRecord, CommentRecord.bvid == VideoRecord.bvid
+        ).filter(
+            CommentRecord.success == True  # noqa: E712
+        ).order_by(
+            CommentRecord.created_at.desc()
+        ).limit(limit).all()
+        results = []
+        for comment, video in rows:
+            bvid = comment.bvid or ''
+            url = (
+                f'https://www.bilibili.com/video/{bvid}' if bvid
+                else (f'https://www.bilibili.com/video/av{comment.aid}' if comment.aid else '')
+            )
+            results.append({
+                'created_at': comment.created_at,
+                'title': (video.title if video else '') or bvid or '',
+                'content': comment.content or '',
+                'bvid': bvid,
+                'aid': comment.aid,
+                'url': url,
+            })
+        return results
+
     def get_recent_videos(self, limit: int = 50) -> List[VideoRecord]:
         """获取最近的视频记录"""
         return self.session.query(VideoRecord)\
