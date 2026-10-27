@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict
 
 from loguru import logger
@@ -17,6 +18,19 @@ from core.free_context import (
 )
 
 MAX_STEPS = 12
+
+INSPECT_VIDEO_TOOL = {
+    'name': 'inspect_video',
+    'description': (
+        '读取一个视频的标题、简介、字幕、热门评论，并可抽取关键帧做画面描述。'
+        '只读，不点赞、不评论。'
+    ),
+    'parameters': {
+        'bvid': 'string',
+        'frames': 'int(可选，0-5，默认3)',
+        'comments': 'int(可选，0-20，默认10)',
+    },
+}
 
 
 class FreeAgent:
@@ -39,7 +53,7 @@ class FreeAgent:
             self._stop.set()
 
     def _system_prompt(self) -> str:
-        tools = [self.bili_tool.spec(), *DIARY_TOOLS]
+        tools = [self.bili_tool.spec(), INSPECT_VIDEO_TOOL, *DIARY_TOOLS]
         owner = self.config.get('bilibili.owner_name', '') or '未配置'
         return (
             f'{build_agent_context(self.config)}\n\n'
@@ -59,12 +73,106 @@ class FreeAgent:
             method = str(args.get('method') or '')
             params = args.get('arguments') or args.get('params') or {}
             return await self.bili_tool.call(method, params)
+        if name == 'inspect_video':
+            return await self.inspect_video(
+                str(args.get('bvid') or ''),
+                frames=int(args.get('frames') if args.get('frames') is not None else 3),
+                comments=int(args.get('comments') if args.get('comments') is not None else 10),
+            )
         if name == 'read_diary':
             return read_diary(str(args.get('day') or ''))
         if name == 'write_diary':
             path = append_diary(str(args.get('content') or ''))
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
+
+    async def inspect_video(self, bvid: str, frames: int = 3, comments: int = 10) -> dict:
+        """Read title/subtitle/comments and optionally describe sampled frames."""
+        bvid = (bvid or '').strip()
+        if not bvid:
+            return {'error': 'bvid 不能为空'}
+        if not hasattr(self.bili, 'get_video_info'):
+            return {'error': '当前没有视频读取接口'}
+        try:
+            info = await self.bili.get_video_info(bvid)
+        except Exception as exc:  # noqa: BLE001
+            return {'error': f'读取视频失败: {exc}'}
+        if not info:
+            return {'error': f'视频不存在或无法读取: {bvid}'}
+
+        aid = int(info.get('aid') or 0)
+        subtitle = ''
+        if hasattr(self.bili, 'get_subtitle'):
+            try:
+                subtitle = str(await self.bili.get_subtitle(bvid) or '')
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'读取字幕失败 {bvid}: {exc}')
+
+        comment_items = []
+        count = max(0, min(int(comments or 0), 20))
+        if count and aid and hasattr(self.bili, 'get_comments'):
+            try:
+                raw = await self.bili.get_comments(aid, count=count)
+                for item in (raw or [])[:count]:
+                    comment_items.append({
+                        'user': str(item.get('user') or item.get('nickname') or ''),
+                        'content': str(item.get('content') or '')[:200],
+                        'like': item.get('like') or 0,
+                    })
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'读取评论失败 {bvid}: {exc}')
+
+        frame_items = []
+        frame_note = ''
+        frame_count = max(0, min(int(frames or 0), 5))
+        if frame_count:
+            try:
+                from core.frame_analyzer import FrameAnalyzer
+                analyzer = FrameAnalyzer()
+                if not analyzer.ffmpeg_available:
+                    frame_note = 'ffmpeg 不可用，未抽帧'
+                elif hasattr(self.bili, 'get_media_urls'):
+                    urls = await self.bili.get_media_urls(bvid) or {}
+                    video_url = urls.get('video')
+                    if not video_url:
+                        frame_note = '没有可用的视频流地址，未抽帧'
+                    else:
+                        output_dir = Path('data') / 'frames' / bvid
+                        paths = await analyzer.extract_frames(
+                            video_url, str(output_dir), count=frame_count,
+                            duration=info.get('duration'),
+                        )
+                        for path in paths:
+                            description = ''
+                            try:
+                                if hasattr(self.ai, 'describe_image'):
+                                    description = str(
+                                        await analyzer.analyze_frame(path, self.ai) or ''
+                                    )
+                            except Exception as exc:  # noqa: BLE001
+                                logger.debug(f'画面描述失败 {path}: {exc}')
+                            frame_items.append({
+                                'path': path,
+                                'description': description[:500],
+                            })
+                        if not paths:
+                            frame_note = '抽帧没有成功'
+            except Exception as exc:  # noqa: BLE001
+                frame_note = f'抽帧失败: {exc}'
+                logger.warning(f'inspect_video 抽帧失败 {bvid}: {exc}')
+
+        return {
+            'bvid': bvid,
+            'aid': aid,
+            'title': str(info.get('title') or ''),
+            'owner': str(info.get('owner') or ''),
+            'duration': info.get('duration'),
+            'description': str(info.get('desc') or '')[:1000],
+            'subtitle': subtitle[:4000],
+            'comments': comment_items,
+            'frames': frame_items,
+            'frame_note': frame_note,
+        }
 
     @staticmethod
     def _infer_method(args: dict) -> str:

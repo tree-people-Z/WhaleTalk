@@ -67,6 +67,24 @@ class DsmlAI:
         return '{"action":"finish","reason":"完成"}'
 
 
+class InspectBili(FakeBili):
+    async def get_video_info(self, bvid: str):
+        return {
+            'bvid': bvid,
+            'aid': 123,
+            'title': '测试视频',
+            'owner': '测试UP',
+            'duration': 60,
+            'desc': '简介',
+        }
+
+    async def get_subtitle(self, bvid: str, cid: int = None):
+        return '这是字幕内容'
+
+    async def get_comments(self, aid: int, **kwargs):
+        return [{'user': '网友', 'content': '好看', 'like': 3}]
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -126,6 +144,13 @@ class FreeAgentTests(unittest.TestCase):
         self.assertEqual(len(result['actions']), 1)
         self.assertIn('get_x', result['actions'][0])
         self.assertIn('成功', result['actions'][0])
+
+    def test_inspect_video_returns_title_subtitle_comments(self):
+        agent = FreeAgent(InspectBili(), FakeAI(), Mock(), Mock())
+        result = asyncio.run(agent.inspect_video('BV1test', frames=0, comments=3))
+        self.assertEqual(result['title'], '测试视频')
+        self.assertEqual(result['subtitle'], '这是字幕内容')
+        self.assertEqual(result['comments'][0]['content'], '好看')
 
     def test_normalizes_malformed_bili_calls(self):
         agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
