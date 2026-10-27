@@ -80,7 +80,7 @@ class FreeAgent:
 
         method = str(
             args.get('method') or args.get('name') or args.get('api')
-            or args.get('method_name') or ''
+            or args.get('method_name') or args.get('tool') or ''
         )
         params = (
             args.get('arguments') or args.get('params')
@@ -223,10 +223,29 @@ class FreeAgent:
                     summary = str(decision.get('reason') or '')
                     break
                 tool = str(decision.get('tool') or decision.get('name') or 'bili_api')
-                args = decision.get('arguments') or {}
+                args = (
+                    decision.get('arguments')
+                    or decision.get('params')
+                    or decision.get('args')
+                    or decision.get('input')
+                    or {}
+                )
+                if isinstance(args, list):
+                    args = next(
+                        (item for item in args if isinstance(item, dict)), {}
+                    )
                 if not isinstance(args, dict):
                     args = {}
+                else:
+                    args = dict(args)
+                # Some models put method at the decision level instead of
+                # inside arguments.
+                for key in ('method', 'method_name', 'api'):
+                    if decision.get(key) and not args.get('method'):
+                        args['method'] = decision[key]
                 tool, args = self._normalize_call(tool, args)
+                if tool == 'bili_api' and not args.get('method'):
+                    logger.warning(f'🐋 未识别的工具调用: {response[:800]}')
                 try:
                     result = await self._call_tool(tool, args)
                 except Exception as exc:  # noqa: BLE001

@@ -2,7 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from core.bili_tool import BiliTool
 from core.free_agent import FreeAgent
@@ -116,6 +116,17 @@ class FreeAgentTests(unittest.TestCase):
             agent._normalize_call('get_x', '{"value": 3}'),
             ('bili_api', {'method': 'get_x', 'arguments': {'value': 3}}),
         )
+
+    def test_top_level_method_is_normalized(self):
+        ai = Mock()
+        ai.chat = AsyncMock(side_effect=[
+            '{"action":"tool","tool":"bili_api","method":"get_x","arguments":{"value":4}}',
+            '{"action":"finish","reason":"done"}',
+        ])
+        agent = FreeAgent(FakeBili(), ai, Mock(), Mock())
+        with patch('core.free_agent.build_agent_context', return_value='ctx'):
+            result = asyncio.run(agent.run_analysis_cycle())
+        self.assertIn('get_x 成功', result['actions'][0])
 
     def test_session_history_is_saved(self):
         with tempfile.TemporaryDirectory() as directory:
