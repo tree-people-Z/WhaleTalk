@@ -41,7 +41,58 @@ class BiliTool:
         self.config = config
         self.writes = 0
         self.max_writes = 8
+        self.video_refs: list[dict] = []
         self._specs = self._build_specs()
+
+    @staticmethod
+    def _video_url(bvid: str, aid: int) -> str:
+        if bvid:
+            return f'https://www.bilibili.com/video/{bvid}'
+        if aid:
+            return f'https://www.bilibili.com/video/av{aid}'
+        return ''
+
+    def _remember_video(self, bvid: str = '', aid: int = 0, title: str = '') -> None:
+        bvid = str(bvid or '').strip()
+        try:
+            aid = int(aid or 0)
+        except (TypeError, ValueError):
+            aid = 0
+        if not bvid and not aid:
+            return
+        for item in self.video_refs:
+            if (bvid and item.get('bvid') == bvid) or (not bvid and item.get('aid') == aid):
+                if title and not item.get('title'):
+                    item['title'] = title
+                if bvid and not item.get('bvid'):
+                    item['bvid'] = bvid
+                    item['url'] = self._video_url(bvid, aid)
+                return
+        if len(self.video_refs) >= 12:
+            return
+        self.video_refs.append({
+            'bvid': bvid,
+            'aid': aid,
+            'title': title,
+            'url': self._video_url(bvid, aid),
+        })
+
+    def _collect_videos(self, method: str, args: dict, result: Any, info: dict | None) -> None:
+        payloads = []
+        if isinstance(info, dict):
+            payloads.append(info)
+        payloads.append(args)
+        if isinstance(result, dict):
+            payloads.append(result)
+        elif isinstance(result, list):
+            payloads.extend(item for item in result[:5] if isinstance(item, dict))
+        for item in payloads:
+            bvid = str(item.get('bvid') or '')
+            aid = item.get('aid') or item.get('avid') or 0
+            title = str(item.get('title') or '')
+            if bvid or aid:
+                self._remember_video(bvid, int(aid or 0), title)
+
 
     def _build_specs(self) -> list[dict]:
         methods = []
@@ -161,6 +212,7 @@ class BiliTool:
                     await self._record_comment(
                         call_args, extra_bvid, bool(result), video_info
                     )
+            self._collect_videos(method, call_args, result, video_info)
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction, QCursor
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
@@ -598,13 +598,17 @@ class MainWindow(QMainWindow):
         """加载新旧两种运行历史，旧视频记录继续可见。"""
         rows = []
         for session in self.db.get_recent_agent_sessions(limit=200):
+            videos = [
+                item for item in (session.get('videos') or [])
+                if isinstance(item, dict) and item.get('url')
+            ]
             rows.append({
                 'time': session.get('created_at'),
                 'source': '自由 Agent',
                 'summary': session.get('summary') or '',
                 'actions': '；'.join(str(item) for item in (session.get('actions') or [])),
                 'count': session.get('comments_sent') or 0,
-                'url': '',
+                'urls': videos,
             })
         for record in self.db.get_recent_videos(limit=200):
             rows.append({
@@ -613,10 +617,11 @@ class MainWindow(QMainWindow):
                 'summary': record.title or '',
                 'actions': record.comment_text or record.reason or '',
                 'count': 1 if record.commented else 0,
-                'url': (
-                    f'https://www.bilibili.com/video/{record.bvid}'
-                    if record.bvid else ''
-                ),
+                'urls': ([{
+                    'bvid': record.bvid,
+                    'url': f'https://www.bilibili.com/video/{record.bvid}',
+                    'title': record.title or '',
+                }] if record.bvid else []),
             })
         rows.sort(key=lambda row: row['time'] or datetime.min, reverse=True)
 
@@ -638,11 +643,17 @@ class MainWindow(QMainWindow):
 
             self.history_table.setItem(i, 4, QTableWidgetItem(str(row['count'])))
 
-            link_item = QTableWidgetItem('打开视频 ↗' if row['url'] else '')
-            if row['url']:
-                link_item.setData(Qt.ItemDataRole.UserRole, row['url'])
+            urls = row['urls']
+            link_text = ''
+            if len(urls) == 1:
+                link_text = '打开视频 ↗'
+            elif len(urls) > 1:
+                link_text = f'视频 {len(urls)} 个 ↗'
+            link_item = QTableWidgetItem(link_text)
+            if urls:
+                link_item.setData(Qt.ItemDataRole.UserRole, urls)
                 link_item.setForeground(Qt.GlobalColor.blue)
-                link_item.setToolTip('点击打开B站视频')
+                link_item.setToolTip('点击选择要打开的视频')
             self.history_table.setItem(i, 5, link_item)
 
     def _open_history_video(self, row: int, column: int):
@@ -650,9 +661,20 @@ class MainWindow(QMainWindow):
         if column != 5:
             return
         item = self.history_table.item(row, column)
-        url = item.data(Qt.ItemDataRole.UserRole) if item else None
-        if url:
-            QDesktopServices.openUrl(QUrl(url))
+        urls = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not urls:
+            return
+        if len(urls) == 1:
+            QDesktopServices.openUrl(QUrl(urls[0].get('url') or ''))
+            return
+        menu = QMenu(self)
+        for video in urls:
+            label = video.get('title') or video.get('bvid') or video.get('url')
+            action = menu.addAction(str(label))
+            action.setData(video.get('url'))
+        chosen = menu.exec(QCursor.pos())
+        if chosen is not None and chosen.data():
+            QDesktopServices.openUrl(QUrl(chosen.data()))
 
     def log(self, message: str):
         """添加日志"""

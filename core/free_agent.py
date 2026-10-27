@@ -218,7 +218,9 @@ class FreeAgent:
             logger.info(f'🐋 模型总结：{summary}')
         if self.db is not None:
             try:
-                self.db.add_agent_session(summary, actions, comments)
+                self.db.add_agent_session(
+                    summary, actions, comments, self.bili_tool.video_refs
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f'记录 Agent 运行历史失败: {exc}')
         return {

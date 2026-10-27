@@ -137,6 +137,7 @@ class AgentSession(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
     summary = Column(Text, default='')
     actions_json = Column(Text, default='[]')
+    videos_json = Column(Text, default='[]')
     comments_sent = Column(Integer, default=0)
 
 
@@ -179,6 +180,14 @@ class Database:
         if 'target_user' not in columns:
             with self.engine.begin() as connection:
                 connection.execute(text('ALTER TABLE comments ADD COLUMN target_user VARCHAR(100)'))
+        session_columns = {
+            col['name'] for col in inspect(self.engine).get_columns('agent_sessions')
+        }
+        if 'videos_json' not in session_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE agent_sessions ADD COLUMN videos_json TEXT DEFAULT '[]'"
+                ))
 
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
@@ -503,11 +512,13 @@ class Database:
         return record
 
     def add_agent_session(
-        self, summary: str, actions: List[str], comments_sent: int = 0
+        self, summary: str, actions: List[str], comments_sent: int = 0,
+        videos: List[Dict[str, Any]] | None = None,
     ) -> None:
         self.session.add(AgentSession(
             summary=summary or '',
             actions_json=json.dumps(actions or [], ensure_ascii=False),
+            videos_json=json.dumps(videos or [], ensure_ascii=False),
             comments_sent=int(comments_sent or 0),
         ))
         self.session.commit()
@@ -523,10 +534,15 @@ class Database:
                 actions = json.loads(row.actions_json or '[]')
             except (TypeError, ValueError):
                 actions = []
+            try:
+                videos = json.loads(row.videos_json or '[]')
+            except (TypeError, ValueError):
+                videos = []
             results.append({
                 'created_at': row.created_at,
                 'summary': row.summary or '',
                 'actions': actions if isinstance(actions, list) else [],
+                'videos': videos if isinstance(videos, list) else [],
                 'comments_sent': row.comments_sent or 0,
             })
         return results
