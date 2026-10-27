@@ -127,7 +127,7 @@ class DiarySystem:
 
         # 写入JSON文件
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(diary_data, f, indent=2, ensure_ascii=False)
+            json.dump(diary_data, f, indent=2, ensure_ascii=False, default=str)
 
         logger.info(f"📔 已写入给自己的日记: {filepath}")
         return filepath

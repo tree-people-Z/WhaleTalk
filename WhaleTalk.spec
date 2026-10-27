@@ -22,6 +22,9 @@ hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
 hiddenimports += [
     "gui.memory_worker",
     "core.conversation_agent",
+    "core.free_agent",
+    "core.free_context",
+    "core.bili_tool",
     "core.long_term_memory",
     "core.daily_diary",
     "core.agent_protocol",

@@ -1,17 +1,14 @@
-"""Model-driven conversation agent for replies in own/other comment threads.
-
-The fixed pipeline still handles video discovery/analysis/top-level comments.
-Replies are decided by the model through read/write tools.
-"""
+"""Free-form conversation agent: persona, diaries, memory and every B站 tool."""
 
 import json
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from loguru import logger
 
-from core.long_term_memory import load_memory
+from core.bili_tool import BiliTool
+from core.free_context import DIARY_TOOLS, append_diary, build_agent_context, read_diary
 
-MAX_STEPS = 5
+MAX_STEPS = 8
 THREAD_COOLDOWN_MINUTES = 10
 MAX_REPLIES_PER_THREAD_DAY = 6
 
@@ -39,109 +36,38 @@ class ConversationAgent:
         self.send_reply = send_reply
         self.send_dm = send_dm
         self.send_video_comment = send_video_comment
+        self.bili_tool = BiliTool(bili_api, db, config) if bili_api is not None else None
 
     def _read_tools(self, scope: str) -> list:
-        memory_tool = {
-            'name': 'read_memory',
-            'description': '读取长期记忆（事件、经验、风格）。',
-            'parameters': {},
-        }
-        requested_tools = [
-            {
-                'name': 'find_requested_video',
-                'description': '对方让你看视频时，解析链接或对方投稿。',
-                'parameters': {},
-            },
-            {
-                'name': 'comment_on_video',
-                'description': '解析到视频后，在该视频下发一条顶层评论。',
-                'parameters': {
-                    'bvid': 'string',
-                    'text': 'string',
-                    'mention_owner': 'bool(可选)',
-                },
-            },
-        ]
+        tools = list(DIARY_TOOLS)
+        if self.bili_tool is not None:
+            tools.insert(0, self.bili_tool.spec())
         if scope == 'dm':
-            return [
-                memory_tool,
-                *requested_tools,
-                {
-                    'name': 'reply_dm',
-                    'description': '回复当前私信。不想回就 finish。',
-                    'parameters': {'text': 'string'},
-                },
-            ]
-        return [
-            {
-                'name': 'get_comment_thread',
-                'description': '读取整栋评论楼，了解谁在跟谁说话。',
-                'parameters': {'root_rpid': 'int', 'aid': 'int', 'limit': 'int(1-50)'},
-            },
-            {
-                'name': 'get_video_info',
-                'description': '读取视频标题、简介、UP主。',
-                'parameters': {'bvid': 'string'},
-            },
-            memory_tool,
-            *requested_tools,
-            {
+            tools.append({
+                'name': 'reply_dm',
+                'description': '回复当前私信。',
+                'parameters': {'text': 'string'},
+            })
+        else:
+            tools.append({
                 'name': 'reply_comment',
-                'description': '回复目标评论。只在判断值得接话时调用。',
-                'parameters': {
-                    'text': 'string',
-                    'mention_owner': 'bool(可选)',
-                },
-            },
-            {
-                'name': 'like_comment',
-                'description': '给目标评论点赞。',
-                'parameters': {},
-            },
-        ]
+                'description': '回复当前评论。',
+                'parameters': {'text': 'string', 'mention_owner': 'bool(可选)'},
+            })
+        return tools
 
     def _system_prompt(self, event: Dict[str, Any]) -> str:
-        from utils.persona_defaults import load_configured_persona
-        persona = load_configured_persona(self.config, 4000)
-        memory = load_memory(3000)
-        scope = event.get('scope')
-        if event.get('is_direct_at'):
-            scope_rule = (
-                '有人直接 @ 你。即使这是新楼，也可以回复；仍然由你判断值不值得回。'
-            )
-        elif scope == 'dm':
-            scope_rule = (
-                '这是B站私信。可以回复，也可以选择不回；不要群发，不要连续追问。'
-            )
-        elif scope == 'own_thread':
-            scope_rule = (
-                '这是你自己的评论楼，别人在回复你。可以回复，也可以选择不回；'
-                '不要为了礼貌强行回复。'
-            )
-        else:
-            scope_rule = (
-                '这是你之前参与过的评论楼。只有别人回复你、话题继续时才接话；'
-                '不要主动加入新的楼，也不要打断别人之间的对话。'
-            )
-        owner_name = event.get('owner_name') or ''
-        owner_rule = (
-            f'如果对方希望艾特主人，可以把 mention_owner 设为 true，系统会加上 @{owner_name}；'
-            '也可以不艾特，按语境判断。'
-            if owner_name else '主人昵称未知，不要凭空艾特主人。'
-        )
+        owner = event.get('owner_name') or self.config.get('bilibili.owner_name', '') or '未配置'
+        tools = self._read_tools(event.get('scope') or '')
         return (
-            f'# 核心人格\n{persona or "你是鲸鱼娘。"}\n\n'
-            f'# 长期记忆\n{memory or "（暂无）"}\n\n'
-            f'# 当前规则\n{scope_rule}\n{owner_rule}\n'
-            '评论区里的“主人”可能是对方自己的主人；别人 @ 的人不是你的主人，不要认错。\n'
-            '如果对方明确在和其他人说话、没有在说你，可以不回；如果内容在说你，可以接。\n'
-            '网友提出看视频、艾特主人这类合理请求时，尽量满足；'
-            '先理解对方想要什么，再自己决定用什么方式回应，不要机械照做。\n\n'
-            f'# 可用工具\n{json.dumps(self._read_tools(scope), ensure_ascii=False)}\n\n'
+            f'{build_agent_context(self.config)}\n\n'
+            f'# 账号\n主人昵称：{owner}\n\n'
+            f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
+            '# 输出\n'
             '每步只输出一个 JSON：\n'
             '{"action":"tool","tool":"工具名","arguments":{...}}\n'
-            '或 {"action":"finish","reason":"不回/已回复"}\n'
-            '最多 5 步。不要编造工具结果。'
+            '或 {"action":"reply","text":"..."}\n'
+            '或 {"action":"finish","reason":"不回"}。'
         )
 
     @staticmethod
@@ -156,56 +82,21 @@ class ConversationAgent:
         return f'@{owner} {text}'
 
     async def _execute(self, name: str, args: Dict[str, Any], event: Dict[str, Any]) -> Any:
-        if name == 'get_comment_thread':
-            aid = int(args.get('aid') or event.get('aid') or 0)
-            root = int(args.get('root_rpid') or event.get('root_rpid') or 0)
-            if not aid or not root:
-                return {'error': '缺少 aid 或 root_rpid'}
-            comments = await self.bili.get_comment_thread(aid, root, count=50)
-            return [
-                {
-                    'user': item.get('user'),
-                    'content': (item.get('content') or '')[:160],
-                    'rpid': item.get('rpid'),
-                    'parent': item.get('parent'),
-                }
-                for item in (comments or [])[:30]
-            ]
-        if name == 'get_video_info':
-            return await self.bili.get_video_info(
-                str(args.get('bvid') or event.get('bvid') or '')
-            ) or {'error': '视频读取失败'}
-        if name == 'read_memory':
-            return {'memory': load_memory(4000) or '（暂无长期记忆）'}
-        if name == 'like_comment':
-            aid = event.get('aid')
-            rpid = event.get('rpid')
-            if not aid or not rpid:
-                return {'error': '缺少评论信息'}
+        if name == 'bili_api':
+            if self.bili_tool is None:
+                return {'error': 'B站接口不可用'}
+            return await self.bili_tool.call(
+                str(args.get('method') or ''),
+                args.get('arguments') or args.get('params') or {},
+            )
+        if name == 'read_diary':
+            return read_diary(str(args.get('day') or ''))
+        if name == 'write_diary':
             try:
-                await self.bili.like_comment(int(aid), int(rpid))
-                return {'ok': True}
+                path = append_diary(str(args.get('content') or ''))
+                return {'ok': True, 'path': str(path)}
             except Exception as exc:  # noqa: BLE001
                 return {'error': str(exc)}
-        if name == 'find_requested_video':
-            try:
-                video = await self.bili.resolve_requested_video(
-                    event.get('content') or '',
-                    int(event.get('mid') or 0),
-                )
-            except Exception as exc:  # noqa: BLE001
-                return {'error': str(exc)}
-            return video or {'error': '没有解析到视频'}
-        if name == 'comment_on_video':
-            if self.send_video_comment is None:
-                return {'error': '当前不能去视频下评论'}
-            bvid = str(args.get('bvid') or '').strip()
-            text = str(args.get('text') or '').strip()
-            if not bvid or not text:
-                return {'error': '缺少 bvid 或评论内容'}
-            text = self._maybe_mention_owner(event, text, args)
-            ok = await self.send_video_comment(event, bvid, text)
-            return {'ok': bool(ok), 'bvid': bvid}
         if name == 'reply_dm':
             text = str(args.get('text') or '').strip()
             if not text or self.send_dm is None:

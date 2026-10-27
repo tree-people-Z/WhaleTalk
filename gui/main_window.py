@@ -25,7 +25,7 @@ from gui.styles import MODERN_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
-from core.video_analyzer import VideoAnalyzer
+from core.free_agent import FreeAgent
 from core.scheduler import TaskScheduler
 from gui.memory_worker import MemoryWorker
 from utils.database import Database
@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
 
             # 初始化视频分析器
             if self.bili_api and self.ai_client:
-                self.video_analyzer = VideoAnalyzer(
+                self.video_analyzer = FreeAgent(
                     self.bili_api,
                     self.ai_client,
                     self.db,
@@ -455,6 +455,8 @@ class MainWindow(QMainWindow):
         status = result.get('status', 'unknown')
 
         if status == 'success':
+            if result.get('summary'):
+                self.log(f"🐋 自由 Agent：{result['summary']}")
             self.log(f"✅ 分析完成!")
             self.log(f"  - 找到视频: {result['videos_found']}个")
             self.log(f"  - 分析视频: {result['videos_analyzed']}个")
@@ -535,7 +537,7 @@ class MainWindow(QMainWindow):
             self.ai_client = AIClient(
                 provider=provider, api_key=api_key, model=model, base_url=base_url
             ) if api_key else None
-            self.video_analyzer = VideoAnalyzer(
+            self.video_analyzer = FreeAgent(
                 self.bili_api, self.ai_client, self.db, self.config
             ) if self.bili_api and self.ai_client else None
             scheduler_was_running = bool(self.scheduler and self.scheduler.is_running)
