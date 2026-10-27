@@ -207,6 +207,13 @@ class FreeAgentTests(unittest.TestCase):
             agent._summary_mismatch('搜索了鲸鱼娘', ['搜索视频 鲸鱼娘：成功']),
             [],
         )
+        self.assertEqual(
+            agent._summary_mismatch(
+                '检查了@消息（空）、私信会话和评论额度（正常）',
+                ['检查@消息（0 条）：成功'],
+            ),
+            [],
+        )
 
     def test_false_summary_is_not_stored(self):
         agent = FreeAgent(FakeBili(), FalseSummaryAI(), Mock(), Mock())

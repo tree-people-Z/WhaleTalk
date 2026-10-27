@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -642,16 +643,18 @@ class FreeAgent:
     def _summary_mismatch(summary: str, actions: list[str]) -> list[str]:
         actual = '；'.join(actions)
         claims = [
-            ('点赞', ('点赞',), ('点赞',)),
+            ('点赞', ('点赞', '点了赞', '给了.*赞', '赞了'), ('点赞',)),
             ('收藏', ('收藏',), ('收藏',)),
-            ('评论/留言', ('评论', '留言'), ('发送评论',)),
-            ('私信', ('私信',), ('发送私信',)),
+            ('评论/留言', ('留言', '评论了', '留了评论', '发了评论', '回复了', '回了'),
+             ('发送评论',)),
+            ('私信', ('发送私信', '发了私信', '回了私信', '回复.*私信', '私信.*(回|发)'),
+             ('发送私信',)),
             ('关注', ('关注',), ('关注',)),
             ('弹幕', ('弹幕',), ('发送弹幕',)),
         ]
         missing = []
-        for claim, words, markers in claims:
-            if not any(word in summary for word in words):
+        for claim, patterns, markers in claims:
+            if not any(re.search(pattern, summary) for pattern in patterns):
                 continue
             if not any(marker in actual for marker in markers):
                 missing.append(claim)
