@@ -66,6 +66,26 @@ class FreeAgent:
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
 
+    @staticmethod
+    def _infer_method(args: dict) -> str:
+        """Infer a method when the model sends only its arguments."""
+        keys = set(args)
+        if 'keyword' in keys or 'search_type' in keys:
+            return 'search_videos'
+        if 'talker_id' in keys:
+            return 'send_private_message' if 'text' in keys else 'get_private_messages'
+        if 'bvid' in keys and 'text' not in keys:
+            return 'get_video_info'
+        if 'aid' in keys:
+            if 'text' in keys:
+                return 'post_comment'
+            if 'root_rpid' in keys or 'parent_rpid' in keys:
+                return 'get_comment_thread' if 'text' not in keys else 'post_comment'
+            return 'get_comments'
+        if 'uid' in keys:
+            return 'get_user_info'
+        return ''
+
     def _normalize_call(self, tool: str, args: Any) -> tuple[str, dict]:
         if isinstance(args, str):
             try:
@@ -86,8 +106,13 @@ class FreeAgent:
         )
         params = (
             args.get('arguments') or args.get('params')
-            or args.get('parameters') or args.get('args') or {}
+            or args.get('parameters') or args.get('args')
         )
+        if params is None:
+            params = {
+                key: value for key, value in args.items()
+                if key not in {'method', 'method_name', 'name', 'api', 'tool'}
+            }
         if isinstance(params, str):
             try:
                 params = json.loads(params)
@@ -122,6 +147,8 @@ class FreeAgent:
                     method = method_keys[0]
                     value = args.get(method)
                     params = value if isinstance(value, dict) else {}
+                if not method:
+                    method = self._infer_method(args or params)
         return 'bili_api', {'method': method, 'arguments': params}
 
     @staticmethod

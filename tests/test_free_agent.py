@@ -144,6 +144,22 @@ class FreeAgentTests(unittest.TestCase):
             agent._normalize_call('get_x', '{"value": 3}'),
             ('bili_api', {'method': 'get_x', 'arguments': {'value': 3}}),
         )
+        self.assertEqual(
+            agent._normalize_call(
+                'bili_api',
+                {'keyword': '鲸鱼娘', 'order': 'pubdate', 'page': 1},
+            ),
+            ('bili_api', {
+                'method': 'search_videos',
+                'arguments': {'keyword': '鲸鱼娘', 'order': 'pubdate', 'page': 1},
+            }),
+        )
+        self.assertEqual(
+            agent._normalize_call(
+                'bili_api', {'talker_id': 1, 'text': 'hi'}
+            )[1]['method'],
+            'send_private_message',
+        )
 
     def test_top_level_method_is_normalized(self):
         ai = Mock()
