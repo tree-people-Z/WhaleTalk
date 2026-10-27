@@ -467,9 +467,12 @@ class FreeAgent:
             title = self._video_title(
                 str(params.get('bvid') or ''), int(params.get('aid') or 0)
             )
-            target = f'《{title}》' if title else f' aid={params.get("aid")}'
+            target = (
+                f'《{self._clip(title, 32)}》' if title
+                else f' aid={params.get("aid")}'
+            )
             logger.info(
-                f'发送{kind}{target}：{str(params.get("text") or "")[:120]}'
+                f'发送{kind}{target}：{self._clip(params.get("text"), 120)}'
             )
         elif method == 'send_private_message' and result is True:
             logger.info(
@@ -496,13 +499,18 @@ class FreeAgent:
             pass
         return ''
 
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        text = str(text or '')
+        return text if len(text) <= limit else text[:limit - 1] + '…'
+
     def _describe_action(self, tool: str, args: dict, result: Any) -> str:
         ok = self._action_ok(result)
         if tool == 'inspect_video':
             bvid = str(args.get('bvid') or '')
             if not isinstance(result, dict) or result.get('error'):
                 return f'读取视频素材 {bvid}：失败'
-            title = str(result.get('title') or self._video_title(bvid))
+            title = self._clip(str(result.get('title') or self._video_title(bvid)), 32)
             subtitle_len = len(str(result.get('subtitle') or ''))
             comments = len(result.get('comments') or [])
             frames = len(result.get('frames') or [])
@@ -572,15 +580,15 @@ class FreeAgent:
             if bvid:
                 target = f' {bvid}'
             if title:
-                target += f'《{title}》'
+                target += f'《{self._clip(title, 32)}》'
         elif method in {'post_comment', 'get_comments', 'get_comment_thread'}:
             aid = params.get('aid') or (result.get('aid') if isinstance(result, dict) else 0)
             title = self._video_title(str(params.get('bvid') or ''), int(aid or 0))
             if title:
-                target += f'《{title}》'
+                target += f'《{self._clip(title, 32)}》'
         detail = f'{label}{target}'
         if method in {'post_comment', 'send_private_message', 'send_danmaku'}:
-            text = str(params.get('text') or '')[:40]
+            text = self._clip(str(params.get('text') or ''), 40)
             if text:
                 detail += f'：{text}'
         if isinstance(result, list):
@@ -740,6 +748,12 @@ class FreeAgent:
                 logger.info(f'🐋 模型总结：{summary}')
         if not actions:
             logger.warning('🐋 本轮没有实际调用工具，模型总结不代表已执行操作')
+        if not summary:
+            summary = (
+                '本轮实际完成：' + '；'.join(successful_actions)
+                if successful_actions else '本轮没有成功动作'
+            )
+            logger.info(f'🐋 实际总结：{summary}（模型未给出总结）')
         if self.db is not None:
             try:
                 self.db.add_agent_session(
