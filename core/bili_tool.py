@@ -42,6 +42,7 @@ class BiliTool:
         self.writes = 0
         self.max_writes = 8
         self.video_refs: list[dict] = []
+        self._video_cache: dict[str, dict] = {}
         self._specs = self._build_specs()
 
     @staticmethod
@@ -193,6 +194,13 @@ class BiliTool:
             key: value for key, value in args.items()
             if key not in {'bvid', 'video_title'}
         }
+        cache_key = ''
+        if method == 'get_video_info' and extra_bvid:
+            cache_key = f'bvid:{extra_bvid}'
+        elif method == 'get_video_info_by_aid' and call_args.get('aid'):
+            cache_key = f'aid:{call_args.get("aid")}'
+        if cache_key and cache_key in self._video_cache:
+            return self._video_cache[cache_key]
         video_info = None
         if method == 'post_comment' and (
             hasattr(self.bili, 'get_video_info_by_aid')
@@ -213,6 +221,8 @@ class BiliTool:
                         call_args, extra_bvid, bool(result), video_info
                     )
             self._collect_videos(method, call_args, result, video_info)
+            if cache_key and isinstance(result, dict) and result.get('bvid'):
+                self._video_cache[cache_key] = result
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}

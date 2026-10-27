@@ -141,6 +141,18 @@ class AgentSession(Base):
     comments_sent = Column(Integer, default=0)
 
 
+class AgentEvent(Base):
+    """Persistent inbox state so the same @/comment/DM is handled once."""
+    __tablename__ = 'agent_events'
+
+    id = Column(Integer, primary_key=True)
+    event_key = Column(String(160), unique=True, nullable=False, index=True)
+    event_type = Column(String(30), index=True)
+    payload_json = Column(Text, default='{}')
+    created_at = Column(DateTime, default=datetime.now)
+    seen_at = Column(DateTime, default=datetime.now)
+
+
 class DailyQuota(Base):
     """每日配额表"""
     __tablename__ = 'daily_quota'
@@ -548,6 +560,35 @@ class Database:
             comments_sent=int(comments_sent or 0),
         ))
         self.session.commit()
+
+    def seen_agent_event_keys(self, keys: List[str]) -> set:
+        keys = [key for key in keys if key]
+        if not keys:
+            return set()
+        rows = self.session.query(AgentEvent.event_key)\
+            .filter(AgentEvent.event_key.in_(keys)).all()
+        return {row[0] for row in rows}
+
+    def mark_agent_events_seen(self, events: List[Dict[str, Any]]) -> None:
+        if not events:
+            return
+        keys = [str(item.get('key') or '') for item in events]
+        existing = self.seen_agent_event_keys(keys)
+        changed = False
+        for item in events:
+            key = str(item.get('key') or '')
+            if not key or key in existing:
+                continue
+            self.session.add(AgentEvent(
+                event_key=key,
+                event_type=str(item.get('type') or ''),
+                payload_json=json.dumps(
+                    item.get('payload') or {}, ensure_ascii=False, default=str
+                ),
+            ))
+            changed = True
+        if changed:
+            self.session.commit()
 
     def get_recent_agent_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
         rows = self.session.query(AgentSession)\

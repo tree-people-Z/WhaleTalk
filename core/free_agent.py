@@ -1,6 +1,7 @@
 """Free-form agent: all B站 interfaces, persona/diary/memory, no fixed workflow."""
 
 import asyncio
+import hashlib
 import json
 import tempfile
 from datetime import datetime
@@ -54,6 +55,77 @@ class FreeAgent:
         if self._stop is not None:
             self._stop.set()
 
+    def _filter_agent_events(self, method: str, params: dict, result: Any) -> Any:
+        """Drop already-delivered events so each @/comment/DM is handled once."""
+        if self.db is None or not isinstance(result, list):
+            return result
+        if method not in {
+            'get_at_messages', 'get_comments', 'get_comment_thread',
+            'get_private_messages',
+        }:
+            return result
+        if method == 'get_comments' and not (
+            params.get('root_rpids') or params.get('include_replies')
+        ):
+            return result
+        own = set()
+        if method in {'get_comments', 'get_comment_thread'}:
+            try:
+                own_ids = self.db.get_own_comment_rpids()
+                if isinstance(own_ids, (set, list, tuple)):
+                    own = set(own_ids)
+            except Exception:  # noqa: BLE001
+                own = set()
+
+        records = []
+        for item in result:
+            if not isinstance(item, dict):
+                continue
+            rpid = item.get('rpid')
+            if method in {'get_comments', 'get_comment_thread'} and rpid in own:
+                continue
+            if method == 'get_at_messages':
+                key = f'at:{rpid}'
+                event_type = 'at'
+            elif method == 'get_private_messages':
+                talker_id = params.get('talker_id') or ''
+                timestamp = item.get('timestamp') or 0
+                digest = hashlib.sha1(
+                    str(item.get('content') or '').encode('utf-8')
+                ).hexdigest()[:16]
+                key = f'dm:{talker_id}:{timestamp}:{digest}'
+                event_type = 'dm'
+            else:
+                key = f'comment:{rpid}'
+                event_type = 'comment'
+            records.append({
+                'key': key,
+                'type': event_type,
+                'payload': {
+                    'rpid': rpid,
+                    'user': item.get('user') or item.get('nickname') or '',
+                    'content': str(item.get('content') or '')[:300],
+                    'aid': item.get('aid'),
+                    'bvid': item.get('bvid'),
+                },
+                '_item': item,
+            })
+        if not records:
+            return result
+        seen = self.db.seen_agent_event_keys([item['key'] for item in records])
+        new_items = []
+        new_records = []
+        for record in records:
+            if record['key'] in seen:
+                continue
+            new_items.append(record.pop('_item'))
+            new_records.append(record)
+        try:
+            self.db.mark_agent_events_seen(new_records)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'记录事件状态失败: {exc}')
+        return new_items
+
     def _system_prompt(self) -> str:
         tools = [self.bili_tool.spec(), INSPECT_VIDEO_TOOL, *DIARY_TOOLS]
         owner = self.config.get('bilibili.owner_name', '') or '未配置'
@@ -74,7 +146,8 @@ class FreeAgent:
         if name == 'bili_api':
             method = str(args.get('method') or '')
             params = args.get('arguments') or args.get('params') or {}
-            return await self.bili_tool.call(method, params)
+            result = await self.bili_tool.call(method, params)
+            return self._filter_agent_events(method, params, result)
         if name == 'inspect_video':
             return await self.inspect_video(
                 str(args.get('bvid') or ''),
@@ -398,6 +471,9 @@ class FreeAgent:
 
     @staticmethod
     def _describe_action(tool: str, args: dict, result: Any) -> str:
+        if tool == 'inspect_video':
+            bvid = str(args.get('bvid') or '')
+            return f'inspect_video {bvid} {"成功" if FreeAgent._action_ok(result) else "失败"}'
         if tool == 'bili_api':
             method = str(args.get('method') or '') or '(缺少 method)'
             params = args.get('arguments') or args.get('params') or {}

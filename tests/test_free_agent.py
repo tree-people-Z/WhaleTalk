@@ -85,6 +85,17 @@ class InspectBili(FakeBili):
         return [{'user': '网友', 'content': '好看', 'like': 3}]
 
 
+class EventBili(FakeBili):
+    async def get_at_messages(self, since_time: int = 0):
+        return [{
+            'rpid': 321691098720,
+            'user': '网友',
+            'content': '同一条@',
+            'bvid': 'BV1test',
+            'aid': 1,
+        }]
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -151,6 +162,23 @@ class FreeAgentTests(unittest.TestCase):
         self.assertEqual(result['title'], '测试视频')
         self.assertEqual(result['subtitle'], '这是字幕内容')
         self.assertEqual(result['comments'][0]['content'], '好看')
+
+    def test_same_at_event_is_delivered_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'events.db'))
+            try:
+                agent = FreeAgent(EventBili(), FakeAI(), db, Mock())
+                first = asyncio.run(agent._call_tool(
+                    'bili_api', {'method': 'get_at_messages', 'arguments': {}}
+                ))
+                second = asyncio.run(agent._call_tool(
+                    'bili_api', {'method': 'get_at_messages', 'arguments': {}}
+                ))
+                self.assertEqual(len(first), 1)
+                self.assertEqual(second, [])
+            finally:
+                db.session.close()
+                db.engine.dispose()
 
     def test_normalizes_malformed_bili_calls(self):
         agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())

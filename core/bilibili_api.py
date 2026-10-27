@@ -616,24 +616,30 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
 
     async def get_video_info(self, bvid: str) -> Optional[Dict[str, Any]]:
         """获取视频详细信息"""
-        try:
-            v = video.Video(bvid=bvid, credential=self.credential)
-            info = await v.get_info()
+        last_error = None
+        for attempt in range(2):
+            try:
+                v = video.Video(bvid=bvid, credential=self.credential)
+                info = await v.get_info()
 
-            return {
-                'bvid': bvid,
-                'aid': info.get('aid'),
-                'title': info.get('title'),
-                'desc': info.get('desc'),
-                'duration': info.get('duration'),
-                'owner': info.get('owner', {}).get('name'),
-                'owner_mid': info.get('owner', {}).get('mid'),
-                'pubdate': info.get('pubdate'),
-                'stat': info.get('stat', {})
-            }
-        except Exception as e:
-            logger.error(f"获取视频信息失败 {bvid}: {e}")
-            return None
+                return {
+                    'bvid': bvid,
+                    'aid': info.get('aid'),
+                    'title': info.get('title'),
+                    'desc': info.get('desc'),
+                    'duration': info.get('duration'),
+                    'owner': info.get('owner', {}).get('name'),
+                    'owner_mid': info.get('owner', {}).get('mid'),
+                    'pubdate': info.get('pubdate'),
+                    'stat': info.get('stat', {})
+                }
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+                    continue
+        logger.error(f"获取视频信息失败 {bvid}: {last_error}")
+        return None
 
     async def get_video_info_by_aid(self, aid: int) -> Optional[Dict[str, Any]]:
         """通过 aid 读取视频信息；自由 Agent 发评论时只有 aid。"""
