@@ -34,7 +34,7 @@ from utils.updater import launch_update_installer
 
 
 class AnalysisWorker(QThread):
-    """分析任务工作线程"""
+    """Agent 工作线程"""
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
@@ -44,7 +44,7 @@ class AnalysisWorker(QThread):
         self.operation = operation
 
     def run(self):
-        """运行分析任务"""
+        """运行 Agent 任务"""
         import asyncio
         loop = asyncio.new_event_loop()
         try:
@@ -57,7 +57,7 @@ class AnalysisWorker(QThread):
         except asyncio.CancelledError:
             self.finished.emit({'status': 'cancelled'})
         except Exception as e:
-            logger.error(f"分析任务异常: {e}")
+            logger.error(f"Agent 任务异常: {e}")
             self.error.emit(str(e))
         finally:
             try:
@@ -142,7 +142,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         """初始化UI"""
-        self.setWindowTitle("鲸语 · B站智能运营助手")
+        self.setWindowTitle("鲸语 · AI 运营助手")
         icon_path = Path(__file__).resolve().parent.parent / 'assets' / 'whale-assistant.ico'
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -186,7 +186,6 @@ class MainWindow(QMainWindow):
         self.settings_page.auto_run_btn.clicked.connect(self.toggle_auto_run)
         self.settings_page.schedule_settings_saved.connect(self.refresh_scheduler_settings)
         self.settings_page.ai_settings_saved.connect(self.refresh_ai_settings)
-        self.settings_page.analysis_settings_saved.connect(self.refresh_analysis_settings)
         self.tabs.addTab(self.settings_page, "设置")
 
         layout.addWidget(self.tabs)
@@ -239,7 +238,7 @@ class MainWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        self.run_now_btn = QPushButton("🚀 现在巡视一轮")
+        self.run_now_btn = QPushButton("🚀 现在运行一轮")
         self.run_now_btn.setObjectName("primaryButton")
         self.run_now_btn.clicked.connect(self.run_analysis_now)
         self.run_now_btn.setMinimumHeight(45)
@@ -332,7 +331,7 @@ class MainWindow(QMainWindow):
             else:
                 self.log("⚠️ 未配置AI API密钥，请前往设置页面配置")
 
-            # 初始化视频分析器
+            # 初始化自由 Agent
             if self.bili_api and self.ai_client:
                 self.video_analyzer = FreeAgent(
                     self.bili_api,
@@ -415,7 +414,7 @@ class MainWindow(QMainWindow):
             self.comments_tab.set_bili_api(self.bili_api)
 
     def run_analysis_now(self):
-        """立即运行分析"""
+        """立即运行一轮自由 Agent"""
         if not self.video_analyzer:
             QMessageBox.warning(self, "错误", "请先配置AI API密钥")
             return
@@ -430,8 +429,8 @@ class MainWindow(QMainWindow):
             return
 
         self.run_now_btn.setEnabled(False)
-        self.statusBar.showMessage("正在分析...")
-        self.log("开始执行分析任务...")
+        self.statusBar.showMessage("自由 Agent 正在运行...")
+        self.log("开始自由 Agent 一轮...")
 
         # 创建工作线程
         self.worker = AnalysisWorker(self.video_analyzer)
@@ -440,12 +439,12 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def on_analysis_finished(self, result: dict):
-        """分析完成"""
+        """自由 Agent 完成"""
         QTimer.singleShot(0, self.refresh_ai_settings)
         self.run_now_btn.setEnabled(True)
         if result.get('status') == 'cancelled':
             self.statusBar.showMessage("任务已停止")
-            self.log("⏹️ 分析任务已安全停止")
+            self.log("⏹️ Agent 任务已安全停止")
             return
         if result.get('status') == 'replies_checked':
             self.on_reply_check_finished(result)
@@ -457,11 +456,9 @@ class MainWindow(QMainWindow):
         if status == 'success':
             if result.get('summary'):
                 self.log(f"🐋 自由 Agent：{result['summary']}")
-            self.log(f"✅ 分析完成!")
-            self.log(f"  - 找到视频: {result['videos_found']}个")
-            self.log(f"  - 分析视频: {result['videos_analyzed']}个")
-            self.log(f"  - 值得关注: {result['worthy_count']}个")
-            self.log(f"  - 发送评论: {result['comments_sent']}条")
+            self.log("✅ 自由 Agent 本轮结束")
+            if result.get('comments_sent'):
+                self.log(f"  - 发送评论: {result['comments_sent']}条")
         elif status == 'quota_exhausted':
             self.log("⚠️ 今日评论配额已用完")
         elif status == 'no_videos_found':
@@ -510,21 +507,8 @@ class MainWindow(QMainWindow):
     def _ai_signature(self):
         return tuple(self.config.get(f'ai.{key}', '') for key in ('provider', 'api_key', 'model', 'base_url'))
 
-    def refresh_analysis_settings(self):
-        """Apply media-analysis switches and model choice to the live analyzer."""
-        if not self.video_analyzer:
-            return
-        from core.audio_transcriber import LocalAudioTranscriber
-        self.video_analyzer.enable_frame_analysis = self.config.get(
-            'analysis.enable_frame_analysis', True
-        )
-        self.video_analyzer.local_transcriber = LocalAudioTranscriber(
-            model_name=self.config.get('analysis.local_transcription_model', 'medium')
-        )
-        self.log("⚙️ 画面分析与本地转写设置已应用")
-
     def refresh_ai_settings(self):
-        """AI连接参数变化后重建客户端和分析器，使保存的设置立即生效。"""
+        """AI连接参数变化后重建客户端和 Agent，使保存的设置立即生效。"""
         signature = self._ai_signature()
         if signature == getattr(self, '_active_ai_signature', None):
             return
@@ -858,7 +842,7 @@ class MainWindow(QMainWindow):
                 QApplication.style().StandardPixmap.SP_ComputerIcon
             )
         self.tray_icon = QSystemTrayIcon(icon, self)
-        self.tray_icon.setToolTip("鲸语 · B站智能运营助手")
+        self.tray_icon.setToolTip("鲸语 · AI 运营助手")
 
         menu = QMenu(self)
         show_action = QAction("显示主窗口", self)

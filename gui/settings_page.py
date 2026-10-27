@@ -155,77 +155,31 @@ class SettingsPage(QWidget):
 
     def connect_signals(self):
         """连接信号实现实时保存"""
-        # 数字输入框
-        self.max_comments_spin.valueChanged.connect(self.auto_save)
-        self.max_likes_spin.valueChanged.connect(self.auto_save)
-        self.cooldown_spin.valueChanged.connect(self.auto_save)
-        self.max_videos_spin.valueChanged.connect(self.auto_save)
-        self.min_score_spin.valueChanged.connect(self.auto_save)
-        self.max_results_spin.valueChanged.connect(self.auto_save)
-        self.browse_interval_min_spin.valueChanged.connect(self.auto_save)
-        self.browse_interval_max_spin.valueChanged.connect(self.auto_save)
-        self.reply_check_interval_spin.valueChanged.connect(self.auto_save)
-        self.mention_threshold_spin.valueChanged.connect(self.auto_save)
-
-        # 复选框
-        self.auto_comment_check.stateChanged.connect(self.auto_save)
-        self.auto_like_check.stateChanged.connect(self.auto_save)
-        self.mention_owner_check.stateChanged.connect(self.auto_save)
-        self.persona_enabled_check.stateChanged.connect(self.auto_save)
-        self.comment_monitor_check.stateChanged.connect(self.auto_save)
-        self.reply_scope_combo.currentIndexChanged.connect(self.auto_save)
-        self.like_replied_comment_check.stateChanged.connect(self.auto_save)
-        self.report_watching_check.stateChanged.connect(self.auto_save)
-        self.favorite_video_check.stateChanged.connect(self.auto_save)
-        self.follow_up_check.stateChanged.connect(self.auto_save)
-        self.like_up_dynamic_check.stateChanged.connect(self.auto_save)
-        self.post_video_dynamic_check.stateChanged.connect(self.auto_save)
-        self.reply_private_messages_check.stateChanged.connect(self.auto_save)
-        self.coin_video_check.stateChanged.connect(self.auto_save)
-        self.share_video_check.stateChanged.connect(self.auto_save)
-        self.watch_later_check.stateChanged.connect(self.auto_save)
-        self.repost_dynamic_check.stateChanged.connect(self.auto_save)
-        self.send_danmaku_check.stateChanged.connect(self.auto_save)
-        self.like_danmaku_check.stateChanged.connect(self.auto_save)
         for spin in (
-            self.prob_like_reply_spin, self.prob_report_watch_spin,
-            self.prob_favorite_spin, self.prob_follow_spin,
-            self.prob_like_dynamic_spin, self.prob_post_dynamic_spin,
-            self.prob_coin_spin, self.prob_share_spin,
-            self.prob_watch_later_spin, self.prob_repost_spin,
+            self.max_comments_spin,
+            self.browse_interval_min_spin,
+            self.browse_interval_max_spin,
+            self.reply_check_interval_spin,
         ):
             spin.valueChanged.connect(self.auto_save)
             self.disable_wheel_event(spin)
-        self.auto_reply_check.stateChanged.connect(self.auto_save)
-        self.frame_analysis_check.stateChanged.connect(self.auto_save)
-        self.deepseek_offpeak_check.stateChanged.connect(self.auto_save)
 
-        # 下拉框
+        for check in (
+            self.persona_enabled_check,
+            self.comment_monitor_check,
+            self.auto_reply_check,
+            self.like_replied_comment_check,
+            self.reply_private_messages_check,
+            self.deepseek_offpeak_check,
+        ):
+            check.stateChanged.connect(self.auto_save)
+
+        self.reply_scope_combo.currentIndexChanged.connect(self.auto_save)
         self.ai_provider_combo.currentIndexChanged.connect(self.auto_save)
-        self.order_combo.currentIndexChanged.connect(self.auto_save)
-        # Save the whole range after editing; saving every keystroke would
-        # temporarily persist malformed windows and restart the scheduler.
         self.deepseek_offpeak_windows_input.editingFinished.connect(self.auto_save)
-        self.transcription_mode_combo.currentIndexChanged.connect(
-            self.on_transcription_mode_changed
-        )
-        self.cloud_stt_base_url_input.editingFinished.connect(self.auto_save)
-        self.cloud_stt_api_key_input.editingFinished.connect(self.auto_save)
-        self.cloud_stt_model_input.editingFinished.connect(self.auto_save)
 
-        # 禁用所有数字输入框的鼠标滚轮
-        self.disable_wheel_event(self.max_comments_spin)
-        self.disable_wheel_event(self.max_likes_spin)
-        self.disable_wheel_event(self.cooldown_spin)
-        self.disable_wheel_event(self.max_videos_spin)
-        self.disable_wheel_event(self.min_score_spin)
-        self.disable_wheel_event(self.max_results_spin)
-        self.disable_wheel_event(self.mention_threshold_spin)
-
-        # 禁用所有下拉框的鼠标滚轮
         self.disable_wheel_event(self.ai_provider_combo)
-        self.disable_wheel_event(self.order_combo)
-        self.disable_wheel_event(self.transcription_mode_combo)
+        self.disable_wheel_event(self.reply_scope_combo)
 
     def disable_wheel_event(self, widget):
         """禁用控件的鼠标滚轮事件"""
@@ -288,10 +242,6 @@ class SettingsPage(QWidget):
         # AI设置
         ai_group = self._create_ai_section()
         layout.addWidget(ai_group)
-
-        # 搜索设置
-        search_group = self._create_search_section()
-        layout.addWidget(search_group)
 
         # 限制设置
         limits_group = self._create_limits_section()
@@ -427,57 +377,18 @@ class SettingsPage(QWidget):
         return group
 
     def _create_limits_section(self) -> QGroupBox:
-        """创建限制设置区域"""
-        group = QGroupBox("⚙️ 运营限制设置")
+        """创建发送上限区域"""
+        group = QGroupBox("发送上限")
         layout = QFormLayout()
 
-        # 每日最大评论数
         self.max_comments_spin = QSpinBox()
         self.max_comments_spin.setRange(0, 9999)
         layout.addRow("每日最大发送数（评论+回复）:", self.max_comments_spin)
 
-        # 每日最大点赞数
-        self.max_likes_spin = QSpinBox()
-        self.max_likes_spin.setRange(0, 500)
-        layout.addRow("每日最大点赞数:", self.max_likes_spin)
-
-        # 同视频冷却天数
-        self.cooldown_spin = QSpinBox()
-        self.cooldown_spin.setRange(1, 30)
-        layout.addRow("同视频冷却天数:", self.cooldown_spin)
-
-        # 每轮分析视频数
-        self.max_videos_spin = QSpinBox()
-        self.max_videos_spin.setRange(1, 20)
-        self.max_videos_spin.setToolTip(
-            "每轮最多分析这么多条；符合评分/置信度条件才会评论，不强制每轮发评论"
-        )
-        layout.addRow("每轮分析视频数:", self.max_videos_spin)
-
-        # 最低评分阈值
-        self.min_score_spin = QSpinBox()
-        self.min_score_spin.setRange(0, 20)
-        layout.addRow("评论最低评分:", self.min_score_spin)
-        layout.addRow("", QLabel(
-            "评分按内容质量与观众热度综合判断：播放量、评论量最多影响5分；不因题材不合口味扣分。"
-        ))
-
-        # 自动评论开关
-        self.auto_comment_check = QCheckBox("启用自动评论")
-        layout.addRow("", self.auto_comment_check)
-
-        self.auto_like_check = QCheckBox("评论成功后给视频点赞（可选）")
-        layout.addRow("", self.auto_like_check)
-
-        self.mention_owner_check = QCheckBox("在评论中 @我（默认关闭）")
-        layout.addRow("", self.mention_owner_check)
-
-        self.mention_threshold_spin = QSpinBox()
-        self.mention_threshold_spin.setRange(0, 20)
-        layout.addRow("评论 @我 的最低评分:", self.mention_threshold_spin)
-        layout.addRow("", QLabel(
-            "评分达到该值时在评论中 @主人；调低可提高 @ 的概率，调高可减少打扰。"
-        ))
+        hint = QLabel("自由 Agent 可以自己决定做什么，但仍受这个上限和 B站冷却保护。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addRow("", hint)
 
         group.setLayout(layout)
         return group
@@ -488,7 +399,7 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
-        version_label = QLabel(f"鲸语 · B站智能运营助手  v{APP_VERSION}")
+        version_label = QLabel(f"鲸语 · AI 运营助手  v{APP_VERSION}")
         version_label.setStyleSheet("font-weight: 600;")
         layout.addWidget(version_label)
 
@@ -514,13 +425,11 @@ class SettingsPage(QWidget):
         return group
 
     def _create_advanced_section(self) -> QGroupBox:
-        """创建高级功能设置区域"""
-        group = QGroupBox("🚀 高级功能")
+        """创建回复与私信设置区域。"""
+        group = QGroupBox("回复与私信")
         layout = QVBoxLayout()
         layout.setSpacing(10)
 
-        # 评论监听
-        layout.addWidget(self._section_header("评论与回复"))
         scope_layout = QHBoxLayout()
         scope_layout.addWidget(QLabel("回复范围:"))
         self.reply_scope_combo = QComboBox()
@@ -529,157 +438,21 @@ class SettingsPage(QWidget):
         scope_layout.addWidget(self.reply_scope_combo)
         scope_layout.addStretch()
         layout.addLayout(scope_layout)
+
         self.comment_monitor_check = QCheckBox("启用评论监听（检测回复和@）")
         layout.addWidget(self.comment_monitor_check)
-
-        layout.addWidget(self._section_header("视频互动"))
-        self.like_replied_comment_check = QCheckBox(
-            "回复后顺手给网友评论点赞（约一半概率）"
-        )
-        layout.addWidget(self.like_replied_comment_check)
-
-        self.report_watching_check = QCheckBox(
-            "评论成功后上报观看进度（默认关闭，会上报播放量）"
-        )
-        layout.addWidget(self.report_watching_check)
-
-        self.favorite_video_check = QCheckBox("评论成功后偶尔收藏视频（约20%）")
-        layout.addWidget(self.favorite_video_check)
-        self.follow_up_check = QCheckBox("关注喜欢的UP主（低频，默认关闭）")
-        layout.addWidget(self.follow_up_check)
-        layout.addWidget(self._section_header("动态"))
-        self.like_up_dynamic_check = QCheckBox("偶尔给UP主的动态点赞（默认关闭）")
-        layout.addWidget(self.like_up_dynamic_check)
-        self.post_video_dynamic_check = QCheckBox(
-            "偶尔把喜欢的视频发成动态（默认关闭，请谨慎）"
-        )
-        layout.addWidget(self.post_video_dynamic_check)
-
-        layout.addWidget(self._section_header("私信"))
-        self.reply_private_messages_check = QCheckBox("自动回复私信（低频，默认开启）")
-        layout.addWidget(self.reply_private_messages_check)
-        self.coin_video_check = QCheckBox("评论成功后偶尔投币（约5%）")
-        layout.addWidget(self.coin_video_check)
-        self.share_video_check = QCheckBox("评论成功后偶尔分享视频（默认关闭）")
-        layout.addWidget(self.share_video_check)
-        self.watch_later_check = QCheckBox("评论成功后偶尔加入稍后再看（约10%）")
-        layout.addWidget(self.watch_later_check)
-        self.repost_dynamic_check = QCheckBox("偶尔转发UP主的动态（默认关闭）")
-        layout.addWidget(self.repost_dynamic_check)
-        layout.addWidget(self._section_header("弹幕"))
-        self.send_danmaku_check = QCheckBox("偶尔发一条弹幕（默认关闭）")
-        layout.addWidget(self.send_danmaku_check)
-        self.like_danmaku_check = QCheckBox("偶尔点赞视频弹幕（默认关闭）")
-        layout.addWidget(self.like_danmaku_check)
-
-        self.prob_panel = QWidget()
-        prob_form = QFormLayout(self.prob_panel)
-        self.prob_like_reply_spin = QSpinBox()
-        self.prob_like_reply_spin.setRange(0, 100)
-        self.prob_like_reply_spin.setSuffix("%")
-        prob_form.addRow("回复后点赞网友评论:", self.prob_like_reply_spin)
-        self.prob_report_watch_spin = QSpinBox()
-        self.prob_report_watch_spin.setRange(0, 100)
-        self.prob_report_watch_spin.setSuffix("%")
-        prob_form.addRow("上报观看进度:", self.prob_report_watch_spin)
-        self.prob_favorite_spin = QSpinBox()
-        self.prob_favorite_spin.setRange(0, 100)
-        self.prob_favorite_spin.setSuffix("%")
-        prob_form.addRow("评论后收藏视频:", self.prob_favorite_spin)
-        self.prob_follow_spin = QSpinBox()
-        self.prob_follow_spin.setRange(0, 100)
-        self.prob_follow_spin.setSuffix("%")
-        prob_form.addRow("关注UP主:", self.prob_follow_spin)
-        self.prob_like_dynamic_spin = QSpinBox()
-        self.prob_like_dynamic_spin.setRange(0, 100)
-        self.prob_like_dynamic_spin.setSuffix("%")
-        prob_form.addRow("点赞UP动态:", self.prob_like_dynamic_spin)
-        self.prob_post_dynamic_spin = QSpinBox()
-        self.prob_post_dynamic_spin.setRange(0, 100)
-        self.prob_post_dynamic_spin.setSuffix("%")
-        prob_form.addRow("发视频动态:", self.prob_post_dynamic_spin)
-        self.prob_coin_spin = QSpinBox()
-        self.prob_coin_spin.setRange(0, 100)
-        self.prob_coin_spin.setSuffix("%")
-        prob_form.addRow("评论后投币:", self.prob_coin_spin)
-        self.prob_share_spin = QSpinBox()
-        self.prob_share_spin.setRange(0, 100)
-        self.prob_share_spin.setSuffix("%")
-        prob_form.addRow("评论后分享:", self.prob_share_spin)
-        self.prob_watch_later_spin = QSpinBox()
-        self.prob_watch_later_spin.setRange(0, 100)
-        self.prob_watch_later_spin.setSuffix("%")
-        prob_form.addRow("加入稍后再看:", self.prob_watch_later_spin)
-        self.prob_repost_spin = QSpinBox()
-        self.prob_repost_spin.setRange(0, 100)
-        self.prob_repost_spin.setSuffix("%")
-        prob_form.addRow("转发UP动态:", self.prob_repost_spin)
-        self.prob_panel.setVisible(False)
-        self.prob_toggle_btn = QPushButton("行为概率")
-        self.prob_toggle_btn.setCheckable(True)
-        self.prob_toggle_btn.toggled.connect(self._toggle_probability_panel)
-        layout.addWidget(self.prob_toggle_btn)
-        layout.addWidget(self.prob_panel)
-
-        # 自动回复
-        layout.addWidget(self._section_header("回复规则"))
         self.auto_reply_check = QCheckBox("启用自动回复")
         layout.addWidget(self.auto_reply_check)
-
-        # 画面分析
-        layout.addWidget(self._section_header("分析与转写"))
-        self.frame_analysis_check = QCheckBox("每条视频分析画面（需要ffmpeg和支持视觉的模型）")
-        layout.addWidget(self.frame_analysis_check)
-
-        # 语音转写（可开关：关闭 / 本地 medium / 云端）
-        transcription_layout = QHBoxLayout()
-        transcription_layout.addWidget(QLabel("语音转写:"))
-        self.transcription_mode_combo = QComboBox()
-        self.transcription_mode_combo.addItem("关闭", "off")
-        self.transcription_mode_combo.addItem("本地识别（medium，需下载模型）", "local")
-        self.transcription_mode_combo.addItem("云端识别（OpenAI 兼容接口）", "cloud")
-        transcription_layout.addWidget(self.transcription_mode_combo)
-        self.transcription_setup_btn = QPushButton("下载本地识别组件和模型")
-        self.transcription_setup_btn.clicked.connect(self.setup_local_transcription)
-        transcription_layout.addWidget(self.transcription_setup_btn)
-        self.open_model_dir_btn = QPushButton("打开模型目录")
-        self.open_model_dir_btn.clicked.connect(self.open_local_model_dir)
-        transcription_layout.addWidget(self.open_model_dir_btn)
-        transcription_layout.addStretch()
-        layout.addLayout(transcription_layout)
-
-        cloud_form = QFormLayout()
-        self.cloud_stt_base_url_input = QLineEdit()
-        self.cloud_stt_base_url_input.setPlaceholderText("https://api.openai.com/v1")
-        cloud_form.addRow("云端接口地址:", self.cloud_stt_base_url_input)
-        self.cloud_stt_api_key_input = QLineEdit()
-        self.cloud_stt_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.cloud_stt_api_key_input.setPlaceholderText("云端转写服务的 API Key")
-        cloud_form.addRow("云端 API Key:", self.cloud_stt_api_key_input)
-        self.cloud_stt_model_input = QLineEdit()
-        self.cloud_stt_model_input.setPlaceholderText("whisper-1")
-        cloud_form.addRow("云端模型:", self.cloud_stt_model_input)
-        layout.addLayout(cloud_form)
-
-        self.transcription_status_label = QLabel(
-            "关闭时不转写；本地识别可在线下载 medium 模型（约 1.5 GB），"
-            "也可手动放入 data\\models\\faster-whisper\\medium\\（4 个文件）后优先使用，音频不出本机；"
-            "云端识别会把音频上传到上面配置的服务（接口需兼容 /audio/transcriptions）。"
-        )
-        self.transcription_status_label.setWordWrap(True)
-        layout.addWidget(self.transcription_status_label)
-
-        self.transcription_state_label = QLabel("模型状态：检测中…")
-        self.transcription_state_label.setWordWrap(True)
-        layout.addWidget(self.transcription_state_label)
-
-        # 记忆与人格进化全自动，不提供开关
+        self.like_replied_comment_check = QCheckBox("回复后顺手给网友评论点赞")
+        layout.addWidget(self.like_replied_comment_check)
+        self.reply_private_messages_check = QCheckBox("允许回复私信")
+        layout.addWidget(self.reply_private_messages_check)
 
         group.setLayout(layout)
         return group
 
     def _create_schedule_section(self) -> QGroupBox:
-        """自动巡视、回复检查和 DeepSeek 闲时段。"""
+        """自动运行、回复检查和 DeepSeek 闲时段。"""
         group = QGroupBox("⏱️ 自动运行与 DeepSeek 闲时")
         layout = QFormLayout()
 
@@ -691,7 +464,7 @@ class SettingsPage(QWidget):
         browse_layout.addWidget(self.browse_interval_min_spin)
         browse_layout.addWidget(QLabel("至"))
         browse_layout.addWidget(self.browse_interval_max_spin)
-        browse_layout.addWidget(QLabel("分钟，随机巡视一次"))
+        browse_layout.addWidget(QLabel("分钟，随机运行一次"))
         layout.addRow("巡视间隔:", browse_layout)
 
         self.reply_check_interval_spin = QSpinBox()
@@ -699,7 +472,7 @@ class SettingsPage(QWidget):
         self.reply_check_interval_spin.setSuffix(" 分钟")
         layout.addRow("回复检查间隔:", self.reply_check_interval_spin)
 
-        self.deepseek_offpeak_check = QCheckBox("仅在 DeepSeek API 闲时自动巡视视频")
+        self.deepseek_offpeak_check = QCheckBox("仅在 DeepSeek API 闲时自动运行")
         layout.addRow("", self.deepseek_offpeak_check)
         self.deepseek_offpeak_windows_input = QLineEdit()
         self.deepseek_offpeak_windows_input.setPlaceholderText(
@@ -725,160 +498,41 @@ class SettingsPage(QWidget):
 
     def load_settings(self):
         """加载设置"""
-        # B站设置
         self.owner_uid_input.setText(self.config.get('bilibili.owner_uid', ''))
         self.owner_name_input.setText(self.config.get('bilibili.owner_name', ''))
 
-        # 人设设置
         self.persona_name_input.setText(self.config.get('persona.name', 'AI娘'))
-
-        # 加载人设描述
         persona_file = self.config.get('persona.persona_file', 'data/persona.md')
         try:
             from pathlib import Path
             if Path(persona_file).exists():
-                with open(persona_file, 'r', encoding='utf-8') as f:
-                    self.persona_desc_text.setPlainText(f.read())
-        except:
+                self.persona_desc_text.setPlainText(Path(persona_file).read_text(encoding='utf-8'))
+        except OSError:
             pass
-
         self.persona_enabled_check.setChecked(self.config.get('persona.enabled', True))
 
-        # AI设置
         provider = self.config.get('ai.provider', 'openai')
         index = self.ai_provider_combo.findText(provider)
         if index >= 0:
             self.ai_provider_combo.setCurrentIndex(index)
-
         self.api_key_input.setText(self.config.get('ai.api_key', ''))
         self.model_input.setText(self.config.get('ai.model', ''))
         self.base_url_input.setText(self.config.get('ai.base_url', ''))
 
-        # 搜索设置
-        keywords = self.config.get('search.keywords', [])
-        self.keywords_input.setPlainText('\n'.join(keywords))
-        self.max_results_spin.setValue(self.config.get('search.max_results_per_keyword', 5))
-
-        order = self.config.get('search.order', 'totalrank')
-        order_map = {
-            'totalrank': 0,
-            'pubdate': 1,
-            'click': 2,
-            'dm': 3,
-            'stow': 4
-        }
-        self.order_combo.setCurrentIndex(order_map.get(order, 0))
-
-        # 限制设置
         self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 60))
-        self.max_likes_spin.setValue(self.config.get('limits.max_likes_per_day', 50))
-        self.cooldown_spin.setValue(self.config.get('limits.same_video_cooldown_days', 7))
-        self.max_videos_spin.setValue(self.config.get('limits.max_videos_per_run', 20))
-        self.min_score_spin.setValue(self.config.get('limits.min_score_to_comment', 13))
-        self.mention_threshold_spin.setValue(
-            self.config.get('limits.min_score_to_mention_owner', 13)
-        )
-        self.auto_comment_check.setChecked(self.config.get('interaction.auto_comment', False))
-        self.auto_like_check.setChecked(
-            self.config.get('interaction.auto_like_commented_video', False)
-        )
-        self.mention_owner_check.setChecked(
-            self.config.get('interaction.mention_owner_on_interesting', False)
-        )
-
-        # 高级功能设置
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
         scope = resolve_reply_scope(self.config)
         scope_index = self.reply_scope_combo.findData(scope)
         if scope_index >= 0:
             self.reply_scope_combo.setCurrentIndex(scope_index)
+        self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
         self.like_replied_comment_check.setChecked(
             self.config.get('interaction.like_replied_comments', True)
-        )
-        self.report_watching_check.setChecked(
-            self.config.get('interaction.report_watching', False)
-        )
-        self.favorite_video_check.setChecked(
-            self.config.get('interaction.favorite_commented_video', True)
-        )
-        self.follow_up_check.setChecked(
-            self.config.get('interaction.follow_commented_up', False)
-        )
-        self.like_up_dynamic_check.setChecked(
-            self.config.get('interaction.like_up_dynamics', False)
-        )
-        self.post_video_dynamic_check.setChecked(
-            self.config.get('interaction.post_video_dynamic', False)
         )
         self.reply_private_messages_check.setChecked(
             self.config.get('interaction.reply_private_messages', True)
         )
-        self.coin_video_check.setChecked(
-            self.config.get('interaction.coin_commented_video', True)
-        )
-        self.share_video_check.setChecked(
-            self.config.get('interaction.share_commented_video', False)
-        )
-        self.watch_later_check.setChecked(
-            self.config.get('interaction.watch_later_commented_video', True)
-        )
-        self.repost_dynamic_check.setChecked(
-            self.config.get('interaction.repost_up_dynamic', False)
-        )
-        self.send_danmaku_check.setChecked(
-            self.config.get('interaction.send_danmaku', False)
-        )
-        self.like_danmaku_check.setChecked(
-            self.config.get('interaction.like_danmaku', False)
-        )
-        self.prob_like_reply_spin.setValue(
-            self.config.get('interaction.prob_like_reply', 50)
-        )
-        self.prob_report_watch_spin.setValue(
-            self.config.get('interaction.prob_report_watch', 50)
-        )
-        self.prob_favorite_spin.setValue(
-            self.config.get('interaction.prob_favorite_video', 20)
-        )
-        self.prob_follow_spin.setValue(
-            self.config.get('interaction.prob_follow_up', 10)
-        )
-        self.prob_like_dynamic_spin.setValue(
-            self.config.get('interaction.prob_like_dynamic', 10)
-        )
-        self.prob_post_dynamic_spin.setValue(
-            self.config.get('interaction.prob_post_dynamic', 5)
-        )
-        self.prob_coin_spin.setValue(
-            self.config.get('interaction.prob_coin_video', 5)
-        )
-        self.prob_share_spin.setValue(
-            self.config.get('interaction.prob_share_video', 2)
-        )
-        self.prob_watch_later_spin.setValue(
-            self.config.get('interaction.prob_watch_later', 10)
-        )
-        self.prob_repost_spin.setValue(
-            self.config.get('interaction.prob_repost_dynamic', 3)
-        )
-        self.auto_reply_check.setChecked(self.config.get('interaction.auto_reply', True))
-        self.frame_analysis_check.setChecked(self.config.get('analysis.enable_frame_analysis', True))
-        mode = self.config.get('analysis.transcription_mode', 'off')
-        mode_index = self.transcription_mode_combo.findData(mode)
-        self.transcription_mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
-        self.cloud_stt_base_url_input.setText(
-            self.config.get('analysis.cloud_transcription.base_url', 'https://api.openai.com/v1')
-        )
-        self.cloud_stt_api_key_input.setText(
-            self.config.get('analysis.cloud_transcription.api_key', '')
-        )
-        self.cloud_stt_model_input.setText(
-            self.config.get('analysis.cloud_transcription.model', 'whisper-1')
-        )
-        self._update_transcription_controls()
-        self._refresh_transcription_state()
 
-        # 自动运行
         self.browse_interval_min_spin.setValue(
             self.config.get('schedule.browse_interval_min_minutes', 60)
         )
@@ -901,158 +555,36 @@ class SettingsPage(QWidget):
     def save_settings(self, silent=False):
         """保存设置"""
         try:
-            # B站设置
             self.config.set('bilibili.owner_uid', self.owner_uid_input.text())
             self.config.set('bilibili.owner_name', self.owner_name_input.text())
 
-            # 人设设置
             self.config.set('persona.name', self.persona_name_input.text())
             self.config.set('persona.enabled', self.persona_enabled_check.isChecked())
-
-            # 保存人设描述到文件
             persona_file = self.config.get('persona.persona_file', 'data/persona.md')
             from pathlib import Path
             Path(persona_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(persona_file, 'w', encoding='utf-8') as f:
-                f.write(self.persona_desc_text.toPlainText())
+            Path(persona_file).write_text(self.persona_desc_text.toPlainText(), encoding='utf-8')
 
-            # AI设置
             self.config.set('ai.provider', self.ai_provider_combo.currentText())
             self.config.set('ai.api_key', self.api_key_input.text().strip())
             self.config.set('ai.model', self.model_input.text())
             self.config.set('ai.base_url', self.base_url_input.text())
 
-            # 搜索设置
-            keywords_text = self.keywords_input.toPlainText()
-            keywords = [k.strip() for k in keywords_text.split('\n') if k.strip()]
-            self.config.set('search.keywords', keywords)
-            self.config.set('search.max_results_per_keyword', self.max_results_spin.value())
-
-            order_map = ['totalrank', 'pubdate', 'click', 'dm', 'stow']
-            order = order_map[self.order_combo.currentIndex()]
-            self.config.set('search.order', order)
-
-            # 限制设置
             self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
-            self.config.set('limits.max_likes_per_day', self.max_likes_spin.value())
-            self.config.set('limits.same_video_cooldown_days', self.cooldown_spin.value())
-            self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
-            self.config.set('limits.min_score_to_comment', self.min_score_spin.value())
-            self.config.set(
-                'limits.min_score_to_mention_owner', self.mention_threshold_spin.value()
-            )
-            self.config.set('interaction.auto_comment', self.auto_comment_check.isChecked())
-            self.config.set(
-                'interaction.auto_like_commented_video',
-                self.auto_like_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.mention_owner_on_interesting', self.mention_owner_check.isChecked()
-            )
-
-            # 高级功能设置
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
             apply_reply_scope(
                 self.config, self.reply_scope_combo.currentData() or 'all'
             )
+            self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
             self.config.set(
                 'interaction.like_replied_comments',
                 self.like_replied_comment_check.isChecked(),
             )
             self.config.set(
-                'interaction.report_watching',
-                self.report_watching_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.favorite_commented_video',
-                self.favorite_video_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.follow_commented_up',
-                self.follow_up_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.like_up_dynamics',
-                self.like_up_dynamic_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.post_video_dynamic',
-                self.post_video_dynamic_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.prob_like_reply', self.prob_like_reply_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_report_watch', self.prob_report_watch_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_favorite_video', self.prob_favorite_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_follow_up', self.prob_follow_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_like_dynamic', self.prob_like_dynamic_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_post_dynamic', self.prob_post_dynamic_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_coin_video', self.prob_coin_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_share_video', self.prob_share_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_watch_later', self.prob_watch_later_spin.value()
-            )
-            self.config.set(
-                'interaction.prob_repost_dynamic', self.prob_repost_spin.value()
-            )
-            self.config.set(
                 'interaction.reply_private_messages',
                 self.reply_private_messages_check.isChecked(),
             )
-            self.config.set(
-                'interaction.coin_commented_video', self.coin_video_check.isChecked()
-            )
-            self.config.set(
-                'interaction.share_commented_video', self.share_video_check.isChecked()
-            )
-            self.config.set(
-                'interaction.watch_later_commented_video',
-                self.watch_later_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.repost_up_dynamic', self.repost_dynamic_check.isChecked()
-            )
-            self.config.set(
-                'interaction.send_danmaku', self.send_danmaku_check.isChecked()
-            )
-            self.config.set(
-                'interaction.like_danmaku', self.like_danmaku_check.isChecked()
-            )
-            self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
-            self.config.set('analysis.enable_frame_analysis', self.frame_analysis_check.isChecked())
-            self.config.set(
-                'analysis.transcription_mode',
-                self.transcription_mode_combo.currentData() or 'off',
-            )
-            self.config.set(
-                'analysis.cloud_transcription.base_url',
-                self.cloud_stt_base_url_input.text().strip(),
-            )
-            self.config.set(
-                'analysis.cloud_transcription.api_key',
-                self.cloud_stt_api_key_input.text().strip(),
-            )
-            self.config.set(
-                'analysis.cloud_transcription.model',
-                self.cloud_stt_model_input.text().strip() or 'whisper-1',
-            )
-            self.analysis_settings_saved.emit()
 
-            # 自动巡视与 DeepSeek 闲时调度
             interval_min = self.browse_interval_min_spin.value()
             interval_max = self.browse_interval_max_spin.value()
             self.config.set('schedule.browse_interval_min_minutes', min(interval_min, interval_max))
@@ -1069,7 +601,6 @@ class SettingsPage(QWidget):
             if not silent:
                 QMessageBox.information(self, "成功", "设置已保存并立即生效！")
             logger.info("设置已保存")
-
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存设置失败:\n{e}")
             logger.error(f"保存设置失败: {e}")
@@ -1182,7 +713,7 @@ class SettingsPage(QWidget):
         name_layout = QHBoxLayout()
         name_layout.addWidget(QLabel("角色名称:"))
         self.persona_name_input = QLineEdit()
-        self.persona_name_input.setPlaceholderText("例如: AI娘")
+        self.persona_name_input.setPlaceholderText("例如: 鲸鱼娘")
         name_layout.addWidget(self.persona_name_input)
         layout.addLayout(name_layout)
 
