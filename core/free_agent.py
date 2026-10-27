@@ -44,6 +44,7 @@ class FreeAgent:
         self.config = config
         self.bili_tool = BiliTool(bili_api, db, config)
         self._stop = None
+        self._seen_io = set()
         self.enable_frame_analysis = True
         self.local_transcriber = None
         from core.comment_manager import CommentManager
@@ -160,6 +161,13 @@ class FreeAgent:
             return {'error': f'读取视频失败: {exc}'}
         if not info:
             return {'error': f'视频不存在或无法读取: {bvid}'}
+
+        try:
+            self.bili_tool._remember_video(
+                bvid, int(info.get('aid') or 0), str(info.get('title') or '')
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
         aid = int(info.get('aid') or 0)
         subtitle = ''
@@ -326,26 +334,51 @@ class FreeAgent:
                     method = self._infer_method(args or params)
         return 'bili_api', {'method': method, 'arguments': params}
 
-    @staticmethod
-    def _log_io(tool: str, args: dict, result: Any) -> None:
+    def _log_io(self, tool: str, args: dict, result: Any) -> None:
         if tool != 'bili_api':
             return
         method = str(args.get('method') or '')
         params = args.get('arguments') or {}
         if method == 'get_private_messages' and isinstance(result, list) and result:
-            last = result[-1]
-            content = str(last.get('content') or '')[:80]
-            logger.info(f'收到私信 {params.get("talker_id")}: {content}')
+            for item in result[-3:]:
+                key = (
+                    'dm', params.get('talker_id'), item.get('timestamp'),
+                    item.get('content'),
+                )
+                if key in self._seen_io:
+                    continue
+                self._seen_io.add(key)
+                content = str(item.get('content') or '')[:80]
+                logger.info(f'收到私信 {params.get("talker_id")}: {content}')
         elif method == 'get_at_messages' and isinstance(result, list) and result:
-            last = result[-1]
-            user = last.get('user') or last.get('nickname') or '网友'
-            content = str(last.get('content') or '')[:80]
-            logger.info(f'收到@{user}: {content}')
+            for item in result[-3:]:
+                key = ('at', item.get('rpid'))
+                if key in self._seen_io:
+                    continue
+                self._seen_io.add(key)
+                user = item.get('user') or item.get('nickname') or '网友'
+                content = str(item.get('content') or '')[:80]
+                logger.info(f'收到@{user}: {content}')
         elif method in {'get_comments', 'get_comment_thread'} and isinstance(result, list) and result:
-            last = result[-1]
-            user = last.get('user') or last.get('nickname') or '网友'
-            content = str(last.get('content') or '')[:80]
-            logger.info(f'收到评论 [{user}]: {content}')
+            own = set()
+            if self.db is not None and hasattr(self.db, 'get_own_comment_rpids'):
+                try:
+                    own_ids = self.db.get_own_comment_rpids()
+                    if isinstance(own_ids, (set, list, tuple)):
+                        own = set(own_ids)
+                except Exception:  # noqa: BLE001
+                    own = set()
+            for item in result[-3:]:
+                rpid = item.get('rpid')
+                if rpid in own:
+                    continue
+                key = ('comment', rpid)
+                if key in self._seen_io:
+                    continue
+                self._seen_io.add(key)
+                user = item.get('user') or item.get('nickname') or '网友'
+                content = str(item.get('content') or '')[:80]
+                logger.info(f'收到评论 [{user}]: {content}')
         elif method == 'post_comment' and result is True:
             kind = '回复' if params.get('root_rpid') or params.get('parent_rpid') else '评论'
             logger.info(f'发送{kind}: {str(params.get("text") or "")[:80]}')
