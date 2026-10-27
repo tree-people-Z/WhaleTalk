@@ -149,8 +149,12 @@ class AgentEvent(Base):
     event_key = Column(String(160), unique=True, nullable=False, index=True)
     event_type = Column(String(30), index=True)
     payload_json = Column(Text, default='{}')
+    status = Column(String(20), default='delivered', index=True)
+    delivery_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     seen_at = Column(DateTime, default=datetime.now)
+    last_delivered_at = Column(DateTime, default=datetime.now)
+    handled_at = Column(DateTime)
 
 
 class DailyQuota(Base):
@@ -200,6 +204,18 @@ class Database:
                 connection.execute(text(
                     "ALTER TABLE agent_sessions ADD COLUMN videos_json TEXT DEFAULT '[]'"
                 ))
+        event_columns = {
+            col['name'] for col in inspect(self.engine).get_columns('agent_events')
+        }
+        for name, ddl in (
+            ('status', "ALTER TABLE agent_events ADD COLUMN status VARCHAR(20) DEFAULT 'delivered'"),
+            ('delivery_count', "ALTER TABLE agent_events ADD COLUMN delivery_count INTEGER DEFAULT 0"),
+            ('last_delivered_at', "ALTER TABLE agent_events ADD COLUMN last_delivered_at DATETIME"),
+            ('handled_at', "ALTER TABLE agent_events ADD COLUMN handled_at DATETIME"),
+        ):
+            if name not in event_columns:
+                with self.engine.begin() as connection:
+                    connection.execute(text(ddl))
 
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
@@ -561,34 +577,73 @@ class Database:
         ))
         self.session.commit()
 
-    def seen_agent_event_keys(self, keys: List[str]) -> set:
+    def get_agent_event_states(self, keys: List[str]) -> Dict[str, Dict[str, Any]]:
         keys = [key for key in keys if key]
         if not keys:
-            return set()
-        rows = self.session.query(AgentEvent.event_key)\
-            .filter(AgentEvent.event_key.in_(keys)).all()
-        return {row[0] for row in rows}
+            return {}
+        rows = self.session.query(AgentEvent).filter(
+            AgentEvent.event_key.in_(keys)
+        ).all()
+        return {
+            row.event_key: {
+                'status': row.status or 'delivered',
+                'delivery_count': int(row.delivery_count or 0),
+                'last_delivered_at': row.last_delivered_at,
+            }
+            for row in rows
+        }
 
-    def mark_agent_events_seen(self, events: List[Dict[str, Any]]) -> None:
+    def deliver_agent_events(self, events: List[Dict[str, Any]]) -> None:
         if not events:
             return
         keys = [str(item.get('key') or '') for item in events]
-        existing = self.seen_agent_event_keys(keys)
+        rows = self.session.query(AgentEvent).filter(
+            AgentEvent.event_key.in_(keys)
+        ).all()
+        existing = {row.event_key: row for row in rows}
+        now = datetime.now()
         changed = False
         for item in events:
             key = str(item.get('key') or '')
-            if not key or key in existing:
+            if not key:
                 continue
-            self.session.add(AgentEvent(
-                event_key=key,
-                event_type=str(item.get('type') or ''),
-                payload_json=json.dumps(
-                    item.get('payload') or {}, ensure_ascii=False, default=str
-                ),
-            ))
+            row = existing.get(key)
+            if row is None:
+                self.session.add(AgentEvent(
+                    event_key=key,
+                    event_type=str(item.get('type') or ''),
+                    payload_json=json.dumps(
+                        item.get('payload') or {}, ensure_ascii=False, default=str
+                    ),
+                    status='delivered',
+                    delivery_count=1,
+                    last_delivered_at=now,
+                ))
+                changed = True
+                continue
+            if (row.status or 'delivered') in ('handled', 'ignored'):
+                continue
+            row.delivery_count = int(row.delivery_count or 0) + 1
+            row.last_delivered_at = now
+            if row.delivery_count >= 3:
+                row.status = 'ignored'
             changed = True
         if changed:
             self.session.commit()
+
+    def mark_agent_events_handled(self, event_types: Optional[List[str]] = None) -> int:
+        query = self.session.query(AgentEvent).filter(
+            AgentEvent.status == 'delivered'
+        )
+        if event_types:
+            query = query.filter(AgentEvent.event_type.in_(event_types))
+        now = datetime.now()
+        count = query.update(
+            {AgentEvent.status: 'handled', AgentEvent.handled_at: now},
+            synchronize_session=False,
+        )
+        self.session.commit()
+        return int(count or 0)
 
     def get_recent_agent_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
         rows = self.session.query(AgentSession)\

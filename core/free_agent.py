@@ -112,16 +112,26 @@ class FreeAgent:
             })
         if not records:
             return result
-        seen = self.db.seen_agent_event_keys([item['key'] for item in records])
+        states = self.db.get_agent_event_states([item['key'] for item in records])
+        now = datetime.now()
         new_items = []
         new_records = []
         for record in records:
-            if record['key'] in seen:
+            state = states.get(record['key']) or {}
+            status = str(state.get('status') or '')
+            if status in ('handled', 'ignored'):
                 continue
+            if status == 'delivered':
+                last = state.get('last_delivered_at')
+                count = int(state.get('delivery_count') or 0)
+                if last and count < 3 and (now - last).total_seconds() < 600:
+                    continue
+                if count >= 3:
+                    continue
             new_items.append(record.pop('_item'))
             new_records.append(record)
         try:
-            self.db.mark_agent_events_seen(new_records)
+            self.db.deliver_agent_events(new_records)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f'记录事件状态失败: {exc}')
         return new_items
@@ -621,6 +631,7 @@ class FreeAgent:
         comments = 0
         summary = ''
         actions: list[str] = []
+        successful_actions: list[str] = []
         retried_empty_finish = False
         try:
             for _ in range(MAX_STEPS):
@@ -678,8 +689,26 @@ class FreeAgent:
                     result = await self._call_tool(tool, args)
                 except Exception as exc:  # noqa: BLE001
                     result = {'error': str(exc)}
-                actions.append(self._describe_action(tool, args, result))
+                action_text = self._describe_action(tool, args, result)
+                actions.append(action_text)
+                if self._action_ok(result):
+                    successful_actions.append(action_text)
                 self._log_io(tool, args, result)
+                if tool == 'bili_api' and self.db is not None:
+                    method = str(args.get('method') or '')
+                    params = args.get('arguments') or {}
+                    if method == 'post_comment' and result is True and (
+                        params.get('root_rpid') or params.get('parent_rpid')
+                    ):
+                        try:
+                            self.db.mark_agent_events_handled(['at', 'comment'])
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(f'标记评论事件已处理失败: {exc}')
+                    elif method == 'send_private_message' and result is True:
+                        try:
+                            self.db.mark_agent_events_handled(['dm'])
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(f'标记私信事件已处理失败: {exc}')
                 if (tool == 'bili_api'
                         and str(args.get('method')) == 'post_comment'
                         and result is True):
@@ -694,14 +723,19 @@ class FreeAgent:
             self._stop = None
             self._log_actions(actions)
         if summary:
-            missing = self._summary_mismatch(summary, actions)
+            missing = self._summary_mismatch(summary, successful_actions)
             if missing:
                 logger.warning(
                     '🐋 模型总结与实际动作不符：提到 '
                     + '、'.join(missing)
-                    + '，但本轮没有对应动作'
+                    + '，但本轮没有成功的对应动作'
                 )
-                logger.info(f'🐋 模型自述（未核验）：{summary}')
+                logger.info(f'🐋 模型自述（未采信）：{summary}')
+                summary = (
+                    '本轮实际完成：' + '；'.join(successful_actions)
+                    if successful_actions else '本轮没有成功动作'
+                )
+                logger.info(f'🐋 实际总结：{summary}')
             else:
                 logger.info(f'🐋 模型总结：{summary}')
         if not actions:

@@ -67,6 +67,17 @@ class DsmlAI:
         return '{"action":"finish","reason":"完成"}'
 
 
+class FalseSummaryAI:
+    def __init__(self):
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return '{"action":"tool","tool":"bili_api","arguments":{"method":"get_x"}}'
+        return '{"action":"finish","reason":"给视频点了赞并留言"}'
+
+
 class InspectBili(FakeBili):
     async def get_video_info(self, bvid: str):
         return {
@@ -179,6 +190,24 @@ class FreeAgentTests(unittest.TestCase):
             finally:
                 db.session.close()
                 db.engine.dispose()
+
+    def test_false_summary_is_replaced_by_successful_actions(self):
+        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
+        self.assertIn(
+            '点赞',
+            agent._summary_mismatch('给视频点赞并留言', ['搜索视频 鲸鱼娘：成功']),
+        )
+        self.assertEqual(
+            agent._summary_mismatch('搜索了鲸鱼娘', ['搜索视频 鲸鱼娘：成功']),
+            [],
+        )
+
+    def test_false_summary_is_not_stored(self):
+        agent = FreeAgent(FakeBili(), FalseSummaryAI(), Mock(), Mock())
+        with patch('core.free_agent.build_agent_context', return_value='ctx'):
+            result = asyncio.run(agent.run_analysis_cycle())
+        self.assertIn('本轮实际完成', result['summary'])
+        self.assertNotIn('点赞', result['summary'])
 
     def test_normalizes_malformed_bili_calls(self):
         agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
