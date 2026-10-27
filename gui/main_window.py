@@ -295,15 +295,17 @@ class MainWindow(QMainWindow):
         self.history_table = QTableWidget()
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setShowGrid(False)
-        self.history_table.setColumnCount(5)
+        self.history_table.setColumnCount(6)
         self.history_table.setHorizontalHeaderLabels([
-            "时间", "来源", "本轮总结", "实际动作", "发送数"
+            "时间", "来源", "本轮总结", "实际动作", "发送数", "链接"
         ])
+        self.history_table.cellClicked.connect(self._open_history_video)
 
         header = self.history_table.horizontalHeader()
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self.history_table)
 
@@ -602,6 +604,7 @@ class MainWindow(QMainWindow):
                 'summary': session.get('summary') or '',
                 'actions': '；'.join(str(item) for item in (session.get('actions') or [])),
                 'count': session.get('comments_sent') or 0,
+                'url': '',
             })
         for record in self.db.get_recent_videos(limit=200):
             rows.append({
@@ -610,6 +613,10 @@ class MainWindow(QMainWindow):
                 'summary': record.title or '',
                 'actions': record.comment_text or record.reason or '',
                 'count': 1 if record.commented else 0,
+                'url': (
+                    f'https://www.bilibili.com/video/{record.bvid}'
+                    if record.bvid else ''
+                ),
             })
         rows.sort(key=lambda row: row['time'] or datetime.min, reverse=True)
 
@@ -631,9 +638,16 @@ class MainWindow(QMainWindow):
 
             self.history_table.setItem(i, 4, QTableWidgetItem(str(row['count'])))
 
+            link_item = QTableWidgetItem('打开视频 ↗' if row['url'] else '')
+            if row['url']:
+                link_item.setData(Qt.ItemDataRole.UserRole, row['url'])
+                link_item.setForeground(Qt.GlobalColor.blue)
+                link_item.setToolTip('点击打开B站视频')
+            self.history_table.setItem(i, 5, link_item)
+
     def _open_history_video(self, row: int, column: int):
         """打开历史记录对应的视频页面。"""
-        if column != 6:
+        if column != 5:
             return
         item = self.history_table.item(row, column)
         url = item.data(Qt.ItemDataRole.UserRole) if item else None

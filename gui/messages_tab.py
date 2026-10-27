@@ -7,10 +7,33 @@ from typing import Any, Dict, List
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 from loguru import logger
+
+
+class SendMessageWorker(QThread):
+    """Send one manual private message in the background."""
+
+    sent = pyqtSignal(bool, str)
+
+    def __init__(self, bili_api, talker_id: int, text: str, parent=None):
+        super().__init__(parent)
+        self.bili_api = bili_api
+        self.talker_id = talker_id
+        self.text = text
+
+    def run(self):
+        try:
+            ok = asyncio.run(
+                self.bili_api.send_private_message(self.talker_id, self.text)
+            )
+            self.sent.emit(bool(ok), '')
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f'发送私信失败: {exc}')
+            self.sent.emit(False, str(exc))
+
 
 
 class SessionLoadWorker(QThread):
@@ -70,6 +93,8 @@ class MessagesTab(QWidget):
         self.sessions: List[Dict[str, Any]] = []
         self._session_worker = None
         self._message_worker = None
+        self._send_worker = None
+        self._current_session = {}
         self._loaded_at = 0.0
         self._build_ui()
 
@@ -98,6 +123,17 @@ class MessagesTab(QWidget):
         splitter.addWidget(self.message_view)
         splitter.setSizes([300, 620])
         layout.addWidget(splitter, 1)
+
+        send_row = QHBoxLayout()
+        self.message_input = QLineEdit()
+        self.message_input.setPlaceholderText("输入要发送的私信…")
+        self.message_input.returnPressed.connect(self.send_message)
+        self.send_btn = QPushButton("发送")
+        self.send_btn.clicked.connect(self.send_message)
+        self.send_btn.setEnabled(False)
+        send_row.addWidget(self.message_input, 1)
+        send_row.addWidget(self.send_btn)
+        layout.addLayout(send_row)
 
     def set_bili_api(self, bili_api):
         self.bili_api = bili_api
@@ -164,6 +200,8 @@ class MessagesTab(QWidget):
         talker_id = session.get('talker_id')
         if not talker_id:
             return
+        self._current_session = session
+        self.send_btn.setEnabled(True)
         if self._message_worker is not None and self._message_worker.isRunning():
             return
         self.status_label.setText(f"正在加载与 {session.get('name')} 的对话…")
@@ -195,7 +233,41 @@ class MessagesTab(QWidget):
         self.status_label.setText(f"加载失败：{message}")
         logger.warning(f"私信面板加载失败: {message}")
 
+    def send_message(self):
+        text = self.message_input.text().strip()
+        session = self._current_session or {}
+        talker_id = session.get('talker_id')
+        if not text or not talker_id or self.bili_api is None:
+            return
+        if self._send_worker is not None and self._send_worker.isRunning():
+            return
+        self.send_btn.setEnabled(False)
+        self.message_input.setEnabled(False)
+        self.status_label.setText('正在发送私信…')
+        worker = SendMessageWorker(self.bili_api, int(talker_id), text, self)
+        self._send_worker = worker
+        worker.sent.connect(lambda ok, error: self._on_message_sent(ok, error, text))
+        worker.finished.connect(lambda: self._finish_send(worker))
+        worker.start()
+
+    def _on_message_sent(self, ok: bool, error: str, text: str):
+        self.message_input.setEnabled(True)
+        self.send_btn.setEnabled(True)
+        if not ok:
+            self.status_label.setText(f'发送失败：{error}')
+            return
+        self.message_input.clear()
+        self.status_label.setText('私信已发送，正在刷新…')
+        self.message_view.append(f'我：{text}')
+        self._loaded_at = 0.0
+        self.refresh_sessions()
+
+    def _finish_send(self, worker):
+        worker.deleteLater()
+        if self._send_worker is worker:
+            self._send_worker = None
+
     def shutdown(self, timeout_ms: int = 2000):
-        for worker in (self._session_worker, self._message_worker):
+        for worker in (self._session_worker, self._message_worker, self._send_worker):
             if worker is not None and worker.isRunning():
                 worker.wait(timeout_ms)

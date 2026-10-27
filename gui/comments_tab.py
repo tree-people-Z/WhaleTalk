@@ -10,8 +10,8 @@ from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 import requests
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
     QSplitter, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
@@ -93,6 +93,7 @@ class CommentsTab(QWidget):
         self._worker = None
         self._loaded_at = 0.0
         self._notified_aids = set()
+        self._active_thread = {}
         self._build_ui()
 
     def _build_ui(self):
@@ -149,6 +150,18 @@ class CommentsTab(QWidget):
         self.thread_table.itemSelectionChanged.connect(self._on_selection_changed)
         splitter.addWidget(self.thread_table)
 
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+        right_toolbar = QHBoxLayout()
+        right_toolbar.addStretch()
+        self.open_video_btn = QPushButton("打开视频")
+        self.open_video_btn.setEnabled(False)
+        self.open_video_btn.clicked.connect(self._open_active_video)
+        right_toolbar.addWidget(self.open_video_btn)
+        right_layout.addLayout(right_toolbar)
+
         self.transcript = QTextEdit()
         self.transcript.setReadOnly(True)
         self.transcript.setPlaceholderText("选择左侧记录查看评论对话")
@@ -156,7 +169,8 @@ class CommentsTab(QWidget):
             "QTextEdit { border: 1px solid #e5e7eb; border-radius: 8px;"
             " padding: 8px; background: #ffffff; }"
         )
-        splitter.addWidget(self.transcript)
+        right_layout.addWidget(self.transcript, 1)
+        splitter.addWidget(right)
         splitter.setSizes([430, 560])
         layout.addWidget(splitter, 1)
 
@@ -340,6 +354,12 @@ class CommentsTab(QWidget):
             self._load_thread(thread)
 
     def _load_thread(self, thread: Dict[str, Any]):
+        self._active_thread = thread or {}
+        bvid = (thread or {}).get('bvid') or ''
+        self.open_video_btn.setEnabled(bool(bvid))
+        self.open_video_btn.setToolTip(
+            f'https://www.bilibili.com/video/{bvid}' if bvid else '这条记录没有视频链接'
+        )
         self._render_thread(thread, [])
         if self.bili_api is None or not getattr(self.bili_api, 'credential', None):
             self.status_label.setText("登录B站后可加载网友回复")
@@ -363,6 +383,13 @@ class CommentsTab(QWidget):
             worker.deleteLater()
         if self._worker is worker:
             self._worker = None
+
+    def _open_active_video(self):
+        bvid = (self._active_thread or {}).get('bvid') or ''
+        if bvid:
+            QDesktopServices.openUrl(
+                QUrl(f'https://www.bilibili.com/video/{bvid}')
+            )
 
     # --------------------------------------------------------------- rendering
     @staticmethod
