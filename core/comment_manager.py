@@ -249,22 +249,12 @@ class CommentManager:
             return False
 
     async def check_private_messages(self) -> int:
-        """Reply to unread B站 private messages, with strict daily limits."""
+        """Reply to unread B站 private messages."""
         if not self.config.get('interaction.reply_private_messages', True):
             return 0
         if getattr(self.bili, 'is_blocked', lambda: False)():
             return 0
         try:
-            max_per_check = int(self.config.get('limits.max_dm_per_check', 3))
-        except (TypeError, ValueError):
-            max_per_check = 3
-        try:
-            max_per_day = int(self.config.get('limits.max_dm_per_day', 10))
-        except (TypeError, ValueError):
-            max_per_day = 10
-        try:
-            if self.db.get_today_memory_event_count('dm') >= max_per_day:
-                return 0
             sessions = await self.bili.get_private_sessions(session_type=1)
             self_info = await self.bili.get_self_info()
             self_uid = self_info.get('uid')
@@ -273,8 +263,6 @@ class CommentManager:
             return 0
         sent = 0
         for session in sessions:
-            if sent >= max_per_check:
-                break
             talker_id = session.get('talker_id')
             if not talker_id:
                 continue

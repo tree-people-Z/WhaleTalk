@@ -154,20 +154,8 @@ class FreeAgent:
         if not isinstance(keywords, (list, tuple)):
             keywords = []
         keywords = [str(item).strip() for item in keywords if str(item).strip()]
-        recent_short = '、'.join(recent[:4])
-        repeated = len(recent) >= 2 and recent[0] == recent[1]
-        unused = [item for item in keywords if item not in recent[:3]]
-        suggestion = unused[0] if unused else (keywords[0] if keywords else '换一个')
-        if repeated:
-            return (
-                f'# 关键词轮换\n最近连续使用：{recent[0]}。'
-                f'本轮优先尝试「{suggestion}」，不要连续只用同一个关键词；'
-                f'除非有明确理由，才继续用「{recent[0]}」。'
-            )
-        return (
-            f'# 关键词轮换\n最近用过：{recent_short}。'
-            f'本轮优先尝试没出现过的关键词，例如「{suggestion}」。'
-        )
+        recent_short = str(recent[0])
+        return f'# 关键词轮换\n上一次使用：{recent_short}。'
 
     def _system_prompt(self) -> str:
         tools = [self.bili_tool.spec(), INSPECT_VIDEO_TOOL, *DIARY_TOOLS]

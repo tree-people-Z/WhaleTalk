@@ -135,10 +135,18 @@ def build_agent_context(config, diary_days: int = 3) -> str:
         '也会直接用这个账号发出去，别人看到的就是你本人。'
         '你不是旁观者，也不是只给建议的人。'
     )
+    owner = config.get('bilibili.owner_name', '') if config is not None else ''
+    share_target = f'@{owner}' if str(owner or '').strip() else '@主人'
+    share = (
+        '# 和主人分享\n'
+        f'遇到有意思或者想和主人分享的视频，可以 {share_target}。'
+        '这是主动分享时允许 @ 主人的例外，不算乱艾特。'
+    )
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
         f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
         f'{account}\n\n'
+        f'{share}\n\n'
         f'{preference}'
     )

@@ -215,7 +215,7 @@ class FreeAgentTests(unittest.TestCase):
         self.assertIn('本轮实际完成', result['summary'])
         self.assertNotIn('点赞', result['summary'])
 
-    def test_keyword_hint_rotates_after_repeated_search(self):
+    def test_keyword_hint_shows_last_used(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'keywords.db'))
             try:
@@ -227,8 +227,7 @@ class FreeAgentTests(unittest.TestCase):
                 )
                 agent = FreeAgent(FakeBili(), FakeAI(), db, config)
                 hint = agent._keyword_hint()
-                self.assertIn('DeepSeek娘', hint)
-                self.assertIn('不要连续', hint)
+                self.assertIn('上一次使用：鲸鱼娘', hint)
             finally:
                 db.session.close()
                 db.engine.dispose()
