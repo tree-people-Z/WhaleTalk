@@ -49,7 +49,9 @@ class FreeAgent:
             '每步只输出一个 JSON：\n'
             '{"action":"tool","tool":"工具名","arguments":{...}}\n'
             '或 {"action":"finish","reason":"这一轮做了什么/为什么不做"}\n'
-            '工具结果会返回给你。最多 12 步。'
+            '工具结果会返回给你。最多 12 步。\n'
+            'finish 的 reason 只能描述本轮实际调用过的工具；没有调用工具就写“本轮没有操作”，'
+            '不要复述日记或之前的轮次。'
         )
 
     async def _call_tool(self, name: str, args: dict) -> Any:
@@ -206,6 +208,7 @@ class FreeAgent:
         comments = 0
         summary = ''
         actions: list[str] = []
+        retried_empty_finish = False
         try:
             for _ in range(MAX_STEPS):
                 if self._stop.is_set():
@@ -220,6 +223,18 @@ class FreeAgent:
                     continue
                 action = str(decision.get('action') or '').lower()
                 if action == 'finish':
+                    if not actions and not retried_empty_finish:
+                        retried_empty_finish = True
+                        messages.append({'role': 'assistant', 'content': response})
+                        messages.append({
+                            'role': 'user',
+                            'content': (
+                                '你还没有调用任何工具，不能用 finish 描述已经做过的事。'
+                                '如果这轮要操作，先调用工具；如果确实不操作，'
+                                '输出 {"action":"finish","reason":"本轮没有操作"}。'
+                            ),
+                        })
+                        continue
                     summary = str(decision.get('reason') or '')
                     break
                 tool = str(decision.get('tool') or decision.get('name') or 'bili_api')
@@ -267,6 +282,8 @@ class FreeAgent:
             self._log_actions(actions)
         if summary:
             logger.info(f'🐋 模型总结：{summary}')
+        if not actions:
+            logger.warning('🐋 本轮没有实际调用工具，模型总结不代表已执行操作')
         if self.db is not None:
             try:
                 self.db.add_agent_session(
