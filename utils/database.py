@@ -443,6 +443,33 @@ class Database:
 
         return record is not None
 
+    def get_comments_missing_video(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Return comments whose bvid or video title still needs backfilling."""
+        from sqlalchemy import or_
+        rows = self.session.query(
+            CommentRecord.aid, CommentRecord.bvid
+        ).outerjoin(
+            VideoRecord, CommentRecord.bvid == VideoRecord.bvid
+        ).filter(
+            or_(
+                CommentRecord.bvid == '',
+                CommentRecord.bvid.is_(None),
+                VideoRecord.id.is_(None),
+                VideoRecord.title.is_(None),
+                VideoRecord.title == '',
+            )
+        ).distinct().limit(limit).all()
+        return [{'aid': row[0], 'bvid': row[1] or ''} for row in rows]
+
+    def update_comment_bvid(self, aid: int, bvid: str) -> int:
+        from sqlalchemy import or_
+        count = self.session.query(CommentRecord).filter(
+            CommentRecord.aid == int(aid),
+            or_(CommentRecord.bvid == '', CommentRecord.bvid.is_(None)),
+        ).update({CommentRecord.bvid: bvid}, synchronize_session=False)
+        self.session.commit()
+        return int(count or 0)
+
     def get_recent_videos(self, limit: int = 50) -> List[VideoRecord]:
         """获取最近的视频记录"""
         return self.session.query(VideoRecord)\
@@ -459,6 +486,10 @@ class Database:
             raise ValueError('bvid 为空')
         record = self.session.query(VideoRecord).filter_by(bvid=bvid).first()
         if record is not None:
+            if title and not record.title:
+                record.title = title
+                record.author = author or record.author
+                self.session.commit()
             return record
         record = VideoRecord(
             bvid=bvid,

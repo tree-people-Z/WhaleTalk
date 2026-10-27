@@ -117,6 +117,17 @@ class BiliTool:
                 return f'今日评论/回复已达上限 {maximum} 条'
         return ''
 
+    async def _lookup_video(self, args: dict, bvid: str) -> dict | None:
+        aid = int(args.get('aid') or 0)
+        try:
+            if bvid and hasattr(self.bili, 'get_video_info'):
+                return await self.bili.get_video_info(bvid)
+            if aid and hasattr(self.bili, 'get_video_info_by_aid'):
+                return await self.bili.get_video_info_by_aid(aid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f'校验视频失败: {exc}')
+        return None
+
     async def call(self, method: str, arguments: dict | None = None) -> Any:
         if method not in {item['name'] for item in self._specs}:
             return {'error': f'没有这个接口: {method}'}
@@ -131,6 +142,15 @@ class BiliTool:
             key: value for key, value in args.items()
             if key not in {'bvid', 'video_title'}
         }
+        video_info = None
+        if method == 'post_comment' and (
+            hasattr(self.bili, 'get_video_info_by_aid')
+            or hasattr(self.bili, 'get_video_info')
+        ):
+            video_info = await self._lookup_video(call_args, extra_bvid)
+            if not video_info:
+                return {'error': '视频不存在、已删除或无法访问，评论未发送'}
+            extra_bvid = str(video_info.get('bvid') or extra_bvid)
         try:
             result = getattr(self.bili, method)(**call_args)
             if inspect.isawaitable(result):
@@ -138,7 +158,9 @@ class BiliTool:
             if method in _WRITE_METHODS:
                 self.writes += 1
                 if method == 'post_comment' and self.db is not None:
-                    await self._record_comment(call_args, extra_bvid, bool(result))
+                    await self._record_comment(
+                        call_args, extra_bvid, bool(result), video_info
+                    )
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}
@@ -146,16 +168,18 @@ class BiliTool:
             logger.warning(f'自由 Agent 调用 {method} 失败: {exc}')
             return {'error': str(exc)}
 
-    async def _record_comment(self, args: dict, bvid: str, success: bool) -> None:
+    async def _record_comment(
+        self, args: dict, bvid: str, success: bool, video_info: dict | None
+    ) -> None:
         aid = int(args.get('aid') or 0)
-        title = ''
-        author = ''
+        title = str((video_info or {}).get('title') or '')
+        author = str((video_info or {}).get('owner') or '')
         if not bvid and aid and hasattr(self.bili, 'get_video_info_by_aid'):
             try:
                 info = await self.bili.get_video_info_by_aid(aid) or {}
                 bvid = str(info.get('bvid') or '')
-                title = str(info.get('title') or '')
-                author = str(info.get('owner') or '')
+                title = title or str(info.get('title') or '')
+                author = author or str(info.get('owner') or '')
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f'补全视频信息失败 aid={aid}: {exc}')
         try:
