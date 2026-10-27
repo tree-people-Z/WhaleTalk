@@ -88,6 +88,10 @@ class BiliTool:
             'methods': self._specs,
         }
 
+    @property
+    def method_names(self) -> set:
+        return {item['name'] for item in self._specs}
+
     def _check_write(self, method: str, args: dict) -> str:
         if method not in _WRITE_METHODS:
             return ''

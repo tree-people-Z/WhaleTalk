@@ -64,6 +64,61 @@ class FreeAgent:
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
 
+    def _normalize_call(self, tool: str, args: Any) -> tuple[str, dict]:
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        names = self.bili_tool.method_names
+        if tool != 'bili_api' and tool in names:
+            return 'bili_api', {'method': tool, 'arguments': args}
+        if tool == 'bili_api':
+            method = str(
+                args.get('method') or args.get('name') or args.get('api') or ''
+            )
+            params = args.get('arguments') or args.get('params') or {}
+            if isinstance(params, str):
+                try:
+                    params = json.loads(params)
+                except ValueError:
+                    params = {}
+            if not isinstance(params, dict):
+                params = {}
+            return 'bili_api', {'method': method, 'arguments': params}
+        return tool, args
+
+    @staticmethod
+    def _log_io(tool: str, args: dict, result: Any) -> None:
+        if tool != 'bili_api':
+            return
+        method = str(args.get('method') or '')
+        params = args.get('arguments') or {}
+        if method == 'get_private_messages' and isinstance(result, list) and result:
+            last = result[-1]
+            content = str(last.get('content') or '')[:80]
+            logger.info(f'收到私信 {params.get("talker_id")}: {content}')
+        elif method == 'get_at_messages' and isinstance(result, list) and result:
+            last = result[-1]
+            user = last.get('user') or last.get('nickname') or '网友'
+            content = str(last.get('content') or '')[:80]
+            logger.info(f'收到@{user}: {content}')
+        elif method in {'get_comments', 'get_comment_thread'} and isinstance(result, list) and result:
+            last = result[-1]
+            user = last.get('user') or last.get('nickname') or '网友'
+            content = str(last.get('content') or '')[:80]
+            logger.info(f'收到评论 [{user}]: {content}')
+        elif method == 'post_comment' and result is True:
+            kind = '回复' if params.get('root_rpid') or params.get('parent_rpid') else '评论'
+            logger.info(f'发送{kind}: {str(params.get("text") or "")[:80]}')
+        elif method == 'send_private_message' and result is True:
+            logger.info(
+                f'发送私信 -> {params.get("talker_id")}: '
+                f'{str(params.get("text") or "")[:80]}'
+            )
+
     @staticmethod
     def _action_ok(result: Any) -> bool:
         if result is False:
@@ -75,7 +130,7 @@ class FreeAgent:
     @staticmethod
     def _describe_action(tool: str, args: dict, result: Any) -> str:
         if tool == 'bili_api':
-            method = str(args.get('method') or '')
+            method = str(args.get('method') or '') or '(缺少 method)'
             params = args.get('arguments') or args.get('params') or {}
             target = ''
             for key in ('keyword', 'bvid', 'aid', 'talker_id', 'uid'):
@@ -139,11 +194,13 @@ class FreeAgent:
                 args = decision.get('arguments') or {}
                 if not isinstance(args, dict):
                     args = {}
+                tool, args = self._normalize_call(tool, args)
                 try:
                     result = await self._call_tool(tool, args)
                 except Exception as exc:  # noqa: BLE001
                     result = {'error': str(exc)}
                 actions.append(self._describe_action(tool, args, result))
+                self._log_io(tool, args, result)
                 if (tool == 'bili_api'
                         and str(args.get('method')) == 'post_comment'
                         and result is True):
