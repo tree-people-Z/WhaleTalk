@@ -75,20 +75,52 @@ class FreeAgent:
         names = self.bili_tool.method_names
         if tool != 'bili_api' and tool in names:
             return 'bili_api', {'method': tool, 'arguments': args}
-        if tool == 'bili_api':
-            method = str(
-                args.get('method') or args.get('name') or args.get('api') or ''
-            )
-            params = args.get('arguments') or args.get('params') or {}
-            if isinstance(params, str):
-                try:
-                    params = json.loads(params)
-                except ValueError:
-                    params = {}
-            if not isinstance(params, dict):
+        if tool != 'bili_api':
+            return tool, args
+
+        method = str(
+            args.get('method') or args.get('name') or args.get('api')
+            or args.get('method_name') or ''
+        )
+        params = (
+            args.get('arguments') or args.get('params')
+            or args.get('parameters') or args.get('args') or {}
+        )
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except ValueError:
                 params = {}
-            return 'bili_api', {'method': method, 'arguments': params}
-        return tool, args
+        if not isinstance(params, dict):
+            params = {}
+
+        # Handle malformed shapes such as {"search_videos": {...}} or
+        # {"arguments": {"method": "search_videos", ...}}.
+        if method not in names:
+            for key in ('arguments', 'params', 'parameters', 'payload', 'data'):
+                nested = args.get(key)
+                if isinstance(nested, str):
+                    try:
+                        nested = json.loads(nested)
+                    except ValueError:
+                        nested = None
+                if isinstance(nested, dict):
+                    nested_method = str(nested.get('method') or nested.get('name') or '')
+                    if nested_method in names:
+                        method = nested_method
+                        nested_params = (
+                            nested.get('arguments') or nested.get('params') or {}
+                        )
+                        if isinstance(nested_params, dict):
+                            params = nested_params
+                        break
+            else:
+                method_keys = [key for key in args if key in names]
+                if len(method_keys) == 1:
+                    method = method_keys[0]
+                    value = args.get(method)
+                    params = value if isinstance(value, dict) else {}
+        return 'bili_api', {'method': method, 'arguments': params}
 
     @staticmethod
     def _log_io(tool: str, args: dict, result: Any) -> None:

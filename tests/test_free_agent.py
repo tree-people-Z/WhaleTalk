@@ -99,6 +99,24 @@ class FreeAgentTests(unittest.TestCase):
         self.assertIn('get_x', result['actions'][0])
         self.assertIn('成功', result['actions'][0])
 
+    def test_normalizes_malformed_bili_calls(self):
+        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
+        self.assertEqual(
+            agent._normalize_call('bili_api', {'get_x': {'value': 1}}),
+            ('bili_api', {'method': 'get_x', 'arguments': {'value': 1}}),
+        )
+        self.assertEqual(
+            agent._normalize_call(
+                'bili_api',
+                {'arguments': {'method': 'get_x', 'arguments': {'value': 2}}},
+            ),
+            ('bili_api', {'method': 'get_x', 'arguments': {'value': 2}}),
+        )
+        self.assertEqual(
+            agent._normalize_call('get_x', '{"value": 3}'),
+            ('bili_api', {'method': 'get_x', 'arguments': {'value': 3}}),
+        )
+
     def test_session_history_is_saved(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(str(Path(directory) / 'history.db'))
