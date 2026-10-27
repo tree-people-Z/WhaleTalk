@@ -141,6 +141,15 @@ class AgentSession(Base):
     comments_sent = Column(Integer, default=0)
 
 
+class SearchKeywordRecord(Base):
+    """Search terms actually used, for keyword rotation."""
+    __tablename__ = 'search_keywords'
+
+    id = Column(Integer, primary_key=True)
+    keyword = Column(String(100), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
 class AgentEvent(Base):
     """Persistent inbox state so the same @/comment/DM is handled once."""
     __tablename__ = 'agent_events'
@@ -644,6 +653,19 @@ class Database:
         )
         self.session.commit()
         return int(count or 0)
+
+    def record_search_keyword(self, keyword: str) -> None:
+        keyword = str(keyword or '').strip()
+        if not keyword:
+            return
+        self.session.add(SearchKeywordRecord(keyword=keyword))
+        self.session.commit()
+
+    def get_recent_search_keywords(self, limit: int = 8) -> List[str]:
+        rows = self.session.query(SearchKeywordRecord)\
+            .order_by(SearchKeywordRecord.created_at.desc())\
+            .limit(max(1, int(limit))).all()
+        return [row.keyword for row in rows]
 
     def get_recent_agent_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
         rows = self.session.query(AgentSession)\

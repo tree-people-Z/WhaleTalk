@@ -209,6 +209,24 @@ class FreeAgentTests(unittest.TestCase):
         self.assertIn('本轮实际完成', result['summary'])
         self.assertNotIn('点赞', result['summary'])
 
+    def test_keyword_hint_rotates_after_repeated_search(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'keywords.db'))
+            try:
+                db.record_search_keyword('鲸鱼娘')
+                db.record_search_keyword('鲸鱼娘')
+                config = Mock()
+                config.get.side_effect = lambda key, default=None: (
+                    ['鲸鱼娘', 'DeepSeek娘'] if key == 'search.keywords' else default
+                )
+                agent = FreeAgent(FakeBili(), FakeAI(), db, config)
+                hint = agent._keyword_hint()
+                self.assertIn('DeepSeek娘', hint)
+                self.assertIn('不要连续', hint)
+            finally:
+                db.session.close()
+                db.engine.dispose()
+
     def test_normalizes_malformed_bili_calls(self):
         agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
         self.assertEqual(

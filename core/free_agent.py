@@ -136,11 +136,47 @@ class FreeAgent:
             logger.debug(f'记录事件状态失败: {exc}')
         return new_items
 
+    def _keyword_hint(self) -> str:
+        if self.db is None or not hasattr(self.db, 'get_recent_search_keywords'):
+            return ''
+        try:
+            recent = self.db.get_recent_search_keywords(8)
+        except Exception:  # noqa: BLE001
+            return ''
+        if not isinstance(recent, (list, tuple)):
+            return ''
+        recent = [str(item).strip() for item in recent if str(item).strip()]
+        if not recent:
+            return ''
+        keywords = self.config.get('search.keywords', []) if self.config else []
+        if isinstance(keywords, str):
+            keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
+        if not isinstance(keywords, (list, tuple)):
+            keywords = []
+        keywords = [str(item).strip() for item in keywords if str(item).strip()]
+        recent_short = '、'.join(recent[:4])
+        repeated = len(recent) >= 2 and recent[0] == recent[1]
+        unused = [item for item in keywords if item not in recent[:3]]
+        suggestion = unused[0] if unused else (keywords[0] if keywords else '换一个')
+        if repeated:
+            return (
+                f'# 关键词轮换\n最近连续使用：{recent[0]}。'
+                f'本轮优先尝试「{suggestion}」，不要连续只用同一个关键词；'
+                f'除非有明确理由，才继续用「{recent[0]}」。'
+            )
+        return (
+            f'# 关键词轮换\n最近用过：{recent_short}。'
+            f'本轮优先尝试没出现过的关键词，例如「{suggestion}」。'
+        )
+
     def _system_prompt(self) -> str:
         tools = [self.bili_tool.spec(), INSPECT_VIDEO_TOOL, *DIARY_TOOLS]
         owner = self.config.get('bilibili.owner_name', '') or '未配置'
+        keyword_hint = self._keyword_hint()
+        hint_block = f'{keyword_hint}\n\n' if keyword_hint else ''
         return (
             f'{build_agent_context(self.config)}\n\n'
+            f'{hint_block}'
             f'# 账号\n主人昵称：{owner}\n\n'
             f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
             '# 输出\n'
@@ -701,6 +737,15 @@ class FreeAgent:
                 actions.append(action_text)
                 if self._action_ok(result):
                     successful_actions.append(action_text)
+                if (tool == 'bili_api' and self.db is not None
+                        and str(args.get('method') or '') == 'search_videos'
+                        and isinstance(result, list)):
+                    keyword = str((args.get('arguments') or {}).get('keyword') or '')
+                    if keyword:
+                        try:
+                            self.db.record_search_keyword(keyword)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(f'记录搜索关键词失败: {exc}')
                 self._log_io(tool, args, result)
                 if tool == 'bili_api' and self.db is not None:
                     method = str(args.get('method') or '')
