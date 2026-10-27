@@ -42,6 +42,15 @@ class ConversationAgent:
         tools = list(DIARY_TOOLS)
         if self.bili_tool is not None:
             tools.insert(0, self.bili_tool.spec())
+        tools.append({
+            'name': 'inspect_video',
+            'description': '读取视频标题、字幕、评论和关键帧，用来理解视频内容。只读。',
+            'parameters': {
+                'bvid': 'string',
+                'frames': 'int(可选，0-5，默认2)',
+                'comments': 'int(可选，0-10，默认5)',
+            },
+        })
         if scope == 'dm':
             tools.append({
                 'name': 'reply_dm',
@@ -81,6 +90,10 @@ class ConversationAgent:
             return text
         return f'@{owner} {text}'
 
+    async def _transcribe_audio(self, bvid: str, media_urls: dict):
+        from core.free_agent import FreeAgent
+        return await FreeAgent._transcribe_audio(self, bvid, media_urls)
+
     async def _execute(self, name: str, args: Dict[str, Any], event: Dict[str, Any]) -> Any:
         if name == 'bili_api':
             if self.bili_tool is None:
@@ -91,6 +104,16 @@ class ConversationAgent:
             )
         if name == 'read_diary':
             return read_diary(str(args.get('day') or ''))
+        if name == 'inspect_video':
+            from core.free_agent import FreeAgent
+            try:
+                frames = int(args.get('frames') if args.get('frames') is not None else 2)
+                comments = int(args.get('comments') if args.get('comments') is not None else 5)
+            except (TypeError, ValueError):
+                frames, comments = 2, 5
+            return await FreeAgent.inspect_video(
+                self, str(args.get('bvid') or ''), frames, comments
+            )
         if name == 'write_diary':
             try:
                 path = append_diary(str(args.get('content') or ''))
