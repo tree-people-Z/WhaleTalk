@@ -20,6 +20,10 @@ def setup_logger(log_file: str = "data/logs/bot.log", level: str = "INFO"):
 
     # 窗口化打包（console=False）时没有控制台，sys.stdout 为 None，不能作为 sink。
     if sys.stdout is not None:
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError):
+            pass
         logger.add(
             sys.stdout,
             format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
