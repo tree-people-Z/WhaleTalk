@@ -128,9 +128,17 @@ def build_agent_context(config, diary_days: int = 3) -> str:
         f'# 刷视频偏好\n关键词：{"、".join(keywords) if keywords else "（未设置）"}\n'
         f'每轮大致看 {max_videos} 个视频；最终看多少由你决定。'
     )
+    account = (
+        '# 当前状态\n'
+        '你正在用你自己的 B站账号逛 B站。'
+        '你看到的视频、评论和私信都是真实发生的；你发出的点赞、收藏、评论、回复和私信，'
+        '也会直接用这个账号发出去，别人看到的就是你本人。'
+        '你不是旁观者，也不是只给建议的人。'
+    )
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
         f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
+        f'{account}\n\n'
         f'{preference}'
     )
