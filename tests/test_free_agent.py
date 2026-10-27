@@ -47,6 +47,26 @@ class SequenceAI:
         return '{"action":"finish","reason":"查了一个值"}'
 
 
+class DsmlAI:
+    def __init__(self):
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return (
+                '<\uff5cDSML\uff5c calls>\n'
+                '<\uff5cDSML\uff5c invoke name="bili_api">\n'
+                '<\uff5cDSML\uff5c parameter name="arguments" string="false">'
+                '{"value": 9}</\uff5cDSML\uff5c parameter>\n'
+                '<\uff5cDSML\uff5c parameter name="method" string="true">'
+                'get_x</\uff5cDSML\uff5c parameter>\n'
+                '</\uff5cDSML\uff5c invoke>\n'
+                '</\uff5cDSML\uff5c calls>'
+            )
+        return '{"action":"finish","reason":"完成"}'
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -93,6 +113,14 @@ class FreeAgentTests(unittest.TestCase):
 
     def test_action_log_records_tool_call(self):
         agent = FreeAgent(FakeBili(), SequenceAI(), Mock(), Mock())
+        with patch('core.free_agent.build_agent_context', return_value='人设/日记/记忆'):
+            result = asyncio.run(agent.run_analysis_cycle())
+        self.assertEqual(len(result['actions']), 1)
+        self.assertIn('get_x', result['actions'][0])
+        self.assertIn('成功', result['actions'][0])
+
+    def test_dsml_call_executes_tool(self):
+        agent = FreeAgent(FakeBili(), DsmlAI(), Mock(), Mock())
         with patch('core.free_agent.build_agent_context', return_value='人设/日记/记忆'):
             result = asyncio.run(agent.run_analysis_cycle())
         self.assertEqual(len(result['actions']), 1)
