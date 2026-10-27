@@ -592,17 +592,17 @@ class FreeAgent:
     @staticmethod
     def _summary_mismatch(summary: str, actions: list[str]) -> list[str]:
         actual = '；'.join(actions)
-        claims = {
-            '点赞': ('点赞',),
-            '收藏': ('收藏',),
-            '评论/留言': ('发送评论',),
-            '私信': ('发送私信',),
-            '关注': ('关注',),
-            '弹幕': ('发送弹幕',),
-        }
+        claims = [
+            ('点赞', ('点赞',), ('点赞',)),
+            ('收藏', ('收藏',), ('收藏',)),
+            ('评论/留言', ('评论', '留言'), ('发送评论',)),
+            ('私信', ('私信',), ('发送私信',)),
+            ('关注', ('关注',), ('关注',)),
+            ('弹幕', ('弹幕',), ('发送弹幕',)),
+        ]
         missing = []
-        for claim, markers in claims.items():
-            if claim.split('/')[0] not in summary and '留言' not in summary:
+        for claim, words, markers in claims:
+            if not any(word in summary for word in words):
                 continue
             if not any(marker in actual for marker in markers):
                 missing.append(claim)
