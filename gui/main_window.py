@@ -21,6 +21,7 @@ from gui.login_dialog import LoginDialog
 from gui.settings_page import SettingsPage
 from gui.comments_tab import CommentsTab
 from gui.messages_tab import MessagesTab
+from gui.dashboard_tab import DashboardTab
 from gui.styles import MODERN_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
@@ -165,6 +166,15 @@ class MainWindow(QMainWindow):
         # 标签页
         self.tabs = QTabWidget()
 
+        # 仪表盘标签（新增 - 作为首页）
+        self.dashboard_tab = DashboardTab(
+            self.analyzer, 
+            self.bili_api, 
+            self.config, 
+            self.db
+        )
+        self.tabs.addTab(self.dashboard_tab, "📊 仪表盘")
+
         # 控制台标签
         self.console_tab = self._create_console_tab()
         self.tabs.addTab(self.console_tab, "控制台")
@@ -187,6 +197,10 @@ class MainWindow(QMainWindow):
         self.settings_page.schedule_settings_saved.connect(self.refresh_scheduler_settings)
         self.settings_page.ai_settings_saved.connect(self.refresh_ai_settings)
         self.tabs.addTab(self.settings_page, "设置")
+
+        # 连接仪表盘按钮
+        self.dashboard_tab.run_now_btn.clicked.connect(self.run_once_now)
+        self.dashboard_tab.pause_btn.clicked.connect(self.toggle_auto_run)
 
         layout.addWidget(self.tabs)
         self.tabs.currentChanged.connect(self._on_tab_changed)
