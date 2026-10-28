@@ -659,6 +659,55 @@ class SettingsPage(QWidget):
                 '00:00-09:00,12:00-14:00,18:00-24:00'
             )
         )
+        self._apply_tooltips()
+
+    def _apply_tooltips(self):
+        """给关键设置项补充悬浮说明"""
+        tips = {
+            self.owner_mention_probability_spin: (
+                "@主人概率：只影响主动发评论，不影响回复和私信。\n"
+                "0% 从不 @；35% 约三分之一；100% 每条都 @（可能刷屏）。"
+            ),
+            self.max_comments_spin: (
+                "每天允许发送的评论 + 回复总数，达到后当天停止发送。\n"
+                "B站自身的 12014 冷却仍会生效。"
+            ),
+            self.max_videos_spin: (
+                "每轮大致浏览的视频数量，只是偏好，AI 可以自己决定多看或少看。"
+            ),
+            self.browse_interval_min_spin: (
+                "自动巡视的最短间隔。间隔太短容易触发 B站风控，建议 30 分钟以上。"
+            ),
+            self.browse_interval_max_spin: (
+                "自动巡视的最长间隔，实际会在最小与最大之间随机。"
+            ),
+            self.reply_check_interval_spin: (
+                "多久检查一次新回复、@ 和私信。"
+            ),
+            self.reply_scope_combo: (
+                "只回主人：只回复主人；所有人：网友也可以回复。"
+            ),
+            self.comment_monitor_check: (
+                "开启后才会检测别人对作品的回复和 @。"
+            ),
+            self.auto_reply_check: (
+                "检测到新回复后是否自动发送回复；关闭则只提醒不回复。"
+            ),
+            self.reply_private_messages_check: (
+                "是否自动回复私信。B站官方系统会话会自动跳过。"
+            ),
+            self.video_keywords_input: (
+                "每行一个搜索关键词，AI 会参考这些偏好决定看什么。"
+            ),
+            self.transcription_mode_combo: (
+                "视频没有字幕时，是否用语音识别生成文字。本地模式不上传音频。"
+            ),
+        }
+        for widget, text in tips.items():
+            try:
+                widget.setToolTip(text)
+            except (AttributeError, RuntimeError):
+                continue
 
     def save_settings(self, silent=False):
         """保存设置"""

@@ -891,6 +891,8 @@ class MainWindow(QMainWindow):
         self._update_timer.stop()
         self._update_recheck_timer.stop()
         self._reply_poll_timer.stop()
+        if getattr(self, '_memory_check_timer', None) is not None:
+            self._memory_check_timer.stop()
         self.comments_tab.shutdown()
         self.messages_tab.shutdown()
         if self._update_worker is not None and self._update_worker.isRunning():
@@ -921,5 +923,10 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        self.db.close()
+        if getattr(self, 'tray_icon', None) is not None:
+            self.tray_icon.hide()
+        try:
+            self.db.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'关闭数据库时出错: {exc}')
         event.accept()

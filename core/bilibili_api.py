@@ -643,6 +643,44 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
         logger.error(f"获取视频信息失败 {bvid}: {last_error}")
         return None
 
+    async def get_videos_info_batch(
+        self, bvids: List[str], max_concurrent: int = 5
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        """批量获取视频信息。
+
+        Args:
+            bvids: BV 号列表（自动去重）
+            max_concurrent: 最大并发数，限制在 1-10
+
+        Returns:
+            {bvid: 视频信息或 None}
+        """
+        unique = []
+        seen = set()
+        for item in bvids or []:
+            bvid = str(item or '').strip()
+            if bvid and bvid not in seen:
+                seen.add(bvid)
+                unique.append(bvid)
+        if not unique:
+            return {}
+        try:
+            limit = max(1, min(int(max_concurrent or 5), 10))
+        except (TypeError, ValueError):
+            limit = 5
+        semaphore = asyncio.Semaphore(limit)
+
+        async def fetch_one(bvid: str):
+            async with semaphore:
+                try:
+                    return bvid, await self.get_video_info(bvid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f'批量获取视频失败 {bvid}: {exc}')
+                    return bvid, None
+
+        pairs = await asyncio.gather(*(fetch_one(bvid) for bvid in unique))
+        return {bvid: info for bvid, info in pairs}
+
     async def get_video_info_by_aid(self, aid: int) -> Optional[Dict[str, Any]]:
         """通过 aid 读取视频信息；自由 Agent 发评论时只有 aid。"""
         try:
