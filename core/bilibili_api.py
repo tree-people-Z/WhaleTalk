@@ -18,6 +18,7 @@ from bilibili_api.search import SearchObjectType, OrderVideo
 from core.bilibili_dm import BiliDMMixin
 from core.bilibili_comment import BiliCommentMixin
 from core.bilibili_interact import BiliInteractMixin
+from utils.simple_cache import cached_video
 from loguru import logger
 
 
@@ -614,8 +615,9 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
             'requested_by': 'commenter_upload' if wants_my_video else 'explicit_link',
         }
 
+    @cached_video
     async def get_video_info(self, bvid: str) -> Optional[Dict[str, Any]]:
-        """获取视频详细信息"""
+        """获取视频详细信息（带缓存）"""
         last_error = None
         for attempt in range(2):
             try:
