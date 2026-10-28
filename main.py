@@ -164,6 +164,18 @@ def main():
     main_window = MainWindow()
     main_window.show()
 
+    # 配置检查：不阻塞启动，只在界面提示缺失项，避免首次安装无法进入。
+    try:
+        from utils.config_validator import validate_config
+        valid, message = validate_config(config_manager)
+        if not valid:
+            logger.warning(message)
+            main_window.statusBar.showMessage(
+                "配置不完整，请到「设置」完成 AI / B站配置", 15000
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"配置检查失败: {exc}")
+
     logger.info("主窗口已显示")
 
     # 运行应用

@@ -290,17 +290,25 @@ class DashboardTab(QWidget):
             runtime = ''
 
         if running:
-            self.status_label.setText(f"🟢 {label}")
-            self.status_label.setStyleSheet(
-                "font-size: 20px; font-weight: bold; color: #10b981;"
-            )
-            self.pause_btn.setText("⏸️ 暂停自动运营")
+            icon = "🟢"
+            color = "#10b981"
+        elif "自动运营中" in label:
+            icon = "🕒"
+            color = "#f59e0b"
         else:
-            self.status_label.setText(f"⏸️ {label}")
-            self.status_label.setStyleSheet(
-                "font-size: 20px; font-weight: bold; color: #f59e0b;"
-            )
-            self.pause_btn.setText("▶️ 启动自动运营")
+            icon = "⏸️"
+            color = "#f59e0b"
+        self.status_label.setText(f"{icon} {label}")
+        self.status_label.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {color};"
+        )
+        scheduler_running = bool(
+            state.get('scheduler_running') if state else False
+        )
+        self.pause_btn.setText(
+            "⏸️ 暂停自动运营" if (running or scheduler_running)
+            else "▶️ 启动自动运营"
+        )
 
         self.runtime_label.setText(f"状态: {label}")
         self.next_run_label.setText(f"自动运营: {next_run}" if next_run else "自动运营: 未启动")

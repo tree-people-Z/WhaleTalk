@@ -594,6 +594,7 @@ class MainWindow(QMainWindow):
             'label': label,
             'next_run': next_run,
             'runtime': '',
+            'scheduler_running': bool(self.scheduler and self.scheduler.is_running),
         }
 
     def _dashboard_notifications(self) -> list:
