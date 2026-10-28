@@ -835,11 +835,9 @@ class FreeAgent:
             missing = self._summary_mismatch(summary, successful_actions)
             if missing:
                 logger.warning(
-                    '🐋 模型总结与实际动作不符：提到 '
-                    + '、'.join(missing)
-                    + '，但本轮没有成功的对应动作'
+                    '🐋 模型总结包含未执行的动作，已按实际动作改写'
                 )
-                logger.info(f'🐋 模型自述（未采信）：{summary}')
+                logger.debug(f'🐋 模型原话（未采信）：{summary}')
                 summary = (
                     '本轮实际完成：' + '；'.join(successful_actions)
                     if successful_actions else '本轮没有成功动作'

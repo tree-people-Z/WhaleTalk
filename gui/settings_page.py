@@ -158,6 +158,7 @@ class SettingsPage(QWidget):
         for spin in (
             self.max_comments_spin,
             self.max_videos_spin,
+            self.owner_mention_probability_spin,
             self.browse_interval_min_spin,
             self.browse_interval_max_spin,
             self.reply_check_interval_spin,
@@ -488,6 +489,19 @@ class SettingsPage(QWidget):
         self.reply_private_messages_check = QCheckBox("允许回复私信")
         layout.addWidget(self.reply_private_messages_check)
 
+        mention_layout = QHBoxLayout()
+        mention_layout.addWidget(QLabel("主动评论时 @主人概率:"))
+        self.owner_mention_probability_spin = QSpinBox()
+        self.owner_mention_probability_spin.setRange(0, 100)
+        self.owner_mention_probability_spin.setSuffix("%")
+        mention_layout.addWidget(self.owner_mention_probability_spin)
+        mention_layout.addStretch()
+        layout.addLayout(mention_layout)
+        mention_hint = QLabel("只影响主动发评论，不影响回复评论和私信；100% 表示每条主动评论都 @。")
+        mention_hint.setWordWrap(True)
+        mention_hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(mention_hint)
+
         group.setLayout(layout)
         return group
 
@@ -589,6 +603,15 @@ class SettingsPage(QWidget):
         self.reply_private_messages_check.setChecked(
             self.config.get('interaction.reply_private_messages', True)
         )
+        try:
+            mention_probability = int(
+                self.config.get('interaction.owner_mention_probability', 35)
+            )
+        except (TypeError, ValueError):
+            mention_probability = 35
+        self.owner_mention_probability_spin.setValue(
+            max(0, min(100, mention_probability))
+        )
 
         self.browse_interval_min_spin.setValue(
             self.config.get('schedule.browse_interval_min_minutes', 60)
@@ -651,6 +674,10 @@ class SettingsPage(QWidget):
             self.config.set(
                 'interaction.reply_private_messages',
                 self.reply_private_messages_check.isChecked(),
+            )
+            self.config.set(
+                'interaction.owner_mention_probability',
+                self.owner_mention_probability_spin.value(),
             )
 
             interval_min = self.browse_interval_min_spin.value()
