@@ -142,6 +142,23 @@ class CommentManager:
             logger.error(f"对话 Agent 处理失败: {exc}")
             return False
 
+    async def _ensure_video_title(self, bvid: str, aid: int) -> None:
+        """Keep a title row so reply history never falls back to a BV id."""
+        bvid = str(bvid or '').strip()
+        if not bvid or not hasattr(self.bili, 'get_video_info'):
+            return
+        try:
+            info = await self.bili.get_video_info(bvid)
+            if info:
+                self.db.ensure_video_record(
+                    bvid,
+                    int(info.get('aid') or aid or 0),
+                    str(info.get('title') or ''),
+                    str(info.get('owner') or ''),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'补全回复视频标题失败 {bvid}: {exc}')
+
     async def _send_agent_video_comment(
         self, event: Dict[str, Any], bvid: str, text: str
     ) -> bool:
@@ -172,6 +189,7 @@ class CommentManager:
                 rpid=rpid,
                 thread_root=rpid,
             )
+            await self._ensure_video_title(bvid, aid)
             try:
                 self.db.add_memory_event(
                     'comment',
@@ -221,6 +239,7 @@ class CommentManager:
                 target_user=event.get('user') or '',
                 parent_content=event.get('content') or '',
             )
+            await self._ensure_video_title(event.get('bvid', ''), aid)
             try:
                 self.db.add_memory_event(
                     'reply',
