@@ -34,6 +34,8 @@ class ConversationAgent:
         self.db = db
         self.ai = ai_client
         self.config = config
+        self.self_uid = None
+        self.self_name = ''
         self.send_reply = send_reply
         self.send_dm = send_dm
         self.send_video_comment = send_video_comment
@@ -134,6 +136,13 @@ class ConversationAgent:
 
     async def handle(self, event: Dict[str, Any]) -> bool:
         """Return True when a reply was sent."""
+        try:
+            if hasattr(self.bili, 'get_self_info') and not self.self_uid:
+                self_info = await self.bili.get_self_info() or {}
+                self.self_uid = self_info.get('uid') or self.self_uid
+                self.self_name = self_info.get('name') or self.self_name
+        except Exception:  # noqa: BLE001
+            pass
         if event.get('images'):
             from core.comment_images import describe_comment_images
             await describe_comment_images([event], self.ai, max_images=2)

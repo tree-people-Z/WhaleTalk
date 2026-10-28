@@ -370,7 +370,8 @@ class FreeAgent:
             'owner': str(info.get('owner') or ''),
             'owner_mid': info.get('owner_mid'),
             'is_own': bool(
-                self.self_uid and str(info.get('owner_mid') or '') == str(self.self_uid)
+                getattr(self, 'self_uid', None)
+                and str(info.get('owner_mid') or '') == str(self.self_uid)
             ),
             'duration': info.get('duration'),
             'description': str(info.get('desc') or '')[:1000],
