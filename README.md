@@ -34,11 +34,10 @@
 
 | 文件 | 适合谁 | 怎么用 |
 |---|---|---|
-| `WhaleTalk-Windows-x64-single.exe` | 大多数人，最省事 | 下载后双击；首次启动会解压内置 ffmpeg，可能慢几秒 |
-| `WhaleTalk-Windows-x64.zip` | 单文件被拦截、启动失败，或想方便备份 | **完整解压**后运行 `WhaleTalk\WhaleTalk.exe` |
+| `WhaleTalk-Windows-x64.zip` | 所有人（本版仅提供便携包） | **完整解压**后运行 `WhaleTalk\WhaleTalk.exe` |
 
-> 两个包功能完全一样，**都已内置 ffmpeg**，不需要安装 Python 或 FFmpeg。  
-> 单文件版首次打开若遇到 SmartScreen，点“更多信息 → 仍要运行”。  
+> 便携包已内置 ffmpeg，不需要安装 Python 或 FFmpeg。
+> 单文件版在部分机器上首次解压会卡住，本版暂不提供；请使用 ZIP 便携包。
 > 系统要求：64 位 Windows 10（1903+）或 Windows 11。
 
 ## 三分钟上手
@@ -96,9 +95,9 @@
 ## 常见问题
 
 <details>
-<summary><b>单文件 exe 打不开 / 被杀软拦截</b></summary>
+<summary><b>下载后怎么运行 / 被杀软拦截</b></summary>
 <br>
-改用 ZIP 版，完整解压后运行 <code>WhaleTalk.exe</code>。单文件版需要系统临时目录可写；受限电脑也可能拦截，这时 ZIP 更稳。
+下载 ZIP 后<strong>完整解压</strong>，运行 <code>WhaleTalk\WhaleTalk.exe</code>。不要直接在压缩包里双击；首次启动会创建 <code>data/</code> 目录。
 </details>
 
 <details>
