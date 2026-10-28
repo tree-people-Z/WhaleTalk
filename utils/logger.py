@@ -42,7 +42,10 @@ def setup_logger(log_file: str = "data/logs/bot.log", level: str = "INFO"):
         rotation="10 MB",  # 文件大小超过10MB时轮转
         retention="7 days",  # 保留7天
         compression="zip",  # 压缩旧日志
-        encoding="utf-8"
+        encoding="utf-8",
+        enqueue=True,  # 异步写入，避免阻塞主线程
+        backtrace=False,
+        diagnose=False,
     )
 
     logger.info(f"日志系统已初始化: {log_file}")

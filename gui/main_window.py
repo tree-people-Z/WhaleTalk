@@ -287,6 +287,8 @@ class MainWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         self.log_text.setObjectName("logText")
         self.log_text.setFont(QFont("Consolas", 9))
+        # 只保留最近 3000 行，避免日志越积越多导致界面卡顿
+        self.log_text.document().setMaximumBlockCount(3000)
         log_layout.addWidget(self.log_text)
 
         log_group.setLayout(log_layout)

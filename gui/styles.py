@@ -1,4 +1,4 @@
-﻿"""统一的现代浅色界面主题。"""
+"""统一的现代浅色界面主题。"""
 
 MODERN_STYLE = """
 QMainWindow, QWidget {
@@ -94,6 +94,25 @@ QCheckBox { spacing: 10px; color: #34445e; padding: 5px 0; }
 QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #cbd6e3; border-radius: 5px; background: #ffffff; }
 QCheckBox::indicator:hover { border-color: #5a9c98; }
 QCheckBox::indicator:checked { background: #287c78; border-color: #287c78; }
+
+QListWidget#settingsNav {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 4px;
+}
+QListWidget#settingsNav::item {
+    padding: 11px 12px;
+    border-radius: 8px;
+    color: #4b5b73;
+    margin: 2px 0;
+}
+QListWidget#settingsNav::item:hover { background: #edf2f7; }
+QListWidget#settingsNav::item:selected {
+    background: #e2f0ef;
+    color: #245f5c;
+    font-weight: 600;
+}
 
 QTableWidget {
     background-color: #ffffff;

@@ -4,7 +4,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QListWidget, QSpinBox, QProgressBar
+    QPushButton, QListWidget, QSpinBox, QProgressBar, QScrollArea
 )
 from PyQt6.QtCore import QTimer, Qt
 from datetime import datetime, timedelta
@@ -24,13 +24,24 @@ class DashboardTab(QWidget):
     
     def init_ui(self):
         """初始化UI"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
+        # 外层只放滚动区域：窗口变小时滚动，而不是把控件压扁重叠
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(14)
+        layout.setContentsMargins(18, 18, 18, 18)
+
         # 1. 顶部状态卡片区
         status_layout = QHBoxLayout()
-        status_layout.setSpacing(16)
+        status_layout.setSpacing(14)
         
         # 运行状态卡片
         self.status_card = self._create_status_card()
@@ -55,6 +66,9 @@ class DashboardTab(QWidget):
         layout.addWidget(notifications_group)
         
         layout.addStretch()
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
         
         # 定时更新
         self.update_timer = QTimer(self)
@@ -67,6 +81,8 @@ class DashboardTab(QWidget):
     def _create_status_card(self):
         """创建运行状态卡片"""
         card = QGroupBox("🔄 运行状态")
+        card.setMinimumWidth(300)
+        card.setMinimumHeight(150)
         layout = QVBoxLayout()
         layout.setSpacing(8)
         
@@ -93,6 +109,8 @@ class DashboardTab(QWidget):
     def _create_stats_card(self):
         """创建统计卡片"""
         card = QGroupBox("📊 今日活跃")
+        card.setMinimumWidth(300)
+        card.setMinimumHeight(150)
         layout = QVBoxLayout()
         layout.setSpacing(8)
         
@@ -184,7 +202,8 @@ class DashboardTab(QWidget):
         layout = QVBoxLayout()
         
         self.recent_list = QListWidget()
-        self.recent_list.setMaximumHeight(120)
+        self.recent_list.setMinimumHeight(90)
+        self.recent_list.setMaximumHeight(140)
         self.recent_list.setStyleSheet(
             "QListWidget { border: 1px solid #e4eaf2; border-radius: 6px; }"
             "QListWidget::item { padding: 8px; }"
@@ -200,7 +219,8 @@ class DashboardTab(QWidget):
         layout = QVBoxLayout()
         
         self.notification_list = QListWidget()
-        self.notification_list.setMaximumHeight(100)
+        self.notification_list.setMinimumHeight(70)
+        self.notification_list.setMaximumHeight(110)
         self.notification_list.setStyleSheet(
             "QListWidget { border: 1px solid #e4eaf2; border-radius: 6px; }"
             "QListWidget::item { padding: 8px; }"

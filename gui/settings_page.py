@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QGroupBox, QComboBox, QTextEdit, QLabel,
-    QMessageBox, QScrollArea
+    QMessageBox, QScrollArea, QStackedWidget, QListWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal, QThread
@@ -218,64 +218,106 @@ class SettingsPage(QWidget):
         except Exception as e:
             logger.error(f"自动保存设置失败: {e}")
 
-    def init_ui(self):
-        """初始化UI"""
-        # 主布局
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-
-        # 创建滚动区域
+    def _make_settings_page(self, widgets) -> QScrollArea:
+        """把一组设置分区包成一个可滚动页面"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # 滚动区域内容
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(12)
         layout.setContentsMargins(14, 14, 14, 14)
+        for widget in widgets:
+            layout.addWidget(widget)
+        layout.addStretch()
 
-        # B站设置
-        bili_group = self._create_bilibili_section()
-        layout.addWidget(bili_group)
+        for box in content.findChildren(QGroupBox):
+            box_layout = box.layout()
+            if box_layout is not None:
+                box_layout.setSpacing(10)
+        for form in content.findChildren(QFormLayout):
+            form.setVerticalSpacing(12)
+            form.setHorizontalSpacing(18)
+            form.setLabelAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
 
-        # 人设设置
-        persona_group = self._create_persona_section()
-        layout.addWidget(persona_group)
+        scroll.setWidget(content)
+        return scroll
 
-        # AI设置
-        ai_group = self._create_ai_section()
-        layout.addWidget(ai_group)
+    def _switch_settings_page(self, index: int):
+        """左侧导航切换设置页"""
+        if 0 <= index < self.page_stack.count():
+            self.page_stack.setCurrentIndex(index)
 
-        # 刷视频偏好
-        video_group = self._create_video_preferences_section()
-        layout.addWidget(video_group)
+    def init_ui(self):
+        """初始化UI"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        # 限制设置
-        limits_group = self._create_limits_section()
-        layout.addWidget(limits_group)
+        body = QHBoxLayout()
+        body.setSpacing(12)
 
-        # 高级功能设置
-        advanced_group = self._create_advanced_section()
-        layout.addWidget(advanced_group)
+        # 左侧导航
+        self.nav_list = QListWidget()
+        self.nav_list.setObjectName("settingsNav")
+        self.nav_list.setFixedWidth(148)
+        self.nav_list.setSpacing(2)
+        for item in (
+            "👤 账号与人设",
+            "🤖 AI 与运行",
+            "📹 刷视频",
+            "💬 互动与私信",
+            "ℹ️ 关于与更新",
+        ):
+            self.nav_list.addItem(item)
+        self.nav_list.currentRowChanged.connect(self._switch_settings_page)
+        body.addWidget(self.nav_list)
 
+        # 右侧分页
+        self.page_stack = QStackedWidget()
+        body.addWidget(self.page_stack, 1)
+
+        # 第 1 页：账号与人设
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_bilibili_section(),
+            self._create_persona_section(),
+        ]))
+
+        # 第 2 页：AI 与运行
         schedule_group = self._create_schedule_section()
-        schedule_group.setVisible(False)
+        schedule_group.setVisible(True)
         self.schedule_group = schedule_group
-        self.schedule_toggle_btn = QPushButton("显示自动运行与闲时设置")
-        self.schedule_toggle_btn.setCheckable(True)
-        self.schedule_toggle_btn.toggled.connect(self._toggle_schedule_panel)
-        layout.addWidget(self.schedule_toggle_btn)
-        layout.addWidget(schedule_group)
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_ai_section(),
+            self._create_limits_section(),
+            schedule_group,
+        ]))
 
-        about_group = self._create_about_section()
-        layout.addWidget(about_group)
+        # 第 3 页：刷视频
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_video_preferences_section(),
+        ]))
 
+        # 第 4 页：互动与私信
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_advanced_section(),
+        ]))
+
+        # 第 5 页：关于与更新
         self.auto_run_btn = QPushButton("⏰ 启动自动运营")
         self.auto_run_btn.setMinimumHeight(40)
-        layout.addWidget(self.auto_run_btn)
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_about_section(),
+            self.auto_run_btn,
+        ]))
 
-        # 按钮
+        main_layout.addLayout(body, 1)
+
+        # 底部按钮（始终可见）
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -290,24 +332,10 @@ class SettingsPage(QWidget):
         reset_btn.setMinimumHeight(40)
         btn_layout.addWidget(reset_btn)
 
-        layout.addLayout(btn_layout)
-        layout.addStretch()
+        main_layout.addLayout(btn_layout)
 
-        # 增加表单间距和标签对齐，降低界面文字拥挤感。
-        for box in content_widget.findChildren(QGroupBox):
-            box_layout = box.layout()
-            if box_layout is not None:
-                box_layout.setSpacing(10)
-        for form in content_widget.findChildren(QFormLayout):
-            form.setVerticalSpacing(12)
-            form.setHorizontalSpacing(18)
-            form.setLabelAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-
-        # 设置滚动区域
-        scroll.setWidget(content_widget)
-        main_layout.addWidget(scroll)
+        self.nav_list.setCurrentRow(0)
+        self.page_stack.setCurrentIndex(0)
 
     def _create_bilibili_section(self) -> QGroupBox:
         """创建B站设置区域"""
