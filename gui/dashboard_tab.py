@@ -132,15 +132,19 @@ class DashboardTab(QWidget):
         
         self.run_now_btn = QPushButton("▶️ 立即运行一轮")
         self.run_now_btn.setMinimumHeight(45)
+        self.run_now_btn.setMinimumWidth(150)
         self.run_now_btn.setStyleSheet(
-            "background-color: #10b981; color: white; font-weight: bold;"
+            "QPushButton { background-color: #10b981; color: white; "
+            "font-weight: bold; font-size: 13px; }"
         )
         control_layout.addWidget(self.run_now_btn)
         
         self.pause_btn = QPushButton("⏸️ 暂停自动运营")
         self.pause_btn.setMinimumHeight(45)
+        self.pause_btn.setMinimumWidth(150)
         self.pause_btn.setStyleSheet(
-            "background-color: #f59e0b; color: white; font-weight: bold;"
+            "QPushButton { background-color: #f59e0b; color: white; "
+            "font-weight: bold; font-size: 13px; }"
         )
         control_layout.addWidget(self.pause_btn)
         
@@ -148,7 +152,10 @@ class DashboardTab(QWidget):
         
         # 第二行：@主人概率调整
         mention_layout = QHBoxLayout()
-        mention_layout.addWidget(QLabel("@主人概率:"))
+        
+        mention_label = QLabel("@主人概率:")
+        mention_label.setMinimumWidth(80)
+        mention_layout.addWidget(mention_label)
         
         self.mention_spin = QSpinBox()
         self.mention_spin.setRange(0, 100)
@@ -157,14 +164,15 @@ class DashboardTab(QWidget):
             self.config.get('interaction.owner_mention_probability', 35)
         )
         self.mention_spin.setMinimumHeight(35)
+        self.mention_spin.setMinimumWidth(80)
         self.mention_spin.valueChanged.connect(self._update_mention_probability)
         mention_layout.addWidget(self.mention_spin)
         
         mention_hint = QLabel("（影响主动评论，不影响回复）")
-        mention_hint.setStyleSheet("color: #64748b; font-size: 12px;")
-        mention_layout.addWidget(mention_hint)
+        mention_hint.setStyleSheet("color: #64748b; font-size: 11px;")
+        mention_hint.setWordWrap(True)
+        mention_layout.addWidget(mention_hint, 1)  # 可伸缩
         
-        mention_layout.addStretch()
         layout.addLayout(mention_layout)
         
         group.setLayout(layout)
