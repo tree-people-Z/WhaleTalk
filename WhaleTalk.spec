@@ -158,6 +158,8 @@ if ONEFILE:
         codesign_identity=None,
         entitlements_file=None,
         icon=str(project_root / "assets" / "whale-assistant.ico"),
+        # 单文件版解压到 exe 同级目录，避免部分机器 TEMP 不可写/被杀软拦截。
+        runtime_tmpdir="WhaleTalkRuntime",
     )
 else:
     exe = EXE(
