@@ -137,7 +137,7 @@ class FreeAgent:
             new_records.append(record)
         try:
             self.db.deliver_agent_events(new_records)
-        except Exception as exc:  # noqa: BLE001
+        except (AttributeError, TypeError, ValueError) as exc:
             logger.debug(f'记录事件状态失败: {exc}')
         return new_items
 
@@ -146,7 +146,7 @@ class FreeAgent:
             return ''
         try:
             recent = self.db.get_recent_search_keywords(8)
-        except Exception:  # noqa: BLE001
+        except (AttributeError, TypeError, RuntimeError):
             return ''
         if not isinstance(recent, (list, tuple)):
             return ''
@@ -858,8 +858,8 @@ class FreeAgent:
                 self.db.add_agent_session(
                     summary, actions, comments, self.bili_tool.video_refs
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f'记录 Agent 运行历史失败: {exc}')
+            except (AttributeError, TypeError, ValueError) as exc:
+                logger.warning(f'记录 Agent 运行历史失败: {exc}')
         return {
             'status': 'success',
             'videos_found': 0,

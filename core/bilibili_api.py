@@ -41,7 +41,7 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
             from bilibili_api import request_settings
             request_settings.set_enable_auto_buvid(True)
             request_settings.set_enable_bili_ticket(False)
-        except Exception as exc:  # noqa: BLE001
+        except (ImportError, AttributeError) as exc:
             logger.debug(f"配置 B 站请求参数失败: {exc}")
 
         # 风控状态
@@ -317,7 +317,7 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
                             self.credential.ac_time_value or '',
                         )
                         logger.info("已补充 buvid4 风控参数")
-                except Exception as exc:  # noqa: BLE001
+                except (AttributeError, TypeError, ValueError) as exc:
                     logger.debug(f"补充 buvid4 失败: {exc}")
             info = await user.get_self_info(credential=self.credential)
             if not isinstance(info, dict) or not info.get('name'):
