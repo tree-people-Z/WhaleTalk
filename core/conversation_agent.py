@@ -7,6 +7,7 @@ from loguru import logger
 
 from core.bili_tool import BiliTool
 from core.free_context import DIARY_TOOLS, append_diary, build_agent_context, read_diary
+from core.system_prompts import load_prompt
 
 MAX_STEPS = 8
 THREAD_COOLDOWN_MINUTES = 10
@@ -72,11 +73,7 @@ class ConversationAgent:
             f'{build_agent_context(self.config)}\n\n'
             f'# 账号\n主人昵称：{owner}\n\n'
             f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
-            '# 输出\n'
-            '每步只输出一个 JSON：\n'
-            '{"action":"tool","tool":"工具名","arguments":{...}}\n'
-            '或 {"action":"reply","text":"..."}\n'
-            '或 {"action":"finish","reason":"不回"}。'
+            f'# 输出\n{load_prompt("conversation_output")}'
         )
 
     @staticmethod

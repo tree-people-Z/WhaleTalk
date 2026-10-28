@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.long_term_memory import load_memory
+from core.system_prompts import load_prompt
 from utils.persona_defaults import load_configured_persona
 
 DIARY_DIR = Path('data') / 'diaries' / 'to_owner'
@@ -128,20 +129,14 @@ def build_agent_context(config, diary_days: int = 3) -> str:
         f'# 刷视频偏好\n关键词：{"、".join(keywords) if keywords else "（未设置）"}\n'
         f'每轮大致看 {max_videos} 个视频；最终看多少由你决定。'
     )
-    account = (
-        '# 当前状态\n'
+    account = '# 当前状态\n' + (load_prompt('current_state') or (
         '你正在用你自己的 B站账号逛 B站。'
-        '你看到的视频、评论和私信都是真实发生的；你发出的点赞、收藏、评论、回复和私信，'
-        '也会直接用这个账号发出去，别人看到的就是你本人。'
-        '你不是旁观者，也不是只给建议的人。'
-    )
+    ))
     owner = config.get('bilibili.owner_name', '') if config is not None else ''
     share_target = f'@{owner}' if str(owner or '').strip() else '@主人'
-    share = (
-        '# 和主人分享\n'
-        f'遇到有意思或者想和主人分享的视频，可以 {share_target}。'
-        '这是主动分享时允许 @ 主人的例外，不算乱艾特。'
-    )
+    share = '# 和主人分享\n' + (load_prompt(
+        'owner_share', owner_mention=share_target
+    ) or f'遇到有意思或者想和主人分享的视频，可以 {share_target}。')
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'

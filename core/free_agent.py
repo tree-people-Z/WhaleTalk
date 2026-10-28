@@ -19,6 +19,7 @@ from core.free_context import (
     build_agent_context,
     read_diary,
 )
+from core.system_prompts import load_prompt
 
 MAX_STEPS = 12
 
@@ -177,13 +178,7 @@ class FreeAgent:
             '就是你自己的视频/评论。在自己的视频下面互动时，不要把它说成别人的视频。\n\n'
             f'# 账号\n主人昵称：{owner}\n\n'
             f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
-            '# 输出\n'
-            '每步只输出一个 JSON：\n'
-            '{"action":"tool","tool":"工具名","arguments":{...}}\n'
-            '或 {"action":"finish","reason":"这一轮做了什么/为什么不做"}\n'
-            '工具结果会返回给你。最多 12 步。\n'
-            'finish 的 reason 只能描述本轮实际调用过的工具；没有调用工具就写“本轮没有操作”，'
-            '不要复述日记或之前的轮次。'
+            f'# 输出\n{load_prompt("free_agent_output")}'
         )
 
     @staticmethod
