@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QProgressDialog, QApplication,
     QSystemTrayIcon, QMenu
 )
-from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction, QPalette
 from PyQt6.QtCore import QUrl
 from loguru import logger
@@ -153,9 +153,6 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(1040, 760)
 
-        # 应用现代化样式
-        self.setStyleSheet(MODERN_STYLE)
-
         # 主布局
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -169,6 +166,7 @@ class MainWindow(QMainWindow):
 
         # 标签页
         self.tabs = QTabWidget()
+        self.tabs.setIconSize(QSize(18, 18))
 
         # 仪表盘标签（新增 - 作为首页）
         self.dashboard_tab = DashboardTab(

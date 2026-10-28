@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QScrollArea, QStackedWidget, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtCore import pyqtSignal, QThread
+from PyQt6.QtCore import pyqtSignal, QThread, QSize
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 from loguru import logger
@@ -269,6 +269,7 @@ class SettingsPage(QWidget):
         self.nav_list.setObjectName("settingsNav")
         self.nav_list.setFixedWidth(166)
         self.nav_list.setSpacing(2)
+        self.nav_list.setIconSize(QSize(20, 20))
         for label, icon_name in (
             ("账号与人设", "user"),
             ("AI 与运行", "ai"),
