@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction, QPalette
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
@@ -23,7 +23,7 @@ from gui.comments_tab import CommentsTab
 from gui.messages_tab import MessagesTab
 from gui.dashboard_tab import DashboardTab
 from gui.icons import load_icon
-from gui.styles import MODERN_STYLE, DARK_STYLE
+from gui.styles import MODERN_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
@@ -103,7 +103,7 @@ class MainWindow(QMainWindow):
         self._tray_hint_shown = False
         self.tray_icon = None
         self._setup_tray()
-        self.apply_theme(self.config.get('ui.theme', 'light'))
+        self.apply_theme()
         self.log_message_received.connect(self._append_runtime_log)
         self._gui_log_sink_id = logger.add(
             lambda message: self.log_message_received.emit(str(message).rstrip()),
@@ -198,7 +198,6 @@ class MainWindow(QMainWindow):
         self.settings_page.auto_run_btn.clicked.connect(self.toggle_auto_run)
         self.settings_page.schedule_settings_saved.connect(self.refresh_scheduler_settings)
         self.settings_page.ai_settings_saved.connect(self.refresh_ai_settings)
-        self.settings_page.theme_changed.connect(self.apply_theme)
         self.tabs.addTab(self.settings_page, load_icon('settings'), "设置")
 
         # 连接仪表盘按钮
@@ -911,12 +910,9 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         show_action = QAction("显示主窗口", self)
         show_action.triggered.connect(self._show_from_tray)
-        theme_action = QAction("切换深色/浅色", self)
-        theme_action.triggered.connect(self.toggle_theme)
         quit_action = QAction("退出鲸语", self)
         quit_action.triggered.connect(self._quit_from_tray)
         menu.addAction(show_action)
-        menu.addAction(theme_action)
         menu.addSeparator()
         menu.addAction(quit_action)
         self.tray_icon.setContextMenu(menu)
@@ -940,36 +936,14 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.instance().quit()
 
-    def apply_theme(self, theme: str):
-        """应用浅色/深色主题。theme: light / dark / system"""
+    def apply_theme(self):
+        """应用浅色界面主题。"""
         try:
             app = QApplication.instance()
-            if app is None:
-                return
-            mode = str(theme or 'light').strip().lower()
-            if mode == 'system':
-                color = app.palette().color(QPalette.ColorRole.Window)
-                resolved = 'dark' if color.lightness() < 128 else 'light'
-            else:
-                resolved = 'dark' if mode == 'dark' else 'light'
-            app.setStyleSheet(DARK_STYLE if resolved == 'dark' else MODERN_STYLE)
-            self._active_theme = mode
-            self._resolved_theme = resolved
-            if hasattr(self, 'settings_page'):
-                self.settings_page.sync_theme_selection(mode)
+            if app is not None:
+                app.setStyleSheet(MODERN_STYLE)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f'应用主题失败: {exc}')
-
-    def toggle_theme(self):
-        """托盘菜单快速切换深浅色。"""
-        current = getattr(self, '_resolved_theme', 'light')
-        new_theme = 'light' if current == 'dark' else 'dark'
-        try:
-            self.config.set('ui.theme', new_theme)
-            self.config.save()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f'保存主题失败: {exc}')
-        self.apply_theme(new_theme)
 
     def closeEvent(self, event):
         """关闭窗口：默认隐藏到托盘继续运行；托盘菜单“退出”才真正结束。"""

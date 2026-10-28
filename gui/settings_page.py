@@ -145,7 +145,6 @@ class SettingsPage(QWidget):
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
-    theme_changed = pyqtSignal(str)
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -275,7 +274,6 @@ class SettingsPage(QWidget):
             ("AI 与运行", "ai"),
             ("刷视频", "video"),
             ("互动与私信", "chat"),
-            ("外观主题", "palette"),
             ("关于与更新", "info"),
         ):
             item = QListWidgetItem(load_icon(icon_name), label)
@@ -313,12 +311,7 @@ class SettingsPage(QWidget):
             self._create_advanced_section(),
         ]))
 
-        # 第 5 页：外观主题
-        self.page_stack.addWidget(self._make_settings_page([
-            self._create_appearance_section(),
-        ]))
-
-        # 第 6 页：关于与更新
+        # 第 5 页：关于与更新
         self.auto_run_btn = QPushButton("启动自动运营")
         self.auto_run_btn.setIcon(load_icon('play'))
         self.auto_run_btn.setMinimumHeight(40)
@@ -475,47 +468,6 @@ class SettingsPage(QWidget):
 
         group.setLayout(layout)
         return group
-
-    def _create_appearance_section(self) -> QGroupBox:
-        """创建外观主题区域"""
-        group = QGroupBox("外观主题")
-        layout = QFormLayout()
-
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItem("浅色", "light")
-        self.theme_combo.addItem("深色", "dark")
-        self.theme_combo.addItem("跟随系统", "system")
-        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        layout.addRow("界面主题:", self.theme_combo)
-
-        hint = QLabel(
-            "深色主题适合夜间使用；托盘右键菜单也可以快速切换深浅色。"
-        )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888; font-size: 12px;")
-        layout.addRow("", hint)
-
-        group.setLayout(layout)
-        return group
-
-    def _on_theme_changed(self):
-        mode = self.theme_combo.currentData() or 'light'
-        try:
-            self.config.set('ui.theme', mode)
-            self.config.save()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f'保存主题失败: {exc}')
-        self.theme_changed.emit(mode)
-
-    def sync_theme_selection(self, mode: str):
-        """托盘切换主题时同步下拉框，不重复触发保存。"""
-        if not hasattr(self, 'theme_combo'):
-            return
-        index = self.theme_combo.findData(str(mode or 'light'))
-        if index >= 0 and index != self.theme_combo.currentIndex():
-            self.theme_combo.blockSignals(True)
-            self.theme_combo.setCurrentIndex(index)
-            self.theme_combo.blockSignals(False)
 
     def _create_about_section(self) -> QGroupBox:
         """创建关于与更新区域"""
@@ -716,14 +668,6 @@ class SettingsPage(QWidget):
                 '00:00-09:00,12:00-14:00,18:00-24:00'
             )
         )
-        try:
-            theme_index = self.theme_combo.findData(
-                self.config.get('ui.theme', 'light')
-            )
-            if theme_index >= 0:
-                self.theme_combo.setCurrentIndex(theme_index)
-        except (TypeError, ValueError):
-            pass
         self._apply_tooltips()
 
     def _apply_tooltips(self):
@@ -821,9 +765,6 @@ class SettingsPage(QWidget):
                 'interaction.owner_mention_probability',
                 self.owner_mention_probability_spin.value(),
             )
-            self.config.set(
-                'ui.theme', self.theme_combo.currentData() or 'light'
-            )
 
             interval_min = self.browse_interval_min_spin.value()
             interval_max = self.browse_interval_max_spin.value()
@@ -837,7 +778,6 @@ class SettingsPage(QWidget):
             )
             self.schedule_settings_saved.emit()
             self.ai_settings_saved.emit()
-            self.theme_changed.emit(self.theme_combo.currentData() or 'light')
 
             if not silent:
                 QMessageBox.information(self, "成功", "设置已保存并立即生效！")
