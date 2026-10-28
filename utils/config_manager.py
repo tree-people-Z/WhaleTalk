@@ -181,6 +181,9 @@ class ConfigManager:
                 "min_score_to_comment": 10,
                 "min_score_to_mention_owner": 13
             },
+            "ui": {
+                "theme": "light"
+            },
             "interaction": {
                 "auto_comment": True,
                 "auto_like_commented_video": False,

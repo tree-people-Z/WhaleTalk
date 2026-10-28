@@ -10,13 +10,15 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QGroupBox, QComboBox, QTextEdit, QLabel,
-    QMessageBox, QScrollArea, QStackedWidget, QListWidget
+    QMessageBox, QScrollArea, QStackedWidget, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal, QThread
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 from loguru import logger
+
+from gui.icons import load_icon
 
 from utils.config_manager import ConfigManager
 from utils.reply_scope import apply_reply_scope, resolve_reply_scope
@@ -143,6 +145,7 @@ class SettingsPage(QWidget):
     ai_settings_saved = pyqtSignal()
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
+    theme_changed = pyqtSignal(str)
 
     def __init__(self, config: ConfigManager):
         super().__init__()
@@ -264,15 +267,17 @@ class SettingsPage(QWidget):
         # 左侧导航
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("settingsNav")
-        self.nav_list.setFixedWidth(148)
+        self.nav_list.setFixedWidth(166)
         self.nav_list.setSpacing(2)
-        for item in (
-            "👤 账号与人设",
-            "🤖 AI 与运行",
-            "📹 刷视频",
-            "💬 互动与私信",
-            "ℹ️ 关于与更新",
+        for label, icon_name in (
+            ("账号与人设", "user"),
+            ("AI 与运行", "ai"),
+            ("刷视频", "video"),
+            ("互动与私信", "chat"),
+            ("外观主题", "palette"),
+            ("关于与更新", "info"),
         ):
+            item = QListWidgetItem(load_icon(icon_name), label)
             self.nav_list.addItem(item)
         self.nav_list.currentRowChanged.connect(self._switch_settings_page)
         body.addWidget(self.nav_list)
@@ -307,8 +312,14 @@ class SettingsPage(QWidget):
             self._create_advanced_section(),
         ]))
 
-        # 第 5 页：关于与更新
-        self.auto_run_btn = QPushButton("⏰ 启动自动运营")
+        # 第 5 页：外观主题
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_appearance_section(),
+        ]))
+
+        # 第 6 页：关于与更新
+        self.auto_run_btn = QPushButton("启动自动运营")
+        self.auto_run_btn.setIcon(load_icon('play'))
         self.auto_run_btn.setMinimumHeight(40)
         self.page_stack.addWidget(self._make_settings_page([
             self._create_about_section(),
@@ -321,13 +332,15 @@ class SettingsPage(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        save_btn = QPushButton("💾 保存设置")
+        save_btn = QPushButton("保存设置")
+        save_btn.setIcon(load_icon('save'))
         save_btn.clicked.connect(self.save_settings)
         save_btn.setMinimumHeight(40)
         save_btn.setStyleSheet("font-size: 14px; font-weight: 600;")
         btn_layout.addWidget(save_btn)
 
-        reset_btn = QPushButton("🔄 恢复默认")
+        reset_btn = QPushButton("恢复默认")
+        reset_btn.setIcon(load_icon('reset'))
         reset_btn.clicked.connect(self.reset_to_default)
         reset_btn.setMinimumHeight(40)
         btn_layout.addWidget(reset_btn)
@@ -462,6 +475,47 @@ class SettingsPage(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_appearance_section(self) -> QGroupBox:
+        """创建外观主题区域"""
+        group = QGroupBox("外观主题")
+        layout = QFormLayout()
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("浅色", "light")
+        self.theme_combo.addItem("深色", "dark")
+        self.theme_combo.addItem("跟随系统", "system")
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        layout.addRow("界面主题:", self.theme_combo)
+
+        hint = QLabel(
+            "深色主题适合夜间使用；托盘右键菜单也可以快速切换深浅色。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addRow("", hint)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_theme_changed(self):
+        mode = self.theme_combo.currentData() or 'light'
+        try:
+            self.config.set('ui.theme', mode)
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'保存主题失败: {exc}')
+        self.theme_changed.emit(mode)
+
+    def sync_theme_selection(self, mode: str):
+        """托盘切换主题时同步下拉框，不重复触发保存。"""
+        if not hasattr(self, 'theme_combo'):
+            return
+        index = self.theme_combo.findData(str(mode or 'light'))
+        if index >= 0 and index != self.theme_combo.currentIndex():
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(index)
+            self.theme_combo.blockSignals(False)
+
     def _create_about_section(self) -> QGroupBox:
         """创建关于与更新区域"""
         group = QGroupBox("关于与更新")
@@ -478,12 +532,14 @@ class SettingsPage(QWidget):
         layout.addWidget(hint)
 
         button_layout = QHBoxLayout()
-        self.check_update_btn = QPushButton("🔃 检查更新")
+        self.check_update_btn = QPushButton("检查更新")
+        self.check_update_btn.setIcon(load_icon('update'))
         self.check_update_btn.setMinimumHeight(36)
         self.check_update_btn.clicked.connect(self.check_update_requested.emit)
         button_layout.addWidget(self.check_update_btn)
 
-        repo_button = QPushButton("🌐 GitHub 仓库")
+        repo_button = QPushButton("GitHub 仓库")
+        repo_button.setIcon(load_icon('info'))
         repo_button.setMinimumHeight(36)
         repo_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPOSITORY_URL)))
         button_layout.addWidget(repo_button)
@@ -535,7 +591,7 @@ class SettingsPage(QWidget):
 
     def _create_schedule_section(self) -> QGroupBox:
         """自动运行、回复检查和 DeepSeek 闲时段。"""
-        group = QGroupBox("⏱️ 自动运行与 DeepSeek 闲时")
+        group = QGroupBox("自动运行与 DeepSeek 闲时")
         layout = QFormLayout()
 
         self.browse_interval_min_spin = QSpinBox()
@@ -659,6 +715,14 @@ class SettingsPage(QWidget):
                 '00:00-09:00,12:00-14:00,18:00-24:00'
             )
         )
+        try:
+            theme_index = self.theme_combo.findData(
+                self.config.get('ui.theme', 'light')
+            )
+            if theme_index >= 0:
+                self.theme_combo.setCurrentIndex(theme_index)
+        except (TypeError, ValueError):
+            pass
         self._apply_tooltips()
 
     def _apply_tooltips(self):
@@ -756,6 +820,9 @@ class SettingsPage(QWidget):
                 'interaction.owner_mention_probability',
                 self.owner_mention_probability_spin.value(),
             )
+            self.config.set(
+                'ui.theme', self.theme_combo.currentData() or 'light'
+            )
 
             interval_min = self.browse_interval_min_spin.value()
             interval_max = self.browse_interval_max_spin.value()
@@ -769,6 +836,7 @@ class SettingsPage(QWidget):
             )
             self.schedule_settings_saved.emit()
             self.ai_settings_saved.emit()
+            self.theme_changed.emit(self.theme_combo.currentData() or 'light')
 
             if not silent:
                 QMessageBox.information(self, "成功", "设置已保存并立即生效！")
@@ -877,7 +945,7 @@ class SettingsPage(QWidget):
             QMessageBox.information(self, "完成", "已恢复默认设置")
     def _create_persona_section(self) -> QGroupBox:
         """创建人设设置区域"""
-        group = QGroupBox("🎭 人设设置")
+        group = QGroupBox("人设设置")
         layout = QVBoxLayout()
         layout.setSpacing(10)
 

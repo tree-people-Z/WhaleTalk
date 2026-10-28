@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction, QPalette
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
@@ -22,7 +22,8 @@ from gui.settings_page import SettingsPage
 from gui.comments_tab import CommentsTab
 from gui.messages_tab import MessagesTab
 from gui.dashboard_tab import DashboardTab
-from gui.styles import MODERN_STYLE
+from gui.icons import load_icon
+from gui.styles import MODERN_STYLE, DARK_STYLE
 from gui.update_check import UpdateCheckWorker, UpdateDownloadWorker, prompt_update
 from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self._tray_hint_shown = False
         self.tray_icon = None
         self._setup_tray()
+        self.apply_theme(self.config.get('ui.theme', 'light'))
         self.log_message_received.connect(self._append_runtime_log)
         self._gui_log_sink_id = logger.add(
             lambda message: self.log_message_received.emit(str(message).rstrip()),
@@ -175,30 +177,31 @@ class MainWindow(QMainWindow):
             self.config, 
             self.db
         )
-        self.tabs.addTab(self.dashboard_tab, "📊 仪表盘")
+        self.tabs.addTab(self.dashboard_tab, load_icon('dashboard'), "仪表盘")
 
         # 控制台标签
         self.console_tab = self._create_console_tab()
-        self.tabs.addTab(self.console_tab, "控制台")
+        self.tabs.addTab(self.console_tab, load_icon('console'), "控制台")
 
         # 历史记录标签
         self.history_tab = self._create_history_tab()
-        self.tabs.addTab(self.history_tab, "历史记录")
+        self.tabs.addTab(self.history_tab, load_icon('history'), "历史记录")
 
         # 评论对话标签
         self.comments_tab = CommentsTab(self.db)
-        self.tabs.addTab(self.comments_tab, "评论")
+        self.tabs.addTab(self.comments_tab, load_icon('comments'), "评论")
 
         # 私信标签
         self.messages_tab = MessagesTab()
-        self.tabs.addTab(self.messages_tab, "私信")
+        self.tabs.addTab(self.messages_tab, load_icon('messages'), "私信")
 
         # 设置标签
         self.settings_page = SettingsPage(self.config)
         self.settings_page.auto_run_btn.clicked.connect(self.toggle_auto_run)
         self.settings_page.schedule_settings_saved.connect(self.refresh_scheduler_settings)
         self.settings_page.ai_settings_saved.connect(self.refresh_ai_settings)
-        self.tabs.addTab(self.settings_page, "设置")
+        self.settings_page.theme_changed.connect(self.apply_theme)
+        self.tabs.addTab(self.settings_page, load_icon('settings'), "设置")
 
         # 连接仪表盘按钮
         self.dashboard_tab.run_now_btn.clicked.connect(self.run_analysis_now)
@@ -226,7 +229,8 @@ class MainWindow(QMainWindow):
         login_layout.addWidget(self.login_status_label)
         login_layout.addStretch()
 
-        self.login_btn = QPushButton("🔐 登录B站")
+        self.login_btn = QPushButton("登录B站")
+        self.login_btn.setIcon(load_icon('login'))
         self.login_btn.clicked.connect(self.show_login_dialog)
         self.login_btn.setMinimumHeight(36)
         login_layout.addWidget(self.login_btn)
@@ -235,7 +239,7 @@ class MainWindow(QMainWindow):
 
         # 统计信息
         stats_layout = QHBoxLayout()
-        self.stats_label = QLabel("📈 今日: 0条发送 | 总计: 0个视频 | 0条评论")
+        self.stats_label = QLabel("今日: 0条发送 | 总计: 0个视频 | 0条评论")
         self.stats_label.setStyleSheet("color: #586069; font-size: 13px;")
         stats_layout.addWidget(self.stats_label)
         stats_layout.addStretch()
@@ -254,8 +258,9 @@ class MainWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        self.run_now_btn = QPushButton("🚀 现在运行一轮")
+        self.run_now_btn = QPushButton("现在运行一轮")
         self.run_now_btn.setObjectName("primaryButton")
+        self.run_now_btn.setIcon(load_icon('play'))
         self.run_now_btn.clicked.connect(self.run_analysis_now)
         self.run_now_btn.setMinimumHeight(45)
         self.run_now_btn.setStyleSheet("""
@@ -272,7 +277,8 @@ class MainWindow(QMainWindow):
         """)
         btn_layout.addWidget(self.run_now_btn)
 
-        self.auto_run_btn = QPushButton("⏰ 启动自动运营")
+        self.auto_run_btn = QPushButton("启动自动运营")
+        self.auto_run_btn.setIcon(load_icon('play'))
         self.auto_run_btn.clicked.connect(self.toggle_auto_run)
         self.auto_run_btn.setMinimumHeight(45)
         self.auto_run_btn.setStyleSheet("font-size: 14px; font-weight: 600;")
@@ -304,7 +310,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         # 刷新按钮
-        refresh_btn = QPushButton("🔄 刷新")
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setIcon(load_icon('reset'))
         refresh_btn.clicked.connect(self.load_history)
         layout.addWidget(refresh_btn)
 
@@ -386,7 +393,8 @@ class MainWindow(QMainWindow):
             if is_logged_in or has_credential:
                 self.login_status_label.setText("● 已登录")
                 self.login_status_label.setStyleSheet("color: #2ea44f; font-size: 14px; font-weight: 600;")
-                self.login_btn.setText("🔐 切换账号")
+                self.login_btn.setText("切换账号")
+                self.login_btn.setIcon(load_icon('login'))
                 self.log("✅ B站账号已登录")
             else:
                 self.login_status_label.setText("● 未登录")
@@ -402,12 +410,16 @@ class MainWindow(QMainWindow):
         if self.config.get('schedule.auto_run', False):
             self.scheduler.start()
             if self.scheduler.is_running:
-                self.auto_run_btn.setText("⏸️ 停止自动运营")
-                self.settings_page.auto_run_btn.setText("⏸️ 停止自动运营")
+                self.auto_run_btn.setText("停止自动运营")
+                self.auto_run_btn.setIcon(load_icon('pause'))
+                self.settings_page.auto_run_btn.setText("停止自动运营")
+                self.settings_page.auto_run_btn.setIcon(load_icon('pause'))
                 self.log("自动运营已启动")
             else:
-                self.auto_run_btn.setText("⏰ 启动自动运营")
-                self.settings_page.auto_run_btn.setText("⏰ 启动自动运营")
+                self.auto_run_btn.setText("启动自动运营")
+                self.auto_run_btn.setIcon(load_icon('play'))
+                self.settings_page.auto_run_btn.setText("启动自动运营")
+                self.settings_page.auto_run_btn.setIcon(load_icon('play'))
                 self.log("自动运行配置未能启动，请检查AI配置与唤醒时段")
 
     def update_stats(self):
@@ -426,7 +438,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.login_status_label.setText("● 已登录")
             self.login_status_label.setStyleSheet("color: #2ea44f; font-size: 14px; font-weight: 600;")
-            self.login_btn.setText("🔐 切换账号")
+            self.login_btn.setText("切换账号")
+            self.login_btn.setIcon(load_icon('login'))
             self.log("✅ 登录成功！")
             self.messages_tab.set_bili_api(self.bili_api)
             self.comments_tab.set_bili_api(self.bili_api)
@@ -601,7 +614,7 @@ class MainWindow(QMainWindow):
         items = []
         unread = int(getattr(self, '_unread_reply_count', 0) or 0)
         if unread > 0:
-            items.append(f'🔔 {unread} 条新回复待处理')
+            items.append(f'● {unread} 条新回复待处理')
         return items
 
     def on_reply_check_finished(self, result: dict):
@@ -619,8 +632,10 @@ class MainWindow(QMainWindow):
 
         if self.scheduler.is_running:
             self.scheduler.stop()
-            self.auto_run_btn.setText("⏰ 启动自动运营")
-            self.settings_page.auto_run_btn.setText("⏰ 启动自动运营")
+            self.auto_run_btn.setText("启动自动运营")
+            self.auto_run_btn.setIcon(load_icon('play'))
+            self.settings_page.auto_run_btn.setText("启动自动运营")
+            self.settings_page.auto_run_btn.setIcon(load_icon('play'))
             self.config.set('schedule.auto_run', False)
             self.log("自动运营已停止")
         else:
@@ -636,8 +651,10 @@ class MainWindow(QMainWindow):
                 self.config.set('schedule.auto_run', False)
                 QMessageBox.warning(self, "无法启动", "没有有效的自动运行时段，请检查设置。")
                 return
-            self.auto_run_btn.setText("⏸️ 停止自动运营")
-            self.settings_page.auto_run_btn.setText("⏸️ 停止自动运营")
+            self.auto_run_btn.setText("停止自动运营")
+            self.auto_run_btn.setIcon(load_icon('pause'))
+            self.settings_page.auto_run_btn.setText("停止自动运营")
+            self.settings_page.auto_run_btn.setIcon(load_icon('pause'))
             self.log("自动运营已启动")
 
             # 显示下次运行时间
@@ -737,7 +754,7 @@ class MainWindow(QMainWindow):
         latest = new_replies[-1]
         content = (latest.get('content') or '').replace('\n', ' ')[:40]
         self.statusBar.showMessage(
-            f"🔔 收到 {len(new_replies)} 条新回复：{latest.get('user')}：{content}", 12000
+            f"收到 {len(new_replies)} 条新回复：{latest.get('user')}：{content}", 12000
         )
         for mention in new_replies:
             preview = (mention.get('content') or '').replace('\n', ' ')[:80]
@@ -789,12 +806,14 @@ class MainWindow(QMainWindow):
             return
         if result.get("status") == "update":
             version = result.get("version", "")
-            self.settings_page.check_update_btn.setText(f"⬆️ 更新到 v{version}")
+            self.settings_page.check_update_btn.setText(f"更新到 v{version}")
+            self.settings_page.check_update_btn.setIcon(load_icon('update'))
             self.statusBar.showMessage(
                 f"发现新版本 v{version}：可在 设置 → 关于与更新 中一键更新"
             )
         elif result.get("status") == "latest":
-            self.settings_page.check_update_btn.setText("🔃 检查更新")
+            self.settings_page.check_update_btn.setText("检查更新")
+            self.settings_page.check_update_btn.setIcon(load_icon('update'))
 
     def _start_update_download(self, result):
         if not getattr(sys, 'frozen', False):
@@ -894,9 +913,12 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         show_action = QAction("显示主窗口", self)
         show_action.triggered.connect(self._show_from_tray)
+        theme_action = QAction("切换深色/浅色", self)
+        theme_action.triggered.connect(self.toggle_theme)
         quit_action = QAction("退出鲸语", self)
         quit_action.triggered.connect(self._quit_from_tray)
         menu.addAction(show_action)
+        menu.addAction(theme_action)
         menu.addSeparator()
         menu.addAction(quit_action)
         self.tray_icon.setContextMenu(menu)
@@ -919,6 +941,37 @@ class MainWindow(QMainWindow):
         self._force_quit = True
         self.close()
         QApplication.instance().quit()
+
+    def apply_theme(self, theme: str):
+        """应用浅色/深色主题。theme: light / dark / system"""
+        try:
+            app = QApplication.instance()
+            if app is None:
+                return
+            mode = str(theme or 'light').strip().lower()
+            if mode == 'system':
+                color = app.palette().color(QPalette.ColorRole.Window)
+                resolved = 'dark' if color.lightness() < 128 else 'light'
+            else:
+                resolved = 'dark' if mode == 'dark' else 'light'
+            app.setStyleSheet(DARK_STYLE if resolved == 'dark' else MODERN_STYLE)
+            self._active_theme = mode
+            self._resolved_theme = resolved
+            if hasattr(self, 'settings_page'):
+                self.settings_page.sync_theme_selection(mode)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'应用主题失败: {exc}')
+
+    def toggle_theme(self):
+        """托盘菜单快速切换深浅色。"""
+        current = getattr(self, '_resolved_theme', 'light')
+        new_theme = 'light' if current == 'dark' else 'dark'
+        try:
+            self.config.set('ui.theme', new_theme)
+            self.config.save()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'保存主题失败: {exc}')
+        self.apply_theme(new_theme)
 
     def closeEvent(self, event):
         """关闭窗口：默认隐藏到托盘继续运行；托盘菜单“退出”才真正结束。"""

@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
 )
 from loguru import logger
 
+from gui.icons import load_icon
+
 
 class SendMessageWorker(QThread):
     """Send one manual private message in the background."""
@@ -105,7 +107,8 @@ class MessagesTab(QWidget):
 
         toolbar = QHBoxLayout()
         self.status_label = QLabel("请先登录B站账号后查看私信")
-        self.refresh_btn = QPushButton("🔄 刷新私信")
+        self.refresh_btn = QPushButton("刷新私信")
+        self.refresh_btn.setIcon(load_icon('reset'))
         self.refresh_btn.clicked.connect(self.refresh_sessions)
         toolbar.addWidget(self.status_label, 1)
         toolbar.addWidget(self.refresh_btn)
@@ -179,7 +182,7 @@ class MessagesTab(QWidget):
             name = session.get('name') or f"UID {session.get('talker_id')}"
             unread = session.get('unread') or 0
             preview = (session.get('last_message') or '').replace('\n', ' ')[:40]
-            label = name + (f"  🔴{unread}" if unread else '')
+            label = name + (f"  ●{unread}" if unread else '')
             if preview:
                 label += f"\n{preview}"
             item = QListWidgetItem(label)

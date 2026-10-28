@@ -10,6 +10,8 @@ from PyQt6.QtCore import QTimer, Qt
 from datetime import datetime, timedelta
 from loguru import logger
 
+from gui.icons import load_icon
+
 
 class DashboardTab(QWidget):
     """仪表盘 - 首页概览"""
@@ -95,7 +97,7 @@ class DashboardTab(QWidget):
     
     def _create_status_card(self):
         """创建运行状态卡片"""
-        card = QGroupBox("🔄 运行状态")
+        card = QGroupBox("运行状态")
         card.setMinimumWidth(300)
         card.setMinimumHeight(150)
         layout = QVBoxLayout()
@@ -123,7 +125,7 @@ class DashboardTab(QWidget):
     
     def _create_stats_card(self):
         """创建统计卡片"""
-        card = QGroupBox("📊 今日活跃")
+        card = QGroupBox("今日活跃")
         card.setMinimumWidth(300)
         card.setMinimumHeight(150)
         layout = QVBoxLayout()
@@ -156,14 +158,15 @@ class DashboardTab(QWidget):
     
     def _create_actions_group(self):
         """创建快速操作区"""
-        group = QGroupBox("⚡ 快速操作")
+        group = QGroupBox("快速操作")
         layout = QVBoxLayout()
         layout.setSpacing(12)
         
         # 第一行：运行控制
         control_layout = QHBoxLayout()
         
-        self.run_now_btn = QPushButton("▶️ 立即运行一轮")
+        self.run_now_btn = QPushButton("立即运行一轮")
+        self.run_now_btn.setIcon(load_icon('play'))
         self.run_now_btn.setMinimumHeight(45)
         self.run_now_btn.setMinimumWidth(150)
         self.run_now_btn.setStyleSheet(
@@ -172,7 +175,8 @@ class DashboardTab(QWidget):
         )
         control_layout.addWidget(self.run_now_btn)
         
-        self.pause_btn = QPushButton("⏸️ 暂停自动运营")
+        self.pause_btn = QPushButton("暂停自动运营")
+        self.pause_btn.setIcon(load_icon('pause'))
         self.pause_btn.setMinimumHeight(45)
         self.pause_btn.setMinimumWidth(150)
         self.pause_btn.setStyleSheet(
@@ -213,7 +217,7 @@ class DashboardTab(QWidget):
     
     def _create_recent_actions_group(self):
         """创建最近动作区"""
-        group = QGroupBox("📋 最近动作")
+        group = QGroupBox("最近动作")
         layout = QVBoxLayout()
         
         self.recent_list = QListWidget()
@@ -230,7 +234,7 @@ class DashboardTab(QWidget):
     
     def _create_notifications_group(self):
         """创建通知区"""
-        group = QGroupBox("🔔 待处理通知")
+        group = QGroupBox("待处理通知")
         layout = QVBoxLayout()
         
         self.notification_list = QListWidget()
@@ -290,13 +294,13 @@ class DashboardTab(QWidget):
             runtime = ''
 
         if running:
-            icon = "🟢"
+            icon = "●"
             color = "#10b981"
         elif "自动运营中" in label:
-            icon = "🕒"
+            icon = "◔"
             color = "#f59e0b"
         else:
-            icon = "⏸️"
+            icon = "○"
             color = "#f59e0b"
         self.status_label.setText(f"{icon} {label}")
         self.status_label.setStyleSheet(
@@ -305,10 +309,12 @@ class DashboardTab(QWidget):
         scheduler_running = bool(
             state.get('scheduler_running') if state else False
         )
-        self.pause_btn.setText(
-            "⏸️ 暂停自动运营" if (running or scheduler_running)
-            else "▶️ 启动自动运营"
-        )
+        if running or scheduler_running:
+            self.pause_btn.setText("暂停自动运营")
+            self.pause_btn.setIcon(load_icon('pause'))
+        else:
+            self.pause_btn.setText("启动自动运营")
+            self.pause_btn.setIcon(load_icon('play'))
 
         self.runtime_label.setText(f"状态: {label}")
         self.next_run_label.setText(f"自动运营: {next_run}" if next_run else "自动运营: 未启动")
