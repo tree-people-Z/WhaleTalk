@@ -107,6 +107,14 @@ class EventBili(FakeBili):
         }]
 
 
+class ResolveBili(FakeBili):
+    async def get_video_info(self, bvid: str):
+        return {'bvid': bvid, 'aid': 123, 'title': 'T'}
+
+    async def like_video(self, aid: int):
+        return aid == 123
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -122,6 +130,10 @@ class BiliToolTests(unittest.TestCase):
             len(asyncio.run(event_tool.call('get_at_messages', {'arguments': {}}))),
             1,
         )
+        resolve_tool = BiliTool(ResolveBili(), Mock(), Mock())
+        self.assertTrue(asyncio.run(resolve_tool.call(
+            'like_video', {'bvid': 'BV1test'}
+        )))
 
     def test_write_cap(self):
         bili = FakeBili()

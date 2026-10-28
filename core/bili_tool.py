@@ -21,6 +21,11 @@ _WRITE_METHODS = {
     'add_to_watch_later', 'report_watch',
 }
 
+_AID_METHODS = {
+    'like_video', 'favorite_video', 'coin_video', 'share_video',
+    'add_to_watch_later', 'report_watch', 'send_danmaku',
+}
+
 
 def _short(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -207,6 +212,13 @@ class BiliTool:
         if cache_key and cache_key in self._video_cache:
             return self._video_cache[cache_key]
         video_info = None
+        if method in _AID_METHODS and not call_args.get('aid'):
+            bvid = extra_bvid or str(call_args.get('bvid') or '')
+            if bvid:
+                video_info = await self._lookup_video({'bvid': bvid}, bvid)
+                if video_info and video_info.get('aid'):
+                    call_args['aid'] = int(video_info['aid'])
+                    extra_bvid = str(video_info.get('bvid') or bvid)
         if method == 'post_comment' and (
             hasattr(self.bili, 'get_video_info_by_aid')
             or hasattr(self.bili, 'get_video_info')

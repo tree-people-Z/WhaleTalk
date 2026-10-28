@@ -32,6 +32,10 @@ class BiliDMMixin:
         if not self.credential:
             return []
         try:
+            since_time = int(since_time or 0)
+        except (TypeError, ValueError):
+            since_time = 0
+        try:
             data = await bili_session.get_at(self.credential)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"获取@消息失败: {exc}")

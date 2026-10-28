@@ -42,6 +42,15 @@ def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
     if tool == 'bili_api':
         if not isinstance(params, dict):
             params = {}
+        tool_param = str(params.pop('tool', '') or '').strip()
+        if not method and tool_param:
+            if tool_param == 'bili_api':
+                return {
+                    'action': 'tool',
+                    'tool': 'bili_api',
+                    'arguments': {'method': '', 'arguments': params},
+                }
+            return {'action': 'tool', 'tool': tool_param, 'arguments': params}
         return {
             'action': 'tool',
             'tool': 'bili_api',
