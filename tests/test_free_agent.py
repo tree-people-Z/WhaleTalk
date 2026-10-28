@@ -132,7 +132,7 @@ class BiliToolTests(unittest.TestCase):
         )
         resolve_tool = BiliTool(ResolveBili(), Mock(), Mock())
         self.assertTrue(asyncio.run(resolve_tool.call(
-            'like_video', {'bvid': 'BV1test'}
+            'like_video', {'bvid': 'BV1test', 'tool': 'inspect_video'}
         )))
 
     def test_per_round_write_cap_is_removed(self):

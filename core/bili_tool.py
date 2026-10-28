@@ -193,6 +193,10 @@ class BiliTool:
             if not isinstance(nested, dict):
                 break
             args = nested
+        args = {
+            key: value for key, value in args.items()
+            if key not in {'tool', 'method', 'method_name', 'api'}
+        }
         blocked = self._check_write(method, args)
         if blocked:
             return {'error': blocked}
