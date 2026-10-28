@@ -248,6 +248,9 @@ class BiliTool:
             if not isinstance(nested, dict):
                 break
             args = nested
+        share_to_owner = str(args.pop('share_to_owner', '')).lower() in {
+            '1', 'true', 'yes', 'on',
+        }
         args = {
             key: value for key, value in args.items()
             if key not in {'tool', 'method', 'method_name', 'api'}
@@ -286,6 +289,18 @@ class BiliTool:
         call_args, arg_error = self._prepare_arguments(method, call_args, extra_bvid)
         if arg_error:
             return {'error': arg_error}
+        if method == 'post_comment':
+            owner = ''
+            try:
+                owner = str(self.config.get('bilibili.owner_name', '') or '').strip()
+            except Exception:  # noqa: BLE001
+                pass
+            mention = f'@{owner}' if owner else '@主人'
+            text = str(call_args.get('text') or '')
+            text = text.replace('@主人', mention)
+            if share_to_owner and mention not in text:
+                text = f'{mention} {text}'
+            call_args['text'] = text
         try:
             result = getattr(self.bili, method)(**call_args)
             if inspect.isawaitable(result):

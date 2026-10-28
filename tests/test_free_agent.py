@@ -15,12 +15,14 @@ class FakeBili:
 
     def __init__(self):
         self.posts = 0
+        self.last_comment = ''
 
     async def get_x(self, value: int = 1):
         return {'value': value}
 
     async def post_comment(self, aid: int, text: str, root_rpid=None, parent_rpid=None):
         self.posts += 1
+        self.last_comment = text
         return True
 
     def is_posting_blocked(self):
@@ -144,6 +146,20 @@ class BiliToolTests(unittest.TestCase):
         tool = BiliTool(bili, db, config)
         results = [asyncio.run(tool.call('post_comment', {'aid': 1, 'text': 'x'})) for _ in range(9)]
         self.assertEqual(results, [True] * 9)
+
+    def test_share_flag_adds_owner_mention(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: (
+            'Tree-people' if key == 'bilibili.owner_name' else 60
+        )
+        tool = BiliTool(bili, db, config)
+        asyncio.run(tool.call('post_comment', {
+            'aid': 1, 'text': '这个视频有意思', 'share_to_owner': True,
+        }))
+        self.assertTrue(bili.last_comment.startswith('@Tree-people '))
 
 
 class FreeContextTests(unittest.TestCase):
