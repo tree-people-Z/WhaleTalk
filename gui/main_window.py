@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.db = Database()
         self.bili_api = None
         self.ai_client = None
+        self.analyzer = None  # 添加这行
         self.video_analyzer = None
         self.scheduler = None
         self.worker = None
@@ -199,7 +200,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_page, "设置")
 
         # 连接仪表盘按钮
-        self.dashboard_tab.run_now_btn.clicked.connect(self.run_once_now)
+        self.dashboard_tab.run_now_btn.clicked.connect(self.run_analysis_now)
         self.dashboard_tab.pause_btn.clicked.connect(self.toggle_auto_run)
 
         layout.addWidget(self.tabs)
