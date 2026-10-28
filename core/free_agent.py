@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import random
 import re
 import tempfile
 from datetime import datetime
@@ -201,6 +202,20 @@ class FreeAgent:
             params = self._unwrap_arguments(
                 args.get('arguments') or args.get('params') or {}
             )
+            if (
+                method == 'post_comment'
+                and not params.get('root_rpid')
+                and not params.get('parent_rpid')
+                and 'share_to_owner' not in params
+            ):
+                try:
+                    probability = float(
+                        self.config.get('interaction.owner_mention_probability', 35)
+                    ) / 100.0
+                except (TypeError, ValueError):
+                    probability = 0.35
+                if random.random() < max(0.0, min(1.0, probability)):
+                    params['share_to_owner'] = True
             result = await self.bili_tool.call(method, params)
             return self._filter_agent_events(method, params, result)
         if name == 'inspect_video':
