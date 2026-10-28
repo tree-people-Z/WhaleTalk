@@ -47,6 +47,8 @@ class FreeAgent:
         self.bili_tool = BiliTool(bili_api, db, config)
         self._stop = None
         self._seen_io = set()
+        self.self_uid = None
+        self.self_name = ''
         self.enable_frame_analysis = True
         self.local_transcriber = None
         from core.comment_manager import CommentManager
@@ -158,14 +160,21 @@ class FreeAgent:
         recent_short = str(recent[0])
         return f'# 关键词轮换\n上一次使用：{recent_short}。'
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, self_info: dict | None = None) -> str:
         tools = [self.bili_tool.spec(), INSPECT_VIDEO_TOOL, *DIARY_TOOLS]
         owner = self.config.get('bilibili.owner_name', '') or '未配置'
+        self_info = self_info or {}
+        self_uid = self_info.get('uid') or self.self_uid or '未获取'
+        self_name = self_info.get('name') or self.self_name or '未获取'
         keyword_hint = self._keyword_hint()
         hint_block = f'{keyword_hint}\n\n' if keyword_hint else ''
         return (
             f'{build_agent_context(self.config)}\n\n'
             f'{hint_block}'
+            f'# 你的B站账号\n'
+            f'账号名：{self_name}，UID：{self_uid}。\n'
+            '视频信息里 owner_mid 等于这个 UID，或者评论里 mid 等于这个 UID，'
+            '就是你自己的视频/评论。在自己的视频下面互动时，不要把它说成别人的视频。\n\n'
             f'# 账号\n主人昵称：{owner}\n\n'
             f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
             '# 输出\n'
@@ -364,6 +373,10 @@ class FreeAgent:
             'aid': aid,
             'title': str(info.get('title') or ''),
             'owner': str(info.get('owner') or ''),
+            'owner_mid': info.get('owner_mid'),
+            'is_own': bool(
+                self.self_uid and str(info.get('owner_mid') or '') == str(self.self_uid)
+            ),
             'duration': info.get('duration'),
             'description': str(info.get('desc') or '')[:1000],
             'subtitle': subtitle[:4000],
@@ -670,8 +683,16 @@ class FreeAgent:
 
     async def run_analysis_cycle(self) -> Dict[str, Any]:
         self._stop = asyncio.Event()
+        self_info = {}
+        try:
+            if hasattr(self.bili, 'get_self_info'):
+                self_info = await self.bili.get_self_info() or {}
+                self.self_uid = self_info.get('uid') or self.self_uid
+                self.self_name = self_info.get('name') or self.self_name
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'读取当前B站账号失败: {exc}')
         messages = [
-            {'role': 'system', 'content': self._system_prompt()},
+            {'role': 'system', 'content': self._system_prompt(self_info)},
             {
                 'role': 'user',
                 'content': (

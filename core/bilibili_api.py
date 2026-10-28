@@ -651,6 +651,7 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
                 'aid': info.get('aid') or int(aid),
                 'title': info.get('title') or '',
                 'owner': info.get('owner', {}).get('name') or '',
+                'owner_mid': info.get('owner', {}).get('mid'),
                 'pubdate': info.get('pubdate'),
             }
         except Exception as e:  # noqa: BLE001
