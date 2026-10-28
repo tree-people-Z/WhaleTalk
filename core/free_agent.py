@@ -656,7 +656,7 @@ class FreeAgent:
             ('收藏', ('收藏',), ('收藏',)),
             ('评论/留言', ('留言', '评论了', '留了评论', '发了评论', '回复了', '回了'),
              ('发送评论',)),
-            ('私信', ('发送私信', '发了私信', '回了私信', '回复.*私信', '私信.*(回|发)'),
+            ('私信', ('发送私信', '发了私信', '回了私信', '回复.{0,6}私信', '私信.{0,6}(回|发)'),
              ('发送私信',)),
             ('关注', ('关注',), ('关注',)),
             ('弹幕', ('弹幕',), ('发送弹幕',)),
@@ -702,6 +702,7 @@ class FreeAgent:
         actions: list[str] = []
         successful_actions: list[str] = []
         retried_empty_finish = False
+        retried_false_summary = False
         try:
             for _ in range(MAX_STEPS):
                 if self._stop.is_set():
@@ -729,6 +730,21 @@ class FreeAgent:
                         })
                         continue
                     summary = str(decision.get('reason') or '')
+                    missing = self._summary_mismatch(summary, successful_actions)
+                    if missing and not retried_false_summary:
+                        retried_false_summary = True
+                        messages.append({'role': 'assistant', 'content': response})
+                        messages.append({
+                            'role': 'user',
+                            'content': (
+                                '你的总结提到 '
+                                + '、'.join(missing)
+                                + '，但本轮没有成功的对应动作。不要编造已经做过的事。'
+                                '如果这些事情还没做，现在调用工具完成；'
+                                '如果不想做，重新输出 finish，只写实际完成的事。'
+                            ),
+                        })
+                        continue
                     break
                 tool = str(decision.get('tool') or decision.get('name') or 'bili_api')
                 args = (
