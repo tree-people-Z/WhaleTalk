@@ -182,6 +182,61 @@ class BiliTool:
             logger.warning(f'校验视频失败: {exc}')
         return None
 
+    def _prepare_arguments(
+        self, method: str, args: dict, bvid: str
+    ) -> tuple[dict, str]:
+        """Validate model-provided arguments against the real B站 signature."""
+        try:
+            signature = inspect.signature(getattr(self.bili, method))
+        except (TypeError, ValueError):
+            return dict(args), ''
+        parameters = signature.parameters
+        accepts_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in parameters.values()
+        )
+        allowed = set(parameters)
+        clean = {
+            key: value for key, value in args.items()
+            if key in allowed or accepts_kwargs
+        }
+        if 'bvid' in allowed and bvid:
+            clean['bvid'] = bvid
+        for name, param in parameters.items():
+            if name not in clean or clean[name] in (None, ''):
+                continue
+            annotation = param.annotation
+            try:
+                if annotation is int or name in {
+                    'aid', 'count', 'page', 'ps', 'limit', 'root_rpid',
+                    'parent_rpid', 'talker_id', 'uid', 'cid', 'since_time',
+                }:
+                    clean[name] = int(clean[name])
+                elif annotation is bool or name in {'include_replies'}:
+                    if isinstance(clean[name], str):
+                        clean[name] = clean[name].lower() in {'1', 'true', 'yes', 'on'}
+                    else:
+                        clean[name] = bool(clean[name])
+                elif annotation is str:
+                    clean[name] = str(clean[name])
+            except (TypeError, ValueError):
+                return {}, f'参数类型不正确: {name}'
+        missing = [
+            name for name, param in parameters.items()
+            if param.default is inspect.Parameter.empty
+            and param.kind not in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            )
+            and name not in clean
+        ]
+        if missing:
+            return {}, (
+                f'缺少参数: {", ".join(missing)}；'
+                f'可用参数: {", ".join(sorted(allowed))}'
+            )
+        return clean, ''
+
     async def call(self, method: str, arguments: dict | None = None) -> Any:
         if method not in {item['name'] for item in self._specs}:
             return {'error': f'没有这个接口: {method}'}
@@ -228,6 +283,9 @@ class BiliTool:
             if not video_info:
                 return {'error': '视频不存在、已删除或无法访问，评论未发送'}
             extra_bvid = str(video_info.get('bvid') or extra_bvid)
+        call_args, arg_error = self._prepare_arguments(method, call_args, extra_bvid)
+        if arg_error:
+            return {'error': arg_error}
         try:
             result = getattr(self.bili, method)(**call_args)
             if inspect.isawaitable(result):
