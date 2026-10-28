@@ -18,6 +18,7 @@ from bilibili_api.search import SearchObjectType, OrderVideo
 from core.bilibili_dm import BiliDMMixin
 from core.bilibili_comment import BiliCommentMixin
 from core.bilibili_interact import BiliInteractMixin
+from utils.simple_cache import cached_video
 from loguru import logger
 
 
@@ -41,7 +42,7 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
             from bilibili_api import request_settings
             request_settings.set_enable_auto_buvid(True)
             request_settings.set_enable_bili_ticket(False)
-        except Exception as exc:  # noqa: BLE001
+        except (ImportError, AttributeError) as exc:
             logger.debug(f"配置 B 站请求参数失败: {exc}")
 
         # 风控状态
@@ -317,7 +318,7 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
                             self.credential.ac_time_value or '',
                         )
                         logger.info("已补充 buvid4 风控参数")
-                except Exception as exc:  # noqa: BLE001
+                except (AttributeError, TypeError, ValueError) as exc:
                     logger.debug(f"补充 buvid4 失败: {exc}")
             info = await user.get_self_info(credential=self.credential)
             if not isinstance(info, dict) or not info.get('name'):
@@ -614,8 +615,9 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
             'requested_by': 'commenter_upload' if wants_my_video else 'explicit_link',
         }
 
+    @cached_video
     async def get_video_info(self, bvid: str) -> Optional[Dict[str, Any]]:
-        """获取视频详细信息"""
+        """获取视频详细信息（带缓存）"""
         last_error = None
         for attempt in range(2):
             try:

@@ -106,7 +106,7 @@ class BiliTool:
                 continue
             try:
                 attr = getattr(self.bili, name)
-            except Exception:  # noqa: BLE001
+            except (AttributeError, TypeError):
                 continue
             if not callable(attr):
                 continue
@@ -156,16 +156,16 @@ class BiliTool:
             try:
                 if self.bili.is_posting_blocked():
                     return '当前处于发帖冷却/风控状态，写操作已暂停'
-            except Exception:  # noqa: BLE001
+            except (AttributeError, RuntimeError):
                 pass
         if method == 'post_comment' and self.db is not None:
             try:
                 maximum = int(self.config.get('limits.max_comments_per_day', 60))
-            except Exception:  # noqa: BLE001
+            except (TypeError, ValueError, AttributeError):
                 maximum = 60
             try:
                 used = int(self.db.get_today_comment_count(include_replies=True))
-            except Exception:  # noqa: BLE001
+            except (TypeError, ValueError, AttributeError):
                 used = 0
             if used >= maximum:
                 return f'今日评论/回复已达上限 {maximum} 条'
@@ -178,7 +178,7 @@ class BiliTool:
                 return await self.bili.get_video_info(bvid)
             if aid and hasattr(self.bili, 'get_video_info_by_aid'):
                 return await self.bili.get_video_info_by_aid(aid)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(f'校验视频失败: {exc}')
         return None
 
