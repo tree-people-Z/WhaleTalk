@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         )
         self.init_components()
         self.load_status()
+        self._attach_dashboard()
 
         # 后台检查更新（不阻塞启动），设置页也可手动触发。
         self._update_worker = None
@@ -550,9 +551,57 @@ class MainWindow(QMainWindow):
                 self.scheduler.start()
             self._active_ai_signature = signature
             self.log("✅ AI设置已应用，客户端已重建")
+            self._attach_dashboard()
         except Exception as exc:
             logger.exception(f"应用AI设置失败: {exc}")
             self.log(f"❌ 应用AI设置失败: {exc}")
+
+    def _attach_dashboard(self):
+        """把当前 Agent 和运行状态接到仪表盘（Agent 重建后需要重新接）。"""
+        if not hasattr(self, 'dashboard_tab'):
+            return
+        try:
+            self.dashboard_tab.set_analyzer(self.video_analyzer)
+            self.dashboard_tab.set_status_provider(self._dashboard_status)
+            self.dashboard_tab.set_notification_provider(self._dashboard_notifications)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'连接仪表盘失败: {exc}')
+
+    def _dashboard_status(self) -> dict:
+        """仪表盘运行状态"""
+        if not self.video_analyzer:
+            return {
+                'running': False,
+                'label': '未配置 AI',
+                'next_run': '未启动',
+                'runtime': '',
+            }
+        running = bool(self.worker and self.worker.isRunning())
+        reply_running = bool(self.reply_worker and self.reply_worker.isRunning())
+        if running:
+            label = '自由 Agent 运行中'
+        elif reply_running:
+            label = '检查回复中'
+        elif self.scheduler and self.scheduler.is_running:
+            label = '自动运营中，等待下次巡视'
+        else:
+            label = '已暂停'
+        next_run = (
+            '已启动' if self.scheduler and self.scheduler.is_running else '未启动'
+        )
+        return {
+            'running': running or reply_running,
+            'label': label,
+            'next_run': next_run,
+            'runtime': '',
+        }
+
+    def _dashboard_notifications(self) -> list:
+        items = []
+        unread = int(getattr(self, '_unread_reply_count', 0) or 0)
+        if unread > 0:
+            items.append(f'🔔 {unread} 条新回复待处理')
+        return items
 
     def on_reply_check_finished(self, result: dict):
         QTimer.singleShot(0, self.refresh_ai_settings)

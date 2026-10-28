@@ -20,7 +20,22 @@ class DashboardTab(QWidget):
         self.bili_api = bili_api
         self.config = config
         self.db = db
+        self._status_provider = None
+        self._notification_provider = None
         self.init_ui()
+
+    def set_analyzer(self, analyzer):
+        """主窗口重建 Agent 后同步过来"""
+        self.analyzer = analyzer
+        self.update_dashboard()
+
+    def set_status_provider(self, provider):
+        """provider 返回 {running, label, next_run, runtime}"""
+        self._status_provider = provider
+
+    def set_notification_provider(self, provider):
+        """provider 返回通知字符串列表"""
+        self._notification_provider = provider
     
     def init_ui(self):
         """初始化UI"""
@@ -256,29 +271,39 @@ class DashboardTab(QWidget):
     
     def _update_status(self):
         """更新运行状态"""
-        # 检查是否正在运行
-        is_running = False
-        if hasattr(self.analyzer, 'is_running'):
-            is_running = self.analyzer.is_running
-        
-        if is_running:
-            self.status_label.setText("🟢 运行中")
+        state = None
+        if self._status_provider is not None:
+            try:
+                state = self._status_provider()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'读取运行状态失败: {exc}')
+
+        if state:
+            running = bool(state.get('running'))
+            label = str(state.get('label') or ('运行中' if running else '已暂停'))
+            next_run = str(state.get('next_run') or '')
+            runtime = str(state.get('runtime') or '')
+        else:
+            running = bool(getattr(self.analyzer, 'is_running', False))
+            label = '运行中' if running else '已暂停'
+            next_run = '根据设置间隔'
+            runtime = ''
+
+        if running:
+            self.status_label.setText(f"🟢 {label}")
             self.status_label.setStyleSheet(
                 "font-size: 20px; font-weight: bold; color: #10b981;"
             )
             self.pause_btn.setText("⏸️ 暂停自动运营")
         else:
-            self.status_label.setText("⏸️ 已暂停")
+            self.status_label.setText(f"⏸️ {label}")
             self.status_label.setStyleSheet(
                 "font-size: 20px; font-weight: bold; color: #f59e0b;"
             )
             self.pause_btn.setText("▶️ 启动自动运营")
-        
-        # 运行时长（简化版）
-        self.runtime_label.setText("运行时长: 查看控制台")
-        
-        # 下次运行时间
-        self.next_run_label.setText("下次运行: 根据设置间隔")
+
+        self.runtime_label.setText(f"状态: {label}")
+        self.next_run_label.setText(f"自动运营: {next_run}" if next_run else "自动运营: 未启动")
     
     def _update_stats(self):
         """更新统计数据"""
@@ -288,7 +313,12 @@ class DashboardTab(QWidget):
         try:
             # 今日评论数
             comment_count = self.db.get_today_comment_count(include_replies=True)
-            max_comments = self.config.get('limits.max_comments_per_day', 60)
+            try:
+                max_comments = int(self.config.get('limits.max_comments_per_day', 60))
+            except (TypeError, ValueError):
+                max_comments = 60
+            if max_comments <= 0:
+                max_comments = 60
             
             self.comments_label.setText(f"💬 评论: {comment_count} / {max_comments}")
             
@@ -316,9 +346,22 @@ class DashboardTab(QWidget):
                 }}
             """)
             
-            # 今日运行轮数
-            sessions = self.db.get_recent_agent_sessions(days=1)
-            self.runs_label.setText(f"🔄 运行轮数: {len(sessions)}")
+            # 今日运行轮数（按日期过滤，接口只接受 limit）
+            sessions = self.db.get_recent_agent_sessions(limit=300)
+            today = datetime.now().date()
+            today_runs = 0
+            for session in sessions:
+                created = session.get('created_at')
+                if isinstance(created, datetime):
+                    if created.date() == today:
+                        today_runs += 1
+                else:
+                    try:
+                        if str(created)[:10] == today.isoformat():
+                            today_runs += 1
+                    except (TypeError, ValueError):
+                        continue
+            self.runs_label.setText(f"🔄 今日轮数: {today_runs}")
             
         except Exception as e:
             logger.debug(f'更新统计数据失败: {e}')
@@ -330,20 +373,18 @@ class DashboardTab(QWidget):
         
         try:
             self.recent_list.clear()
-            
-            # 获取最近的会话
             sessions = self.db.get_recent_agent_sessions(limit=5)
             
             for session in sessions:
-                time_str = session.get('created_at', '')[:16]  # YYYY-MM-DD HH:MM
-                summary = session.get('summary', '无摘要')
-                
-                # 截断过长的摘要
+                created = session.get('created_at')
+                if isinstance(created, datetime):
+                    time_str = created.strftime('%m-%d %H:%M')
+                else:
+                    time_str = str(created or '')[:16]
+                summary = str(session.get('summary') or '无摘要')
                 if len(summary) > 60:
                     summary = summary[:60] + '...'
-                
-                item_text = f"{time_str} | {summary}"
-                self.recent_list.addItem(item_text)
+                self.recent_list.addItem(f"{time_str} | {summary}")
             
             if not sessions:
                 self.recent_list.addItem("暂无最近动作")
@@ -353,15 +394,18 @@ class DashboardTab(QWidget):
     
     def _update_notifications(self):
         """更新通知"""
-        # 简化版本：显示是否有未读回复/私信
-        has_notifications = False
-        
+        items = []
+        if self._notification_provider is not None:
+            try:
+                items = list(self._notification_provider() or [])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f'读取通知失败: {exc}')
+
         self.notification_list.clear()
-        
-        # TODO: 实际检查未读回复和私信
-        # 这里先显示占位符
-        
-        if has_notifications:
+        for item in items:
+            self.notification_list.addItem(str(item))
+
+        if items:
             self.notification_list.setVisible(True)
             self.no_notification_label.setVisible(False)
         else:
