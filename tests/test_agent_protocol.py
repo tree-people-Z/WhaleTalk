@@ -53,6 +53,24 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertEqual(decision['tool'], 'inspect_video')
         self.assertEqual(decision['arguments']['bvid'], 'BV1test')
 
+    def test_dsml_nested_method_and_stray_brace(self):
+        text = (
+            '<\uff5cDSML\uff5c calls>\n'
+            '<\uff5cDSML\uff5c invoke name="bili_api">\n'
+            '<\uff5cDSML\uff5c parameter name="arguments" string="false">'
+            '{"method": "inspect_video", "arguments": '
+            '{"bvid": "BV1test", "frames": 2}}'
+            '</\uff5cDSML\uff5c parameter>\n'
+            '<\uff5cDSML\uff5c parameter name="tool" string="true">'
+            'inspect_video"}'
+            '</\uff5cDSML\uff5c parameter>\n'
+            '</\uff5cDSML\uff5c invoke>\n'
+            '</\uff5cDSML\uff5c calls>'
+        )
+        decision = parse_json_decision(text)
+        self.assertEqual(decision['tool'], 'inspect_video')
+        self.assertEqual(decision['arguments']['bvid'], 'BV1test')
+
 
 if __name__ == '__main__':
     unittest.main()

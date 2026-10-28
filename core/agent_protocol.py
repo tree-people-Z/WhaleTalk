@@ -14,6 +14,11 @@ _DSML_PARAM = re.compile(
     r'</[|｜]DSML[|｜]\s*parameter>',
     re.S,
 )
+_NON_BILI_TOOLS = {'inspect_video', 'read_diary', 'write_diary'}
+
+
+def _clean_value(value: str) -> str:
+    return str(value or '').strip().strip('"').strip('}').strip().strip('"')
 
 
 def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
@@ -30,7 +35,7 @@ def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
         name = match.group(1).strip()
         value = match.group(2).strip()
         if name == 'method':
-            method = value
+            method = _clean_value(value)
             continue
         if name in ('arguments', 'params', 'parameters'):
             try:
@@ -38,19 +43,33 @@ def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
             except (TypeError, ValueError):
                 params = {'value': value}
         else:
-            params[name] = value
+            params[name] = _clean_value(value)
     if tool == 'bili_api':
         if not isinstance(params, dict):
             params = {}
-        tool_param = str(params.pop('tool', '') or '').strip()
-        if not method and tool_param:
-            if tool_param == 'bili_api':
+        nested_method = _clean_value(params.get('method', ''))
+        nested_args = params.get('arguments')
+        if nested_method:
+            params.pop('method', None)
+            if nested_method in _NON_BILI_TOOLS:
                 return {
                     'action': 'tool',
-                    'tool': 'bili_api',
-                    'arguments': {'method': '', 'arguments': params},
+                    'tool': nested_method,
+                    'arguments': nested_args if isinstance(nested_args, dict) else params,
                 }
-            return {'action': 'tool', 'tool': tool_param, 'arguments': params}
+            return {
+                'action': 'tool',
+                'tool': 'bili_api',
+                'arguments': {
+                    'method': nested_method,
+                    'arguments': nested_args if isinstance(nested_args, dict) else params,
+                },
+            }
+        tool_param = _clean_value(params.pop('tool', ''))
+        if not method and tool_param:
+            if tool_param in _NON_BILI_TOOLS:
+                return {'action': 'tool', 'tool': tool_param, 'arguments': params}
+            return {'action': 'tool', 'tool': 'bili_api', 'arguments': {'method': tool_param, 'arguments': params}}
         return {
             'action': 'tool',
             'tool': 'bili_api',
