@@ -436,12 +436,10 @@ class MainWindow(QMainWindow):
         self.worker = AnalysisWorker(self.video_analyzer)
         self.worker.finished.connect(self.on_analysis_finished)
         self.worker.error.connect(self.on_analysis_error)
-        self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
 
     def on_analysis_finished(self, result: dict):
         """自由 Agent 完成"""
-        self.worker = None
         QTimer.singleShot(0, self.refresh_ai_settings)
         self.run_now_btn.setEnabled(True)
         if result.get('status') == 'cancelled':
@@ -471,7 +469,6 @@ class MainWindow(QMainWindow):
 
     def on_analysis_error(self, error: str):
         """分析出错"""
-        self.worker = None
         QTimer.singleShot(0, self.refresh_ai_settings)
         self.run_now_btn.setEnabled(True)
         self.statusBar.showMessage("任务失败")
@@ -492,7 +489,6 @@ class MainWindow(QMainWindow):
         self.reply_worker = AnalysisWorker(self.video_analyzer, operation='replies')
         self.reply_worker.finished.connect(self.on_reply_check_finished)
         self.reply_worker.error.connect(lambda error: self.log(f"❌ 回复检查失败: {error}"))
-        self.reply_worker.finished.connect(self.reply_worker.deleteLater)
         self.reply_worker.start()
         return True
 
@@ -542,7 +538,6 @@ class MainWindow(QMainWindow):
             self.log(f"❌ 应用AI设置失败: {exc}")
 
     def on_reply_check_finished(self, result: dict):
-        self.reply_worker = None
         QTimer.singleShot(0, self.refresh_ai_settings)
         mentions = result.get('mentions') or []
         if mentions:
