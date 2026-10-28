@@ -152,6 +152,9 @@ class BiliDMMixin:
         """给私信会话对象发送纯文本消息。"""
         if not self.credential or not talker_id or not text.strip():
             return False
+        if str(talker_id).startswith('844424930'):
+            logger.info(f"跳过B站系统私信会话: {talker_id}")
+            return False
         try:
             await bili_session.send_msg(
                 credential=self.credential,

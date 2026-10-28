@@ -45,7 +45,6 @@ class BiliTool:
         self.db = db
         self.config = config
         self.writes = 0
-        self.max_writes = 8
         self.video_refs: list[dict] = []
         self._video_cache: dict[str, dict] = {}
         self._specs = self._build_specs()
@@ -152,8 +151,6 @@ class BiliTool:
     def _check_write(self, method: str, args: dict) -> str:
         if method not in _WRITE_METHODS:
             return ''
-        if self.writes >= self.max_writes:
-            return f'本轮写操作已达上限 {self.max_writes} 次'
         if method in {'post_comment', 'send_private_message', 'send_danmaku',
                       'post_video_dynamic'}:
             try:

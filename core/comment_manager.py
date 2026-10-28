@@ -285,6 +285,9 @@ class CommentManager:
             talker_id = session.get('talker_id')
             if not talker_id:
                 continue
+            if str(talker_id).startswith('844424930'):
+                logger.debug(f"跳过B站系统私信会话: {talker_id}")
+                continue
             try:
                 messages = await self.bili.get_private_messages(talker_id)
             except Exception as exc:  # noqa: BLE001

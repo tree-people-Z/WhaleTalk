@@ -135,7 +135,7 @@ class BiliToolTests(unittest.TestCase):
             'like_video', {'bvid': 'BV1test'}
         )))
 
-    def test_write_cap(self):
+    def test_per_round_write_cap_is_removed(self):
         bili = FakeBili()
         db = Mock()
         db.get_today_comment_count.return_value = 0
@@ -143,8 +143,7 @@ class BiliToolTests(unittest.TestCase):
         config.get.return_value = 60
         tool = BiliTool(bili, db, config)
         results = [asyncio.run(tool.call('post_comment', {'aid': 1, 'text': 'x'})) for _ in range(9)]
-        self.assertEqual(results[:8], [True] * 8)
-        self.assertIn('error', results[8])
+        self.assertEqual(results, [True] * 9)
 
 
 class FreeContextTests(unittest.TestCase):
