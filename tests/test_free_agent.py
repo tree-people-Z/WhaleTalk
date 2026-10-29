@@ -358,6 +358,18 @@ class FreeAgentTests(unittest.TestCase):
             [],
         )
 
+    def test_parse_model_audit(self):
+        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
+        audit = agent._parse_model_audit(
+            '本轮看了几个视频。审计：最高分 17/20；@主人 是'
+        )
+        self.assertEqual(audit['max_score'], 17)
+        self.assertTrue(audit['mentioned_owner'])
+        audit = agent._parse_model_audit('审计：最高分 12／20；@主人 否')
+        self.assertEqual(audit['max_score'], 12)
+        self.assertFalse(audit['mentioned_owner'])
+        self.assertEqual(agent._parse_model_audit('本轮没有操作'), {})
+
     def test_false_summary_is_not_stored(self):
         agent = FreeAgent(FakeBili(), FalseSummaryAI(), Mock(), Mock())
         with patch('core.free_agent.build_agent_context', return_value='ctx'):

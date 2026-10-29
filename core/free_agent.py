@@ -649,6 +649,23 @@ class FreeAgent:
         return f'{detail}：{"成功" if ok else "失败"}'
 
     @staticmethod
+    def _parse_model_audit(summary: str) -> dict:
+        """解析模型自己报告的评分/@ 审计，只记录，不干预。"""
+        text = str(summary or '')
+        audit = {}
+        score = re.search(
+            r'最高分\s*[:：]?\s*(\d{1,2})\s*(?:/|／)\s*20', text
+        )
+        if score:
+            audit['max_score'] = int(score.group(1))
+        mention = re.search(
+            r'@\s*主人\s*[:：]?\s*(是|否|已|未)', text
+        )
+        if mention:
+            audit['mentioned_owner'] = mention.group(1) in {'是', '已'}
+        return audit
+
+    @staticmethod
     def _summary_mismatch(summary: str, actions: list[str]) -> list[str]:
         actual = '；'.join(actions)
         claims = [
@@ -816,7 +833,24 @@ class FreeAgent:
         finally:
             self._stop = None
             self._log_actions(actions)
+        audit = {}
         if summary:
+            audit = self._parse_model_audit(summary)
+            if audit:
+                score_text = (
+                    f"{audit['max_score']}/20"
+                    if 'max_score' in audit else '未报告'
+                )
+                mention_text = (
+                    ('是' if audit['mentioned_owner'] else '否')
+                    if 'mentioned_owner' in audit else '未报告'
+                )
+                logger.info(
+                    f'🧾 模型自述审计：最高分 {score_text}，'
+                    f'@主人 {mention_text}'
+                )
+            else:
+                logger.info('🧾 模型自述审计：本轮未报告评分/@')
             missing = self._summary_mismatch(summary, successful_actions)
             if missing:
                 logger.warning(
@@ -853,6 +887,7 @@ class FreeAgent:
             'comments_sent': comments,
             'summary': summary,
             'actions': actions,
+            'audit': audit,
         }
 
     async def check_replies(self) -> Dict[str, Any]:
