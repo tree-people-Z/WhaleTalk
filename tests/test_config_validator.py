@@ -10,8 +10,8 @@ class ConfigValidatorTests(unittest.TestCase):
         config = Mock()
         config.get.side_effect = lambda key, default=None: {
             'ai.provider': 'openai',
-            'ai.openai_api_key': 'sk-test1234567890',
-            'ai.openai_model': 'gpt-4',
+            'ai.api_key': 'sk-test1234567890',
+            'ai.model': 'gpt-4',
             'bilibili.owner_name': 'TestUser',
             'bilibili.owner_uid': 123456,
             'limits.min_score_to_mention_owner': 13,
@@ -38,7 +38,7 @@ class ConfigValidatorTests(unittest.TestCase):
         config = Mock()
         config.get.side_effect = lambda key, default=None: {
             'ai.provider': 'openai',
-            'ai.openai_api_key': 'short',  # 太短
+            'ai.api_key': 'x',  # 太短
         }.get(key, default)
         
         valid, msg = validate_config(config)
@@ -50,7 +50,7 @@ class ConfigValidatorTests(unittest.TestCase):
         config = Mock()
         config.get.side_effect = lambda key, default=None: {
             'ai.provider': 'openai',
-            'ai.openai_api_key': 'sk-test1234567890',
+            'ai.api_key': 'sk-test1234567890',
             'limits.min_score_to_mention_owner': 25,  # 超出范围
         }.get(key, default)
         

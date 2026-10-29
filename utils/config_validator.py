@@ -18,15 +18,21 @@ def validate_config(config) -> tuple[bool, str]:
     if not ai_provider:
         errors.append('❌ AI 提供商未配置（ai.provider）')
     else:
-        # 验证 API Key
-        api_key = config.get(f'ai.{ai_provider}_api_key', '')
+        # 兼容旧配置：优先全局 ai.api_key，其次 provider 专属键
+        api_key = (
+            config.get('ai.api_key', '')
+            or config.get(f'ai.{ai_provider}_api_key', '')
+        )
         if not api_key:
-            errors.append(f'❌ {ai_provider} API Key 未配置')
-        elif len(api_key) < 10:
+            warnings.append(f'⚠️ {ai_provider} API Key 未配置，AI 功能不可用')
+        elif len(api_key) < 4:
             errors.append(f'❌ {ai_provider} API Key 格式不正确（长度过短）')
         
         # 验证模型名称
-        model = config.get(f'ai.{ai_provider}_model', '')
+        model = (
+            config.get('ai.model', '')
+            or config.get(f'ai.{ai_provider}_model', '')
+        )
         if not model:
             warnings.append(f'⚠️ {ai_provider} 模型未指定，将使用默认值')
     
