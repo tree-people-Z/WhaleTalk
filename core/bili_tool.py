@@ -248,9 +248,6 @@ class BiliTool:
             if not isinstance(nested, dict):
                 break
             args = nested
-        share_to_owner = str(args.pop('share_to_owner', '')).lower() in {
-            '1', 'true', 'yes', 'on',
-        }
         share_score_raw = args.pop('share_score', args.pop('score', None))
         share_score = None
         if share_score_raw not in (None, ''):
@@ -306,13 +303,25 @@ class BiliTool:
                 )
             except (TypeError, ValueError, AttributeError):
                 pass
+            threshold = max(0.0, min(20.0, threshold))
+            score = None
             if share_score is not None:
-                share_to_owner = share_score > threshold
+                score = max(0.0, min(20.0, float(share_score)))
+            is_reply = bool(
+                call_args.get('root_rpid') or call_args.get('parent_rpid')
+            )
+            should_mention = (
+                not is_reply and score is not None and score > threshold
+            )
             mention = f'@{owner}' if owner else '@主人'
             text = str(call_args.get('text') or '')
             text = text.replace('@主人', mention)
-            if share_to_owner and mention not in text:
-                text = f'{mention} {text}'
+            if should_mention:
+                if mention not in text:
+                    text = f'{mention} {text}'
+            elif not is_reply and mention in text:
+                # 低于阈值时，防止模型自己在正文里写 @ 绕过规则
+                text = ' '.join(text.replace(mention, '').split())
             call_args['text'] = text
         try:
             result = getattr(self.bili, method)(**call_args)

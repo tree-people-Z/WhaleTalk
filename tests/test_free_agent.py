@@ -147,21 +147,7 @@ class BiliToolTests(unittest.TestCase):
         results = [asyncio.run(tool.call('post_comment', {'aid': 1, 'text': 'x'})) for _ in range(9)]
         self.assertEqual(results, [True] * 9)
 
-    def test_share_flag_adds_owner_mention(self):
-        bili = FakeBili()
-        db = Mock()
-        db.get_today_comment_count.return_value = 0
-        config = Mock()
-        config.get.side_effect = lambda key, default=None: (
-            'Tree-people' if key == 'bilibili.owner_name' else 60
-        )
-        tool = BiliTool(bili, db, config)
-        asyncio.run(tool.call('post_comment', {
-            'aid': 1, 'text': '这个视频有意思', 'share_to_owner': True,
-        }))
-        self.assertTrue(bili.last_comment.startswith('@Tree-people '))
-
-    def test_score_threshold_controls_owner_mention(self):
+    def test_owner_mention_requires_score_above_threshold(self):
         bili = FakeBili()
         db = Mock()
         db.get_today_comment_count.return_value = 0
@@ -182,6 +168,71 @@ class BiliToolTests(unittest.TestCase):
             'aid': 2, 'text': '刚过线', 'share_score': 13,
         }))
         self.assertEqual(bili.last_comment, '刚过线')
+
+        # 没有分数时即使带旧的 share_to_owner 也不 @
+        asyncio.run(tool.call('post_comment', {
+            'aid': 3, 'text': '没有分数', 'share_to_owner': True,
+        }))
+        self.assertEqual(bili.last_comment, '没有分数')
+
+        # 字符串分数也能识别
+        asyncio.run(tool.call('post_comment', {
+            'aid': 4, 'text': '字符串分数', 'share_score': '14',
+        }))
+        self.assertTrue(bili.last_comment.startswith('@Tree-people '))
+
+    def test_owner_mention_not_added_to_replies(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            'bilibili.owner_name': 'Tree-people',
+            'limits.min_score_to_mention_owner': 13,
+            'limits.max_comments_per_day': 60,
+        }.get(key, default)
+        tool = BiliTool(bili, db, config)
+
+        asyncio.run(tool.call('post_comment', {
+            'aid': 1, 'text': '回复内容', 'share_score': 20,
+            'root_rpid': 123, 'parent_rpid': 123,
+        }))
+        self.assertEqual(bili.last_comment, '回复内容')
+
+    def test_low_score_strips_model_written_mention(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            'bilibili.owner_name': 'Tree-people',
+            'limits.min_score_to_mention_owner': 13,
+            'limits.max_comments_per_day': 60,
+        }.get(key, default)
+        tool = BiliTool(bili, db, config)
+
+        asyncio.run(tool.call('post_comment', {
+            'aid': 1, 'text': '@Tree-people 普通内容', 'share_score': 5,
+        }))
+        self.assertNotIn('@Tree-people', bili.last_comment)
+        self.assertIn('普通内容', bili.last_comment)
+
+    def test_threshold_twenty_needs_more_than_twenty(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            'bilibili.owner_name': 'Tree-people',
+            'limits.min_score_to_mention_owner': 20,
+            'limits.max_comments_per_day': 60,
+        }.get(key, default)
+        tool = BiliTool(bili, db, config)
+
+        asyncio.run(tool.call('post_comment', {
+            'aid': 1, 'text': '满分', 'share_score': 20,
+        }))
+        self.assertEqual(bili.last_comment, '满分')
 
 
 class FreeContextTests(unittest.TestCase):
