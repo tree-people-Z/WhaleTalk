@@ -209,7 +209,7 @@ class DashboardTab(QWidget):
         self.mention_spin.valueChanged.connect(self._update_mention_score)
         mention_layout.addWidget(self.mention_spin)
         
-        mention_hint = QLabel("（视频满分20，超过阈值才 @；只影响主动评论）")
+        mention_hint = QLabel("（视频满分20，超过阈值由模型自己决定是否 @）")
         mention_hint.setStyleSheet("color: #64748b; font-size: 11px;")
         mention_hint.setWordWrap(True)
         mention_layout.addWidget(mention_hint, 1)  # 可伸缩

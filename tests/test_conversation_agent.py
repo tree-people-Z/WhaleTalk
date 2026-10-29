@@ -1,4 +1,4 @@
-﻿import tempfile
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -58,6 +58,34 @@ class ConversationAgentTests(unittest.TestCase):
             finally:
                 db.session.close()
                 db.engine.dispose()
+
+    def test_reply_tools_hide_bili_api(self):
+        async def send(event, text):
+            return True
+        agent = ConversationAgent(None, None, FakeAI(), Config(), send)
+        names = {tool.get('name') for tool in agent._read_tools('')}
+        self.assertNotIn('bili_api', names)
+        self.assertIn('reply_comment', names)
+        result = __import__('asyncio').run(
+            agent._execute('bili_api', {'method': 'post_comment'}, {})
+        )
+        self.assertIn('error', result)
+
+    def test_reply_text_is_not_modified(self):
+        sent = {}
+
+        async def send(event, text):
+            sent['text'] = text
+            return True
+
+        agent = ConversationAgent(None, None, FakeAI(), Config(), send)
+        result = __import__('asyncio').run(agent._execute(
+            'reply_comment',
+            {'text': '@Tree-people 模型自己写的回复'},
+            {'root_rpid': 1, 'rpid': 2, 'aid': 3},
+        ))
+        self.assertTrue(result.get('ok'))
+        self.assertEqual(sent['text'], '@Tree-people 模型自己写的回复')
 
 
 if __name__ == '__main__':

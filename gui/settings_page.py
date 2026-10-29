@@ -535,8 +535,8 @@ class SettingsPage(QWidget):
         mention_layout.addStretch()
         layout.addLayout(mention_layout)
         mention_hint = QLabel(
-            "AI 给每个视频打 0-20 分；分数超过阈值才 @ 主人。"
-            "只影响主动发评论，不影响回复和私信。"
+            "AI 给每个视频打 0-20 分；模型会在超过阈值时自己在评论里 @ 主人。"
+            "程序不会自动添加或删除 @。"
         )
         mention_hint.setWordWrap(True)
         mention_hint.setStyleSheet("color: #888; font-size: 12px;")
@@ -675,8 +675,8 @@ class SettingsPage(QWidget):
         """给关键设置项补充悬浮说明"""
         tips = {
             self.owner_mention_score_spin: (
-                "视频评分 0-20，分数超过这个阈值时，主动评论会自动 @ 主人。\n"
-                "例如设为 13：14 分以上才 @；设为 20：只有满分才 @。"
+                "视频评分 0-20。模型会在分数超过阈值时自己写 @ 主人；\n"
+                "程序不会自动加 @、也不会删 @。例如设为 13：14 分以上由模型自行判断是否 @。"
             ),
             self.max_comments_spin: (
                 "每天允许发送的评论 + 回复总数，达到后当天停止发送。\n"

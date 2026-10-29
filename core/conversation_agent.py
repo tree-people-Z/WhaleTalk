@@ -42,9 +42,8 @@ class ConversationAgent:
         self.bili_tool = BiliTool(bili_api, db, config) if bili_api is not None else None
 
     def _read_tools(self, scope: str) -> list:
+        # 回复流程只暴露回复/读取工具；不暴露 bili_api，避免绕过回复去重与配额。
         tools = list(DIARY_TOOLS)
-        if self.bili_tool is not None:
-            tools.insert(0, self.bili_tool.spec())
         tools.append({
             'name': 'inspect_video',
             'description': '读取视频标题、字幕、评论和关键帧，用来理解视频内容。只读。',
@@ -78,25 +77,13 @@ class ConversationAgent:
             f'# 输出\n{load_prompt("conversation_output")}'
         )
 
-    @staticmethod
-    def _maybe_mention_owner(
-        event: Dict[str, Any], text: str, args: Dict[str, Any]
-    ) -> str:
-        # 程序不再自动加 @；模型正文里自己写什么就发什么。
-        return text
-
     async def _transcribe_audio(self, bvid: str, media_urls: dict):
         from core.free_agent import FreeAgent
         return await FreeAgent._transcribe_audio(self, bvid, media_urls)
 
     async def _execute(self, name: str, args: Dict[str, Any], event: Dict[str, Any]) -> Any:
         if name == 'bili_api':
-            if self.bili_tool is None:
-                return {'error': 'B站接口不可用'}
-            return await self.bili_tool.call(
-                str(args.get('method') or ''),
-                args.get('arguments') or args.get('params') or {},
-            )
+            return {'error': '回复流程不提供 bili_api，请用 reply_comment / reply_dm'}
         if name == 'read_diary':
             return read_diary(str(args.get('day') or ''))
         if name == 'inspect_video':
@@ -125,7 +112,6 @@ class ConversationAgent:
             text = str(args.get('text') or '').strip()
             if not text:
                 return {'error': '回复内容为空'}
-            text = self._maybe_mention_owner(event, text, args)
             ok = await self.send_reply(event, text)
             return {'ok': bool(ok), 'text': text}
         return {'error': f'未知工具: {name}'}
