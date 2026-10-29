@@ -160,7 +160,7 @@ class SettingsPage(QWidget):
         for spin in (
             self.max_comments_spin,
             self.max_videos_spin,
-            self.owner_mention_probability_spin,
+            self.owner_mention_score_spin,
             self.browse_interval_min_spin,
             self.browse_interval_max_spin,
             self.reply_check_interval_spin,
@@ -527,14 +527,17 @@ class SettingsPage(QWidget):
         layout.addWidget(self.reply_private_messages_check)
 
         mention_layout = QHBoxLayout()
-        mention_layout.addWidget(QLabel("主动评论时 @主人概率:"))
-        self.owner_mention_probability_spin = QSpinBox()
-        self.owner_mention_probability_spin.setRange(0, 100)
-        self.owner_mention_probability_spin.setSuffix("%")
-        mention_layout.addWidget(self.owner_mention_probability_spin)
+        mention_layout.addWidget(QLabel("主动评论 @主人分数阈值（满分20）:"))
+        self.owner_mention_score_spin = QSpinBox()
+        self.owner_mention_score_spin.setRange(0, 20)
+        self.owner_mention_score_spin.setSuffix("分")
+        mention_layout.addWidget(self.owner_mention_score_spin)
         mention_layout.addStretch()
         layout.addLayout(mention_layout)
-        mention_hint = QLabel("只影响主动发评论，不影响回复评论和私信；100% 表示每条主动评论都 @。")
+        mention_hint = QLabel(
+            "AI 给每个视频打 0-20 分；分数超过阈值才 @ 主人。"
+            "只影响主动发评论，不影响回复和私信。"
+        )
         mention_hint.setWordWrap(True)
         mention_hint.setStyleSheet("color: #888; font-size: 12px;")
         layout.addWidget(mention_hint)
@@ -641,14 +644,12 @@ class SettingsPage(QWidget):
             self.config.get('interaction.reply_private_messages', True)
         )
         try:
-            mention_probability = int(
-                self.config.get('interaction.owner_mention_probability', 35)
+            mention_score = int(
+                self.config.get('limits.min_score_to_mention_owner', 13)
             )
         except (TypeError, ValueError):
-            mention_probability = 35
-        self.owner_mention_probability_spin.setValue(
-            max(0, min(100, mention_probability))
-        )
+            mention_score = 13
+        self.owner_mention_score_spin.setValue(max(0, min(20, mention_score)))
 
         self.browse_interval_min_spin.setValue(
             self.config.get('schedule.browse_interval_min_minutes', 60)
@@ -673,9 +674,9 @@ class SettingsPage(QWidget):
     def _apply_tooltips(self):
         """给关键设置项补充悬浮说明"""
         tips = {
-            self.owner_mention_probability_spin: (
-                "@主人概率：只影响主动发评论，不影响回复和私信。\n"
-                "0% 从不 @；35% 约三分之一；100% 每条都 @（可能刷屏）。"
+            self.owner_mention_score_spin: (
+                "视频评分 0-20，分数超过这个阈值时，主动评论会自动 @ 主人。\n"
+                "例如设为 13：14 分以上才 @；设为 20：只有满分才 @。"
             ),
             self.max_comments_spin: (
                 "每天允许发送的评论 + 回复总数，达到后当天停止发送。\n"
@@ -762,8 +763,8 @@ class SettingsPage(QWidget):
                 self.reply_private_messages_check.isChecked(),
             )
             self.config.set(
-                'interaction.owner_mention_probability',
-                self.owner_mention_probability_spin.value(),
+                'limits.min_score_to_mention_owner',
+                self.owner_mention_score_spin.value(),
             )
 
             interval_min = self.browse_interval_min_spin.value()

@@ -46,15 +46,15 @@ def validate_config(config) -> tuple[bool, str]:
         warnings.append('⚠️ 主人 UID 格式不正确')
     
     # 3. 数值范围验证
-    mention_prob = config.get('interaction.owner_mention_probability', 35)
+    mention_score = config.get('limits.min_score_to_mention_owner', 13)
     try:
-        mention_prob = int(mention_prob)
-        if not 0 <= mention_prob <= 100:
+        mention_score = int(mention_score)
+        if not 0 <= mention_score <= 20:
             errors.append(
-                f'❌ @主人概率应在 0-100 之间，当前为 {mention_prob}'
+                f'❌ @主人分数阈值应在 0-20 之间，当前为 {mention_score}'
             )
     except (TypeError, ValueError):
-        errors.append('❌ @主人概率格式不正确，应为整数')
+        errors.append('❌ @主人分数阈值格式不正确，应为整数')
     
     max_comments = config.get('limits.max_comments_per_day', 60)
     try:

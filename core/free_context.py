@@ -134,9 +134,17 @@ def build_agent_context(config, diary_days: int = 3) -> str:
     ))
     owner = config.get('bilibili.owner_name', '') if config is not None else ''
     share_target = f'@{owner}' if str(owner or '').strip() else '@主人'
+    try:
+        score_threshold = int(
+            config.get('limits.min_score_to_mention_owner', 13)
+        ) if config is not None else 13
+    except (TypeError, ValueError):
+        score_threshold = 13
     share = '# 和主人分享\n' + (load_prompt(
-        'owner_share', owner_mention=share_target
-    ) or f'遇到有意思或者想和主人分享的视频，可以 {share_target}。')
+        'owner_share',
+        owner_mention=share_target,
+        score_threshold=str(score_threshold),
+    ) or f'视频分数超过 {score_threshold}/20 时，可以 {share_target}。')
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'

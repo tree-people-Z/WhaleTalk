@@ -187,25 +187,29 @@ class DashboardTab(QWidget):
         
         layout.addLayout(control_layout)
         
-        # 第二行：@主人概率调整
+        # 第二行：@主人分数阈值调整
         mention_layout = QHBoxLayout()
         
-        mention_label = QLabel("@主人概率:")
-        mention_label.setMinimumWidth(80)
+        mention_label = QLabel("@主人分数阈值:")
+        mention_label.setMinimumWidth(100)
         mention_layout.addWidget(mention_label)
         
         self.mention_spin = QSpinBox()
-        self.mention_spin.setRange(0, 100)
-        self.mention_spin.setSuffix("%")
-        self.mention_spin.setValue(
-            self.config.get('interaction.owner_mention_probability', 35)
-        )
+        self.mention_spin.setRange(0, 20)
+        self.mention_spin.setSuffix("分")
+        try:
+            score_threshold = int(
+                self.config.get('limits.min_score_to_mention_owner', 13)
+            )
+        except (TypeError, ValueError):
+            score_threshold = 13
+        self.mention_spin.setValue(max(0, min(20, score_threshold)))
         self.mention_spin.setMinimumHeight(35)
         self.mention_spin.setMinimumWidth(80)
-        self.mention_spin.valueChanged.connect(self._update_mention_probability)
+        self.mention_spin.valueChanged.connect(self._update_mention_score)
         mention_layout.addWidget(self.mention_spin)
         
-        mention_hint = QLabel("（影响主动评论，不影响回复）")
+        mention_hint = QLabel("（视频满分20，超过阈值才 @；只影响主动评论）")
         mention_hint.setStyleSheet("color: #64748b; font-size: 11px;")
         mention_hint.setWordWrap(True)
         mention_layout.addWidget(mention_hint, 1)  # 可伸缩
@@ -426,11 +430,11 @@ class DashboardTab(QWidget):
             self.notification_list.setVisible(False)
             self.no_notification_label.setVisible(True)
     
-    def _update_mention_probability(self, value):
-        """更新@主人概率"""
+    def _update_mention_score(self, value):
+        """更新 @主人分数阈值"""
         try:
-            self.config.set('interaction.owner_mention_probability', value)
+            self.config.set('limits.min_score_to_mention_owner', value)
             self.config.save()
-            logger.info(f'已更新@主人概率为 {value}%')
+            logger.info(f'已更新@主人分数阈值为 {value}/20')
         except Exception as e:
-            logger.warning(f'保存@主人概率失败: {e}')
+            logger.warning(f'保存@主人分数阈值失败: {e}')

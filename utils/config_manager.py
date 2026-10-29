@@ -200,7 +200,6 @@ class ConfigManager:
                 "prob_watch_later": 10,
                 "prob_repost_dynamic": 3,
                 "reply_private_messages": True,
-                "owner_mention_probability": 35,
                 "coin_commented_video": True,
                 "share_commented_video": False,
                 "watch_later_commented_video": True,

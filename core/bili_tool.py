@@ -251,6 +251,13 @@ class BiliTool:
         share_to_owner = str(args.pop('share_to_owner', '')).lower() in {
             '1', 'true', 'yes', 'on',
         }
+        share_score_raw = args.pop('share_score', args.pop('score', None))
+        share_score = None
+        if share_score_raw not in (None, ''):
+            try:
+                share_score = float(share_score_raw)
+            except (TypeError, ValueError):
+                share_score = None
         args = {
             key: value for key, value in args.items()
             if key not in {'tool', 'method', 'method_name', 'api'}
@@ -291,10 +298,16 @@ class BiliTool:
             return {'error': arg_error}
         if method == 'post_comment':
             owner = ''
+            threshold = 13.0
             try:
                 owner = str(self.config.get('bilibili.owner_name', '') or '').strip()
-            except Exception:  # noqa: BLE001
+                threshold = float(
+                    self.config.get('limits.min_score_to_mention_owner', 13)
+                )
+            except (TypeError, ValueError, AttributeError):
                 pass
+            if share_score is not None:
+                share_to_owner = share_score > threshold
             mention = f'@{owner}' if owner else '@主人'
             text = str(call_args.get('text') or '')
             text = text.replace('@主人', mention)

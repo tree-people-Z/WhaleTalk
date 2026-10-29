@@ -14,7 +14,7 @@ class ConfigValidatorTests(unittest.TestCase):
             'ai.openai_model': 'gpt-4',
             'bilibili.owner_name': 'TestUser',
             'bilibili.owner_uid': 123456,
-            'interaction.owner_mention_probability': 35,
+            'limits.min_score_to_mention_owner': 13,
             'limits.max_comments_per_day': 60,
             'schedule.browse_interval_min_minutes': 30,
             'schedule.browse_interval_max_minutes': 60,
@@ -46,17 +46,17 @@ class ConfigValidatorTests(unittest.TestCase):
         self.assertIn('API Key 格式不正确', msg)
     
     def test_invalid_mention_probability_fails(self):
-        """测试超出范围的@主人概率"""
+        """测试超出范围的@主人分数阈值"""
         config = Mock()
         config.get.side_effect = lambda key, default=None: {
             'ai.provider': 'openai',
             'ai.openai_api_key': 'sk-test1234567890',
-            'interaction.owner_mention_probability': 150,  # 超出范围
+            'limits.min_score_to_mention_owner': 25,  # 超出范围
         }.get(key, default)
         
         valid, msg = validate_config(config)
         self.assertFalse(valid)
-        self.assertIn('@主人概率应在 0-100 之间', msg)
+        self.assertIn('@主人分数阈值应在 0-20 之间', msg)
     
     def test_invalid_interval_range_fails(self):
         """测试最大间隔小于最小间隔"""

@@ -161,6 +161,28 @@ class BiliToolTests(unittest.TestCase):
         }))
         self.assertTrue(bili.last_comment.startswith('@Tree-people '))
 
+    def test_score_threshold_controls_owner_mention(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            'bilibili.owner_name': 'Tree-people',
+            'limits.min_score_to_mention_owner': 13,
+            'limits.max_comments_per_day': 60,
+        }.get(key, default)
+        tool = BiliTool(bili, db, config)
+
+        asyncio.run(tool.call('post_comment', {
+            'aid': 1, 'text': '高分视频', 'share_score': 14,
+        }))
+        self.assertTrue(bili.last_comment.startswith('@Tree-people '))
+
+        asyncio.run(tool.call('post_comment', {
+            'aid': 2, 'text': '刚过线', 'share_score': 13,
+        }))
+        self.assertEqual(bili.last_comment, '刚过线')
+
 
 class FreeContextTests(unittest.TestCase):
     def test_diary_read_write_and_recent_context(self):
