@@ -217,7 +217,54 @@ class BiliToolTests(unittest.TestCase):
         self.assertNotIn('@Tree-people', bili.last_comment)
         self.assertIn('普通内容', bili.last_comment)
 
-    def test_threshold_twenty_needs_more_than_twenty(self):
+    def test_owner_mention_variants_cannot_bypass_threshold(self):
+        bili = FakeBili()
+        db = Mock()
+        db.get_today_comment_count.return_value = 0
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            'bilibili.owner_name': 'Tree-people',
+            'limits.min_score_to_mention_owner': 13,
+            'limits.max_comments_per_day': 60,
+        }.get(key, default)
+        tool = BiliTool(bili, db, config)
+
+        variants = [
+            '@tree-people 内容A',
+            '＠Tree-people 内容B',
+            '@ Tree-people 内容C',
+            '@\u200bTree-people 内容D',
+        ]
+        for index, text in enumerate(variants):
+            asyncio.run(tool.call('post_comment', {
+                'aid': index + 1, 'text': text, 'share_score': 5,
+            }))
+            self.assertNotIn('@', bili.last_comment)
+            self.assertIn('内容', bili.last_comment)
+
+        # 回复评论即使高分也不能带 @
+        asyncio.run(tool.call('post_comment', {
+            'aid': 9, 'text': '@Tree-people 回复内容', 'share_score': 20,
+            'root_rpid': 1, 'parent_rpid': 1,
+        }))
+        self.assertNotIn('@', bili.last_comment)
+
+        # 高分时统一成唯一、大小写正确的主人名
+        asyncio.run(tool.call('post_comment', {
+            'aid': 10, 'text': '@tree-people 高分内容', 'share_score': 14,
+        }))
+        self.assertTrue(bili.last_comment.startswith('@Tree-people '))
+        self.assertEqual(bili.last_comment.count('@'), 1)
+
+        # 只剩 @ 的空评论直接拒绝发送
+        before = bili.last_comment
+        result = asyncio.run(tool.call('post_comment', {
+            'aid': 11, 'text': '@Tree-people', 'share_score': 1,
+        }))
+        self.assertIn('error', result)
+        self.assertEqual(bili.last_comment, before)
+
+
         bili = FakeBili()
         db = Mock()
         db.get_today_comment_count.return_value = 0

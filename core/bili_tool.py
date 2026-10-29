@@ -2,9 +2,26 @@
 
 import inspect
 import json
+import re
 from typing import Any
 
 from loguru import logger
+
+_MENTION_INVISIBLE = '\u200b\u200c\u200d\ufeff'
+
+
+def _strip_owner_mentions(text: str, owner: str) -> str:
+    """删除正文里针对主人的各种 @ 写法，防止模型绕过评分规则。"""
+    patterns = []
+    if owner:
+        patterns.append(
+            r'[@＠]\s*[' + _MENTION_INVISIBLE + r']*' + re.escape(owner)
+        )
+    patterns.append(r'[@＠]\s*[' + _MENTION_INVISIBLE + r']*主人')
+    compiled = re.compile('|'.join(patterns), re.IGNORECASE)
+    cleaned = compiled.sub('', text)
+    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+    return cleaned.strip()
 
 _EXCLUDED = {
     'login_with_qr', 'check_qr_status', 'check_login',
@@ -314,14 +331,18 @@ class BiliTool:
                 not is_reply and score is not None and score > threshold
             )
             mention = f'@{owner}' if owner else '@主人'
-            text = str(call_args.get('text') or '')
-            text = text.replace('@主人', mention)
+            text = _strip_owner_mentions(
+                str(call_args.get('text') or ''), owner
+            )
+            if not text:
+                return {'error': '评论内容为空，未发送'}
+            if score is not None:
+                logger.info(
+                    f'评论评分 {score:g}/20，阈值 {threshold:g}，'
+                    f'{"@主人" if should_mention else "不@主人"}'
+                )
             if should_mention:
-                if mention not in text:
-                    text = f'{mention} {text}'
-            elif not is_reply and mention in text:
-                # 低于阈值时，防止模型自己在正文里写 @ 绕过规则
-                text = ' '.join(text.replace(mention, '').split())
+                text = f'{mention} {text}'
             call_args['text'] = text
         try:
             result = getattr(self.bili, method)(**call_args)
