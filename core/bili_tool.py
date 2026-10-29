@@ -2,26 +2,9 @@
 
 import inspect
 import json
-import re
 from typing import Any
 
 from loguru import logger
-
-_MENTION_INVISIBLE = '\u200b\u200c\u200d\ufeff'
-
-
-def _strip_owner_mentions(text: str, owner: str) -> str:
-    """删除正文里针对主人的各种 @ 写法，防止模型绕过评分规则。"""
-    patterns = []
-    if owner:
-        patterns.append(
-            r'[@＠]\s*[' + _MENTION_INVISIBLE + r']*' + re.escape(owner)
-        )
-    patterns.append(r'[@＠]\s*[' + _MENTION_INVISIBLE + r']*主人')
-    compiled = re.compile('|'.join(patterns), re.IGNORECASE)
-    cleaned = compiled.sub('', text)
-    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
-    return cleaned.strip()
 
 _EXCLUDED = {
     'login_with_qr', 'check_qr_status', 'check_login',
@@ -265,13 +248,6 @@ class BiliTool:
             if not isinstance(nested, dict):
                 break
             args = nested
-        share_score_raw = args.pop('share_score', args.pop('score', None))
-        share_score = None
-        if share_score_raw not in (None, ''):
-            try:
-                share_score = float(share_score_raw)
-            except (TypeError, ValueError):
-                share_score = None
         args = {
             key: value for key, value in args.items()
             if key not in {'tool', 'method', 'method_name', 'api'}
@@ -310,40 +286,6 @@ class BiliTool:
         call_args, arg_error = self._prepare_arguments(method, call_args, extra_bvid)
         if arg_error:
             return {'error': arg_error}
-        if method == 'post_comment':
-            owner = ''
-            threshold = 13.0
-            try:
-                owner = str(self.config.get('bilibili.owner_name', '') or '').strip()
-                threshold = float(
-                    self.config.get('limits.min_score_to_mention_owner', 13)
-                )
-            except (TypeError, ValueError, AttributeError):
-                pass
-            threshold = max(0.0, min(20.0, threshold))
-            score = None
-            if share_score is not None:
-                score = max(0.0, min(20.0, float(share_score)))
-            is_reply = bool(
-                call_args.get('root_rpid') or call_args.get('parent_rpid')
-            )
-            should_mention = (
-                not is_reply and score is not None and score > threshold
-            )
-            mention = f'@{owner}' if owner else '@主人'
-            text = _strip_owner_mentions(
-                str(call_args.get('text') or ''), owner
-            )
-            if not text:
-                return {'error': '评论内容为空，未发送'}
-            if score is not None:
-                logger.info(
-                    f'评论评分 {score:g}/20，阈值 {threshold:g}，'
-                    f'{"@主人" if should_mention else "不@主人"}'
-                )
-            if should_mention:
-                text = f'{mention} {text}'
-            call_args['text'] = text
         try:
             result = getattr(self.bili, method)(**call_args)
             if inspect.isawaitable(result):
