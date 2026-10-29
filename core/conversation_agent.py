@@ -64,7 +64,7 @@ class ConversationAgent:
             tools.append({
                 'name': 'reply_comment',
                 'description': '回复当前评论。',
-                'parameters': {'text': 'string', 'mention_owner': 'bool(可选)'},
+                'parameters': {'text': 'string'},
             })
         return tools
 
@@ -82,12 +82,8 @@ class ConversationAgent:
     def _maybe_mention_owner(
         event: Dict[str, Any], text: str, args: Dict[str, Any]
     ) -> str:
-        if not args.get('mention_owner'):
-            return text
-        owner = event.get('owner_name') or ''
-        if not owner or f'@{owner}' in text:
-            return text
-        return f'@{owner} {text}'
+        # 程序不再自动加 @；模型正文里自己写什么就发什么。
+        return text
 
     async def _transcribe_audio(self, bvid: str, media_urls: dict):
         from core.free_agent import FreeAgent
