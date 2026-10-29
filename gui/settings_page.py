@@ -105,14 +105,14 @@ class TranscriptionSetupWorker(QThread):
         manual_path = LocalAudioTranscriber.local_model_path(model_dir, self.model_name)
         if not manual_path:
             self.status.emit(
-                "正在从国内镜像下载 medium 模型（约 1.5 GB，支持多线程和断点续传）…"
+                f"正在从国内镜像下载 {self.model_name} 模型（支持多线程和断点续传）…"
             )
 
             def report(done: int, total: int):
                 if total:
                     percent = done * 100 // total
                     self.status.emit(
-                        f"正在下载 medium 模型… {percent}% "
+                        f"正在下载 {self.model_name} 模型… {percent}% "
                         f"({done / 1048576:.1f} / {total / 1048576:.1f} MB)"
                     )
 
@@ -136,7 +136,7 @@ class TranscriptionSetupWorker(QThread):
             compute_type='int8',
             download_root=str(model_dir),
         )
-        self.status.emit("✅ 本地语音模型加载成功（medium）")
+        self.status.emit(f"✅ 本地语音模型加载成功（{self.model_name}）")
 
 
 class SettingsPage(QWidget):
@@ -441,6 +441,14 @@ class SettingsPage(QWidget):
         self.transcription_mode_combo.addItem("云端 Whisper", "cloud")
         layout.addRow("无字幕时语音转写:", self.transcription_mode_combo)
 
+        self.local_model_combo = QComboBox()
+        self.local_model_combo.addItem("tiny（最快、最省内存）", "tiny")
+        self.local_model_combo.addItem("base（较快）", "base")
+        self.local_model_combo.addItem("small（平衡）", "small")
+        self.local_model_combo.addItem("medium（默认，约 1.5GB）", "medium")
+        self.local_model_combo.currentIndexChanged.connect(self.auto_save)
+        layout.addRow("本地模型大小:", self.local_model_combo)
+
         hint = QLabel(
             "关键词和每轮数量是偏好，不是固定流程；AI 可以自己决定看多少、看什么。"
             "语音转写用于视频没有 B站字幕时。"
@@ -631,6 +639,12 @@ class SettingsPage(QWidget):
         index = self.transcription_mode_combo.findData(mode)
         if index >= 0:
             self.transcription_mode_combo.setCurrentIndex(index)
+        local_model = self.config.get(
+            'analysis.local_transcription_model', 'medium'
+        )
+        local_index = self.local_model_combo.findData(local_model)
+        if local_index >= 0:
+            self.local_model_combo.setCurrentIndex(local_index)
         self.comment_monitor_check.setChecked(self.config.get('interaction.comment_monitor', False))
         scope = resolve_reply_scope(self.config)
         scope_index = self.reply_scope_combo.findData(scope)
@@ -712,6 +726,10 @@ class SettingsPage(QWidget):
             self.transcription_mode_combo: (
                 "视频没有字幕时，是否用语音识别生成文字。本地模式不上传音频。"
             ),
+            self.local_model_combo: (
+                "本地 Whisper 模型大小。模型越大越准，但内存/CPU 占用越高；\n"
+                "medium 约 1.5GB，small 约 460MB，base 约 140MB，tiny 约 75MB。"
+            ),
         }
         for widget, text in tips.items():
             try:
@@ -748,6 +766,10 @@ class SettingsPage(QWidget):
             self.config.set(
                 'analysis.transcription_mode',
                 self.transcription_mode_combo.currentData() or 'off',
+            )
+            self.config.set(
+                'analysis.local_transcription_model',
+                self.local_model_combo.currentData() or 'medium',
             )
             self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
             apply_reply_scope(
@@ -802,10 +824,13 @@ class SettingsPage(QWidget):
         ):
             widget.setEnabled(is_cloud)
         self.transcription_setup_btn.setEnabled(is_local)
+        self.local_model_combo.setEnabled(is_local)
 
     def open_local_model_dir(self):
         """Create and open the folder for manually downloaded model files."""
-        target = Path('data/models/faster-whisper/medium')
+        target = Path('data/models/faster-whisper') / (
+            self.local_model_combo.currentData() or 'medium'
+        )
         target.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.resolve())))
 
@@ -813,7 +838,7 @@ class SettingsPage(QWidget):
         """Install faster-whisper and download the chosen model on demand."""
         if getattr(self, '_transcription_worker', None) and self._transcription_worker.isRunning():
             return
-        model_name = 'medium'
+        model_name = self.local_model_combo.currentData() or 'medium'
         self.transcription_setup_btn.setEnabled(False)
         self.transcription_status_label.setText(
             f"正在准备 {model_name} 模型，首次下载可能需要一些时间..."
@@ -825,16 +850,17 @@ class SettingsPage(QWidget):
 
     def _refresh_transcription_state(self):
         """Show whether the local model files are complete on disk."""
+        model_name = self.local_model_combo.currentData() or 'medium'
         try:
             from core.audio_transcriber import LocalAudioTranscriber
             path = LocalAudioTranscriber.local_model_path(
-                Path('data/models/faster-whisper'), 'medium'
+                Path('data/models/faster-whisper'), model_name
             )
         except Exception:  # noqa: BLE001
             path = None
         if path:
             self.transcription_state_label.setText(
-                "✅ 本地语音模型已就绪（medium），可以开始本地转写"
+                f"✅ 本地语音模型已就绪（{model_name}），可以开始本地转写"
             )
             self.transcription_state_label.setStyleSheet(
                 "color: #1a7f37; font-weight: 600;"
@@ -853,14 +879,16 @@ class SettingsPage(QWidget):
         self.transcription_setup_btn.setEnabled(True)
         self.transcription_status_label.setText(message)
         if success:
+            model_name = self.local_model_combo.currentData() or 'medium'
             self.transcription_state_label.setText(
-                "✅ 本地语音模型加载成功（medium）"
+                f"✅ 本地语音模型加载成功（{model_name}）"
             )
             self.transcription_state_label.setStyleSheet(
                 "color: #1a7f37; font-weight: 600;"
             )
             self.transcription_setup_btn.setText("重新检测本地模型")
             self.config.set('analysis.transcription_mode', 'local')
+            self.config.set('analysis.local_transcription_model', model_name)
             self.config.set('analysis.local_transcription_enabled', True)
             self.config.set('analysis.local_transcription_model', 'medium')
             mode_index = self.transcription_mode_combo.findData('local')

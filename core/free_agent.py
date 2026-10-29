@@ -223,6 +223,15 @@ class FreeAgent:
         mode = str(self.config.get('analysis.transcription_mode', 'off')) if self.config else 'off'
         if mode not in ('local', 'cloud'):
             return '', ''
+        if mode == 'local':
+            try:
+                from core.audio_transcriber import LocalAudioTranscriber
+                minutes = int(self.config.get(
+                    'analysis.local_model_idle_unload_minutes', 10
+                ))
+                LocalAudioTranscriber.release_if_idle(max(60, minutes * 60))
+            except (ImportError, TypeError, ValueError):
+                pass
         audio_url = (media_urls or {}).get('audio')
         if not audio_url and hasattr(self.bili, 'get_media_urls'):
             try:

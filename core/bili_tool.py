@@ -299,6 +299,8 @@ class BiliTool:
             self._collect_videos(method, call_args, result, video_info)
             if cache_key and isinstance(result, dict) and result.get('bvid'):
                 self._video_cache[cache_key] = result
+                if len(self._video_cache) > 200:
+                    self._video_cache.pop(next(iter(self._video_cache)), None)
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}

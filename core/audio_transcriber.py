@@ -1,9 +1,11 @@
 """Local speech-to-text fallback using faster-whisper."""
 
 import asyncio
+import gc
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +20,7 @@ class LocalAudioTranscriber:
     _model = None
     _model_name = None
     _model_lock = threading.Lock()
+    _last_used = 0.0
 
     # Files required by a faster-whisper / CTranslate2 model directory.
     MODEL_FILES = ('config.json', 'model.bin', 'tokenizer.json', 'vocabulary.txt')
@@ -81,7 +84,23 @@ class LocalAudioTranscriber:
                 download_root=str(model_dir),
             )
             cls._model_name = model_name
+            cls._last_used = time.time()
             return cls._model
+
+    @classmethod
+    def release_if_idle(cls, max_idle_seconds: float = 600) -> bool:
+        """空闲一段时间后释放本地模型，降低常驻内存。"""
+        released = False
+        with cls._model_lock:
+            if (cls._model is not None
+                    and time.time() - cls._last_used > max_idle_seconds):
+                cls._model = None
+                cls._model_name = None
+                released = True
+        if released:
+            gc.collect()
+            logger.info('本地语音模型空闲，已释放内存')
+        return released
 
     async def transcribe_url(
         self,
@@ -124,6 +143,7 @@ class LocalAudioTranscriber:
                 audio_input, beam_size=3, vad_filter=True, condition_on_previous_text=False
             )
             text = ' '.join(segment.text.strip() for segment in segments if segment.text.strip())
+            self.__class__._last_used = time.time()
             if not text:
                 logger.warning("本地语音识别未检测到可用语音")
                 return None

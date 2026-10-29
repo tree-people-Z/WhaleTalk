@@ -90,7 +90,7 @@ class DashboardTab(QWidget):
         # 定时更新
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_dashboard)
-        self.update_timer.start(5000)  # 每5秒更新
+        self.update_timer.start(15000)  # 每15秒更新，降低数据库轮询开销
         
         # 初始更新
         self.update_dashboard()
@@ -365,7 +365,7 @@ class DashboardTab(QWidget):
             """)
             
             # 今日运行轮数（按日期过滤，接口只接受 limit）
-            sessions = self.db.get_recent_agent_sessions(limit=300)
+            sessions = self.db.get_recent_agent_sessions(limit=100)
             today = datetime.now().date()
             today_runs = 0
             for session in sessions:

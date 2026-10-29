@@ -155,6 +155,8 @@ class BiliCommentMixin:
 
             if cache_key is not None:
                 comments_cache[cache_key] = (datetime.now(), list(comments))
+                if len(comments_cache) > 200:
+                    comments_cache.pop(next(iter(comments_cache)), None)
             logger.info(f"获取评论成功, aid={aid}, 数量: {len(comments)}")
             return comments
 
@@ -163,6 +165,8 @@ class BiliCommentMixin:
 
             if '12002' in message or '评论功能已关闭' in message:
                 closed_cache[aid] = datetime.now()
+                if len(closed_cache) > 500:
+                    closed_cache.pop(next(iter(closed_cache)), None)
                 logger.info(f"视频 aid={aid} 评论区已关闭，跳过")
                 return []
 
