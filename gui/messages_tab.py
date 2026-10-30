@@ -166,7 +166,7 @@ class MessagesTab(QWidget):
         worker.start()
 
     def _finish_worker(self, worker, kind: str):
-        worker.deleteLater()
+        # 不在 finished 回调里 deleteLater，避免 QThread 在 run 栈退出前被销毁。
         if kind == 'session' and self._session_worker is worker:
             self._session_worker = None
             self.refresh_btn.setEnabled(True)
@@ -266,7 +266,6 @@ class MessagesTab(QWidget):
         self.refresh_sessions()
 
     def _finish_send(self, worker):
-        worker.deleteLater()
         if self._send_worker is worker:
             self._send_worker = None
 

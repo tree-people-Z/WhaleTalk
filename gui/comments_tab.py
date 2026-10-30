@@ -402,8 +402,8 @@ class CommentsTab(QWidget):
 
     def _finish_worker(self):
         worker = self.sender()
-        if worker is not None:
-            worker.deleteLater()
+        # 不要在这里 deleteLater：QThread 的 finished 信号发出时
+        # 线程栈可能还没完全退出，销毁 QThread 会触发 Qt 原生崩溃。
         if self._worker is worker:
             self._worker = None
 

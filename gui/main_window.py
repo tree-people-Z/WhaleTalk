@@ -809,7 +809,6 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _update_check_finished(self, worker):
-        worker.deleteLater()
         if self._update_worker is worker:
             self._update_worker = None
         self.settings_page.check_update_btn.setEnabled(True)
@@ -863,7 +862,6 @@ class MainWindow(QMainWindow):
         worker.failed.connect(lambda message: self._update_failed(message, dialog))
         worker.cancelled.connect(lambda: self._update_cancelled(dialog))
         dialog.canceled.connect(worker.cancel)
-        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _apply_update(self, source, dialog):
@@ -894,8 +892,12 @@ class MainWindow(QMainWindow):
             return
         self._memory_worker = MemoryWorker(self.ai_client, self.db, self)
         self._memory_worker.done.connect(self._on_memory_done)
-        self._memory_worker.finished.connect(self._memory_worker.deleteLater)
+        self._memory_worker.finished.connect(self._on_memory_finished)
         self._memory_worker.start()
+
+    def _on_memory_finished(self):
+        # 不 deleteLater；QThread 由 Qt 父对象管理，避免 finished 时线程栈未退出就销毁。
+        self._memory_worker = None
 
     def _on_memory_done(self, success: bool, message: str):
         if success and message:
@@ -997,6 +999,32 @@ class MainWindow(QMainWindow):
         if self._update_download is not None and self._update_download.isRunning():
             self._update_download.cancel()
             self._update_download.wait(3000)
+        if self._memory_worker is not None and self._memory_worker.isRunning():
+            self._memory_worker.wait(5000)
+        settings_worker = getattr(
+            self.settings_page, '_transcription_worker', None
+        )
+        if settings_worker is not None and settings_worker.isRunning():
+            settings_worker.wait(5000)
+
+        leftover = []
+        for worker in (
+            self._memory_worker,
+            self._update_worker,
+            self._update_download,
+            settings_worker,
+        ):
+            if worker is not None and worker.isRunning():
+                leftover.append(worker)
+        for tab in (self.comments_tab, self.messages_tab):
+            for attr in ('_worker', '_session_worker', '_message_worker', '_send_worker'):
+                worker = getattr(tab, attr, None)
+                if worker is not None and worker.isRunning():
+                    leftover.append(worker)
+        if leftover:
+            self.log("后台任务仍在运行，请稍后再关闭窗口")
+            event.ignore()
+            return
 
         if self.scheduler and self.scheduler.is_running:
             self.scheduler.stop()
