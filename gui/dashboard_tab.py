@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QListWidget, QSpinBox, QProgressBar, QScrollArea
 )
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from datetime import datetime, timedelta
 from loguru import logger
 
@@ -15,6 +15,8 @@ from gui.icons import load_icon
 
 class DashboardTab(QWidget):
     """仪表盘 - 首页概览"""
+
+    mention_score_changed = pyqtSignal(int)
     
     def __init__(self, analyzer, bili_api, config, db):
         super().__init__()
@@ -436,5 +438,22 @@ class DashboardTab(QWidget):
             self.config.set('limits.min_score_to_mention_owner', value)
             self.config.save()
             logger.info(f'已更新@主人分数阈值为 {value}/20')
+            self.mention_score_changed.emit(int(value))
         except Exception as e:
             logger.warning(f'保存@主人分数阈值失败: {e}')
+
+    def sync_mention_score(self, value=None):
+        """从设置页/配置同步阈值，不触发保存。"""
+        if value is None:
+            try:
+                value = int(self.config.get(
+                    'limits.min_score_to_mention_owner', 13
+                ))
+            except (TypeError, ValueError):
+                value = 13
+        value = max(0, min(20, int(value)))
+        if self.mention_spin.value() == value:
+            return
+        self.mention_spin.blockSignals(True)
+        self.mention_spin.setValue(value)
+        self.mention_spin.blockSignals(False)

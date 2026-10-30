@@ -685,6 +685,24 @@ class SettingsPage(QWidget):
         )
         self._apply_tooltips()
 
+    def sync_mention_score(self, value=None):
+        """从仪表盘同步 @主人分数阈值，不触发保存。"""
+        if not hasattr(self, 'owner_mention_score_spin'):
+            return
+        if value is None:
+            try:
+                value = int(self.config.get(
+                    'limits.min_score_to_mention_owner', 13
+                ))
+            except (TypeError, ValueError):
+                value = 13
+        value = max(0, min(20, int(value)))
+        if self.owner_mention_score_spin.value() == value:
+            return
+        self.owner_mention_score_spin.blockSignals(True)
+        self.owner_mention_score_spin.setValue(value)
+        self.owner_mention_score_spin.blockSignals(False)
+
     def _apply_tooltips(self):
         """给关键设置项补充悬浮说明"""
         tips = {
@@ -801,6 +819,7 @@ class SettingsPage(QWidget):
             )
             self.schedule_settings_saved.emit()
             self.ai_settings_saved.emit()
+            self.analysis_settings_saved.emit()
 
             if not silent:
                 QMessageBox.information(self, "成功", "设置已保存并立即生效！")

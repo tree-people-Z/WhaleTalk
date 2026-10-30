@@ -223,6 +223,13 @@ class MainWindow(QMainWindow):
         # 连接仪表盘按钮
         self.dashboard_tab.run_now_btn.clicked.connect(self.run_analysis_now)
         self.dashboard_tab.pause_btn.clicked.connect(self.toggle_auto_run)
+        # 仪表盘和设置页的 @主人分数阈值双向同步
+        self.dashboard_tab.mention_score_changed.connect(
+            self.settings_page.sync_mention_score
+        )
+        self.settings_page.analysis_settings_saved.connect(
+            self.dashboard_tab.sync_mention_score
+        )
 
         layout.addWidget(self.tabs)
         self.tabs.currentChanged.connect(self._on_tab_changed)
