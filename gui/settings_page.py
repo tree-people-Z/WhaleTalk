@@ -149,8 +149,12 @@ class SettingsPage(QWidget):
     def __init__(self, config: ConfigManager):
         super().__init__()
         self.config = config
-        self.init_ui()
-        self.load_settings()
+        self._loading = True
+        try:
+            self.init_ui()
+            self.load_settings()
+        finally:
+            self._loading = False
 
         # 连接信号，实现实时保存
         self.connect_signals()
@@ -182,6 +186,7 @@ class SettingsPage(QWidget):
         self.ai_provider_combo.currentIndexChanged.connect(self.auto_save)
         self.video_keywords_input.textChanged.connect(self.auto_save)
         self.transcription_mode_combo.currentIndexChanged.connect(self.auto_save)
+        self.local_model_combo.currentIndexChanged.connect(self.auto_save)
         self.deepseek_offpeak_windows_input.editingFinished.connect(self.auto_save)
 
         self.disable_wheel_event(self.ai_provider_combo)
@@ -214,6 +219,8 @@ class SettingsPage(QWidget):
 
     def auto_save(self):
         """自动保存设置（静默）"""
+        if getattr(self, '_loading', False):
+            return
         try:
             # 保存所有设置，不弹窗提示
             self.save_settings(silent=True)
@@ -446,7 +453,6 @@ class SettingsPage(QWidget):
         self.local_model_combo.addItem("base（较快）", "base")
         self.local_model_combo.addItem("small（平衡）", "small")
         self.local_model_combo.addItem("medium（默认，约 1.5GB）", "medium")
-        self.local_model_combo.currentIndexChanged.connect(self.auto_save)
         layout.addRow("本地模型大小:", self.local_model_combo)
 
         hint = QLabel(
