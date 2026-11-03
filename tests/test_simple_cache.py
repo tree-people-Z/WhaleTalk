@@ -1,7 +1,7 @@
 """缓存功能测试"""
 import unittest
 import asyncio
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock
 from utils.simple_cache import cached_video, clear_cache
 
 

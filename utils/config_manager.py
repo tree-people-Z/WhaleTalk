@@ -3,13 +3,23 @@
 """
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
+
 from loguru import logger
+
+from utils import secure_store
 
 
 class ConfigManager:
     """配置管理器"""
+
+    # 需要加密落盘的配置项（内存里始终是明文）。
+    _SECRET_KEYS = (
+        'ai.api_key',
+        'analysis.cloud_transcription.api_key',
+    )
 
     def __init__(self, config_path: Optional[Path] = None):
         """
@@ -20,6 +30,8 @@ class ConfigManager:
         """
         self.config_path = config_path or Path("data/config.json")
         self.config: Dict[str, Any] = {}
+        self._batch_depth = 0
+        self._dirty = False
         self.load()
 
     def load(self):
@@ -31,7 +43,12 @@ class ConfigManager:
                 self._migrate_legacy()
                 self._merge_defaults()
                 self._normalize_secrets()
+                needs_migration = self._decrypt_secrets()
                 self._normalize_transcription()
+                if needs_migration:
+                    # 把遗留的明文 API Key 立即转成密文
+                    self.save()
+                    logger.info("已将明文密钥迁移为加密存储")
                 logger.info(f"配置已加载: {self.config_path}")
             except Exception as e:
                 logger.error(f"加载配置失败: {e}")
@@ -67,16 +84,80 @@ class ConfigManager:
         return changed
 
     def save(self):
-        """保存配置"""
+        """保存配置（敏感项加密落盘）。"""
         try:
             self._normalize_secrets()
             self._normalize_transcription()
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = self._encrypted_copy(self.config)
             with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
             logger.info("配置已保存")
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
+
+    @classmethod
+    def _get_path(cls, config: Dict[str, Any], dotted: str) -> Any:
+        value: Any = config
+        for key in dotted.split('.'):
+            if not isinstance(value, dict):
+                return None
+            value = value.get(key)
+        return value
+
+    @classmethod
+    def _set_path(cls, config: Dict[str, Any], dotted: str, value: Any) -> None:
+        keys = dotted.split('.')
+        target = config
+        for key in keys[:-1]:
+            node = target.get(key)
+            if not isinstance(node, dict):
+                node = {}
+                target[key] = node
+            target = node
+        target[keys[-1]] = value
+
+    def _encrypted_copy(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """返回加密后的深拷贝，避免把密文写回内存中的配置。"""
+        import copy
+
+        payload = copy.deepcopy(config)
+        for dotted in self._SECRET_KEYS:
+            value = self._get_path(payload, dotted)
+            if isinstance(value, str) and value:
+                self._set_path(payload, dotted, secure_store.protect(value))
+        return payload
+
+    def _decrypt_secrets(self) -> bool:
+        """读盘后把密文解回明文，供运行时使用。
+
+        Returns:
+            是否存在需要迁移的明文密钥。
+        """
+        needs_migration = False
+        for dotted in self._SECRET_KEYS:
+            value = self._get_path(self.config, dotted)
+            if not isinstance(value, str) or not value:
+                continue
+            if secure_store.is_encrypted(value):
+                self._set_path(
+                    self.config, dotted, secure_store.unprotect(value)
+                )
+            elif secure_store.available():
+                needs_migration = True
+        return needs_migration
+
+    @contextmanager
+    def batch(self) -> Iterator['ConfigManager']:
+        """批量修改配置：中间不写盘，退出时只保存一次。"""
+        self._batch_depth += 1
+        try:
+            yield self
+        finally:
+            self._batch_depth -= 1
+            if self._batch_depth == 0 and self._dirty:
+                self._dirty = False
+                self.save()
 
     def _normalize_transcription(self):
         """本地转写只提供 medium 模型；transcription_mode 控制关闭/本地/云端。"""
@@ -128,7 +209,10 @@ class ConfigManager:
             config = config[k]
 
         config[keys[-1]] = value
-        self.save()
+        if self._batch_depth > 0:
+            self._dirty = True
+        else:
+            self.save()
 
     def get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
@@ -141,7 +225,10 @@ class ConfigManager:
                 "provider": "deepseek",
                 "api_key": "",
                 "model": "deepseek-flash",
-                "base_url": "https://api.deepseek.com"
+                "base_url": "https://api.deepseek.com",
+                "timeout_seconds": 60,
+                "max_retries": 2,
+                "max_output_tokens": 8000
             },
             "persona": {
                 "name": "鲸鱼娘",
@@ -173,6 +260,7 @@ class ConfigManager:
             },
             "limits": {
                 "max_comments_per_day": 60,
+                "max_writes_per_round": 8,
                 "max_likes_per_day": 50,
                 "max_dm_per_check": 3,
                 "max_dm_per_day": 10,
@@ -216,6 +304,13 @@ class ConfigManager:
                 "own_video_count": 10,
                 "max_own_video_replies_per_check": 10,
                 "mention_owner_on_interesting": False
+            },
+            "evolution": {
+                "enabled": True,
+                "learn_interval_hours": 12,
+                "anti_repetition": True,
+                "max_items": 60,
+                "max_context_chars": 1800
             },
             "analysis": {
                 "enable_frame_analysis": True,

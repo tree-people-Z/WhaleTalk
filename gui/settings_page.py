@@ -13,11 +13,13 @@ from PyQt6.QtWidgets import (
     QMessageBox, QScrollArea, QStackedWidget, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtCore import pyqtSignal, QThread, QSize
+from PyQt6.QtCore import pyqtSignal, QThread, QSize, QTimer
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
+from gui.evolution_worker import EvolutionWorker
+from core.self_evolution import KIND_TITLES, last_learned_at
 from gui.icons import load_icon
 
 from utils.config_manager import ConfigManager
@@ -146,10 +148,18 @@ class SettingsPage(QWidget):
     analysis_settings_saved = pyqtSignal()
     check_update_requested = pyqtSignal()
 
-    def __init__(self, config: ConfigManager):
+    def __init__(self, config: ConfigManager, db=None):
         super().__init__()
         self.config = config
+        self.db = db
+        self._ai_provider = None
+        self._evolution_worker = None
         self._loading = True
+        # 输入框/数值框变化后延迟落盘，避免每敲一个字符就写一次 JSON。
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(400)
+        self._autosave_timer.timeout.connect(self._flush_auto_save)
         try:
             self.init_ui()
             self.load_settings()
@@ -163,11 +173,16 @@ class SettingsPage(QWidget):
         """连接信号实现实时保存"""
         for spin in (
             self.max_comments_spin,
+            self.max_writes_spin,
             self.max_videos_spin,
+            self.ai_timeout_spin,
+            self.ai_retries_spin,
+            self.ai_max_output_spin,
             self.owner_mention_score_spin,
             self.browse_interval_min_spin,
             self.browse_interval_max_spin,
             self.reply_check_interval_spin,
+            self.evolution_interval_spin,
         ):
             spin.valueChanged.connect(self.auto_save)
             self.disable_wheel_event(spin)
@@ -179,6 +194,8 @@ class SettingsPage(QWidget):
             self.like_replied_comment_check,
             self.reply_private_messages_check,
             self.deepseek_offpeak_check,
+            self.evolution_enabled_check,
+            self.anti_repetition_check,
         ):
             check.stateChanged.connect(self.auto_save)
 
@@ -218,14 +235,28 @@ class SettingsPage(QWidget):
         )
 
     def auto_save(self):
-        """自动保存设置（静默）"""
+        """自动保存设置（防抖：停止输入 400ms 后才写盘）。"""
+        if getattr(self, '_loading', False):
+            return
+        self._autosave_timer.start()
+
+    def _flush_auto_save(self):
         if getattr(self, '_loading', False):
             return
         try:
-            # 保存所有设置，不弹窗提示
             self.save_settings(silent=True)
         except Exception as e:
             logger.error(f"自动保存设置失败: {e}")
+
+    def flush_pending_save(self):
+        """离开页面/退出前把尚未落盘的修改立即写入。"""
+        if self._autosave_timer.isActive():
+            self._autosave_timer.stop()
+            self._flush_auto_save()
+
+    def hideEvent(self, event):
+        self.flush_pending_save()
+        super().hideEvent(event)
 
     def _make_settings_page(self, widgets) -> QScrollArea:
         """把一组设置分区包成一个可滚动页面"""
@@ -281,6 +312,7 @@ class SettingsPage(QWidget):
             ("AI 与运行", "ai"),
             ("刷视频", "video"),
             ("互动与私信", "chat"),
+            ("成长与语言", "palette"),
             ("关于与更新", "info"),
         ):
             item = QListWidgetItem(load_icon(icon_name), label)
@@ -318,7 +350,12 @@ class SettingsPage(QWidget):
             self._create_advanced_section(),
         ]))
 
-        # 第 5 页：关于与更新
+        # 第 5 页：成长与语言
+        self.page_stack.addWidget(self._make_settings_page([
+            self._create_evolution_section(),
+        ]))
+
+        # 第 6 页：关于与更新
         self.auto_run_btn = QPushButton("启动自动运营")
         self.auto_run_btn.setIcon(load_icon('play'))
         self.auto_run_btn.setMinimumHeight(40)
@@ -392,6 +429,22 @@ class SettingsPage(QWidget):
         self.base_url_input = QLineEdit()
         self.base_url_input.setPlaceholderText("留空使用默认")
         layout.addRow("Base URL:", self.base_url_input)
+
+        self.ai_timeout_spin = QSpinBox()
+        self.ai_timeout_spin.setRange(10, 300)
+        self.ai_timeout_spin.setSuffix(" 秒")
+        layout.addRow("单次请求超时:", self.ai_timeout_spin)
+
+        self.ai_retries_spin = QSpinBox()
+        self.ai_retries_spin.setRange(0, 5)
+        self.ai_retries_spin.setSuffix(" 次")
+        layout.addRow("网络错误重试:", self.ai_retries_spin)
+
+        self.ai_max_output_spin = QSpinBox()
+        self.ai_max_output_spin.setRange(1000, 32000)
+        self.ai_max_output_spin.setSingleStep(500)
+        self.ai_max_output_spin.setSuffix(" tokens")
+        layout.addRow("推理模型输出预算:", self.ai_max_output_spin)
 
         group.setLayout(layout)
         return group
@@ -475,13 +528,191 @@ class SettingsPage(QWidget):
         self.max_comments_spin.setRange(0, 9999)
         layout.addRow("每日最大发送数（评论+回复）:", self.max_comments_spin)
 
-        hint = QLabel("自由 Agent 可以自己决定做什么，但仍受这个上限和 B站冷却保护。")
+        self.max_writes_spin = QSpinBox()
+        self.max_writes_spin.setRange(1, 30)
+        self.max_writes_spin.setSuffix(" 次")
+        layout.addRow("单轮写操作上限:", self.max_writes_spin)
+
+        hint = QLabel("自由 Agent 可以自己决定做什么，但仍受这些上限和 B站冷却保护。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 12px;")
         layout.addRow("", hint)
 
         group.setLayout(layout)
         return group
+
+    def _create_evolution_section(self) -> QGroupBox:
+        """在线学习：把 B 站上的语言、梗、经验和知识沉淀成成长档案。"""
+        group = QGroupBox("在线学习与成长")
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+
+        desc = QLabel(
+            "她会从 B 站公开评论、互动和日记里，自己提炼语言、梗、兴趣、"
+            "互动经验和知识，形成会衰减的成长档案。核心人设文件不会被自动修改。"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #6b7a90; font-size: 12px;")
+        layout.addWidget(desc)
+
+        self.evolution_enabled_check = QCheckBox("启用在线学习")
+        layout.addWidget(self.evolution_enabled_check)
+        self.anti_repetition_check = QCheckBox(
+            "发送前检查重复开头和口头禅（必要时自动改写）"
+        )
+        layout.addWidget(self.anti_repetition_check)
+
+        form = QFormLayout()
+        self.evolution_interval_spin = QSpinBox()
+        self.evolution_interval_spin.setRange(1, 168)
+        self.evolution_interval_spin.setSuffix(" 小时")
+        form.addRow("自动学习间隔:", self.evolution_interval_spin)
+        layout.addLayout(form)
+
+        self.evolution_status_label = QLabel("还没有学习记录")
+        self.evolution_status_label.setWordWrap(True)
+        self.evolution_status_label.setStyleSheet("color: #6b7a90; font-size: 12px;")
+        layout.addWidget(self.evolution_status_label)
+
+        self.growth_list = QListWidget()
+        self.growth_list.setObjectName("flatList")
+        self.growth_list.setMinimumHeight(170)
+        layout.addWidget(self.growth_list)
+
+        buttons = QHBoxLayout()
+        self.evolution_learn_btn = QPushButton("立即学习")
+        self.evolution_learn_btn.setObjectName("primaryButton")
+        self.evolution_learn_btn.setMinimumHeight(34)
+        self.evolution_learn_btn.clicked.connect(self.run_evolution_now)
+        buttons.addWidget(self.evolution_learn_btn)
+
+        self.evolution_delete_btn = QPushButton("删除选中")
+        self.evolution_delete_btn.setObjectName("ghostButton")
+        self.evolution_delete_btn.clicked.connect(self.delete_selected_growth)
+        buttons.addWidget(self.evolution_delete_btn)
+
+        self.evolution_clear_btn = QPushButton("清空全部")
+        self.evolution_clear_btn.setObjectName("ghostButton")
+        self.evolution_clear_btn.clicked.connect(self.clear_growth)
+        buttons.addWidget(self.evolution_clear_btn)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+        hint = QLabel(
+            "条目会随使用和新鲜度加权、衰减；长期不用的会逐渐停用。"
+            "「立即学习」会消耗一次模型调用。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #8a97a8; font-size: 11px;")
+        layout.addWidget(hint)
+
+        group.setLayout(layout)
+        return group
+
+    def set_ai_provider(self, provider):
+        """由主窗口注入当前 AI 客户端（设置变化后会重建）。"""
+        self._ai_provider = provider
+
+    def _current_ai(self):
+        if callable(self._ai_provider):
+            try:
+                return self._ai_provider()
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def refresh_growth_list(self):
+        """从数据库刷新成长档案列表与统计。"""
+        if not hasattr(self, 'growth_list'):
+            return
+        self.growth_list.clear()
+        if self.db is None:
+            self.evolution_status_label.setText("数据库未连接")
+            return
+        try:
+            items = self.db.get_growth_items(limit=50)
+            counts = self.db.growth_counts()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'读取成长档案失败: {exc}')
+            self.evolution_status_label.setText("读取成长档案失败")
+            return
+        for item in items:
+            label = KIND_TITLES.get(item['kind'], item['kind'])
+            text = f"[{label}] {item['title']}"
+            row = QListWidgetItem(text)
+            row.setData(Qt.ItemDataRole.UserRole, int(item['id']))
+            row.setToolTip(
+                f"{item['content']}\n\n权重 {item['weight']} · 使用 {item['use_count']} 次"
+            )
+            self.growth_list.addItem(row)
+        total = sum(counts.values())
+        last = last_learned_at()
+        short_names = {
+            'language': '语言', 'interest': '兴趣', 'interaction': '互动',
+            'knowledge': '知识', 'value': '态度',
+        }
+        parts = [
+            f"{short_names.get(kind, kind)} {count}"
+            for kind, count in counts.items()
+        ]
+        summary = f"共 {total} 条" + (f"（{'、'.join(parts)}）" if parts else "")
+        if last:
+            summary += f" · 上次学习 {last:%m-%d %H:%M}"
+        self.evolution_status_label.setText(summary or "还没有学习记录")
+
+    def run_evolution_now(self):
+        if self.db is None:
+            QMessageBox.warning(self, "在线学习", "数据库未连接")
+            return
+        if self._evolution_worker is not None and self._evolution_worker.isRunning():
+            return
+        ai_client = self._current_ai()
+        if ai_client is None:
+            QMessageBox.warning(self, "在线学习", "请先配置 AI 模型")
+            return
+        self.evolution_learn_btn.setEnabled(False)
+        self.evolution_status_label.setText("正在从最近的素材里学习…")
+        worker = EvolutionWorker(ai_client, self.db, self.config, self)
+        self._evolution_worker = worker
+        worker.done.connect(self._on_evolution_done)
+        worker.finished.connect(self._on_evolution_finished)
+        worker.start()
+
+    def _on_evolution_finished(self):
+        self._evolution_worker = None
+        self.evolution_learn_btn.setEnabled(True)
+        self.refresh_growth_list()
+
+    def _on_evolution_done(self, ok: bool, message: str, result: dict):
+        self.refresh_growth_list()
+        if ok:
+            logger.info(f"🧬 {message}")
+            QMessageBox.information(self, "在线学习", message)
+        else:
+            QMessageBox.warning(self, "在线学习", message)
+
+    def delete_selected_growth(self):
+        if self.db is None:
+            return
+        row = self.growth_list.currentItem()
+        if row is None:
+            return
+        item_id = row.data(Qt.ItemDataRole.UserRole)
+        if item_id is None:
+            return
+        self.db.delete_growth_item(int(item_id))
+        self.refresh_growth_list()
+
+    def clear_growth(self):
+        if self.db is None:
+            return
+        if QMessageBox.question(
+            self, "清空成长档案",
+            "确定删除全部成长条目吗？核心人设和日记不会受影响。",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.db.clear_growth_items()
+        self.refresh_growth_list()
 
     def _create_about_section(self) -> QGroupBox:
         """创建关于与更新区域"""
@@ -627,7 +858,40 @@ class SettingsPage(QWidget):
         self.model_input.setText(self.config.get('ai.model', ''))
         self.base_url_input.setText(self.config.get('ai.base_url', ''))
 
+        self.evolution_enabled_check.setChecked(
+            self.config.get('evolution.enabled', True)
+        )
+        self.anti_repetition_check.setChecked(
+            self.config.get('evolution.anti_repetition', True)
+        )
+        try:
+            learn_hours = int(self.config.get('evolution.learn_interval_hours', 12))
+        except (TypeError, ValueError):
+            learn_hours = 12
+        self.evolution_interval_spin.setValue(max(1, min(168, learn_hours)))
+        self.refresh_growth_list()
+
         self.max_comments_spin.setValue(self.config.get('limits.max_comments_per_day', 60))
+        try:
+            max_writes = int(self.config.get('limits.max_writes_per_round', 8))
+        except (TypeError, ValueError):
+            max_writes = 8
+        self.max_writes_spin.setValue(max(1, min(30, max_writes)))
+        try:
+            ai_timeout = int(self.config.get('ai.timeout_seconds', 60))
+        except (TypeError, ValueError):
+            ai_timeout = 60
+        self.ai_timeout_spin.setValue(max(10, min(300, ai_timeout)))
+        try:
+            ai_retries = int(self.config.get('ai.max_retries', 2))
+        except (TypeError, ValueError):
+            ai_retries = 2
+        self.ai_retries_spin.setValue(max(0, min(5, ai_retries)))
+        try:
+            max_output = int(self.config.get('ai.max_output_tokens', 8000))
+        except (TypeError, ValueError):
+            max_output = 8000
+        self.ai_max_output_spin.setValue(max(1000, min(32000, max_output)))
         keywords = self.config.get('search.keywords', [])
         if isinstance(keywords, str):
             keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
@@ -762,67 +1026,10 @@ class SettingsPage(QWidget):
                 continue
 
     def save_settings(self, silent=False):
-        """保存设置"""
+        """保存设置（一次性写盘）。"""
         try:
-            self.config.set('bilibili.owner_uid', self.owner_uid_input.text())
-            self.config.set('bilibili.owner_name', self.owner_name_input.text())
-
-            self.config.set('persona.name', self.persona_name_input.text())
-            self.config.set('persona.enabled', self.persona_enabled_check.isChecked())
-            persona_file = self.config.get('persona.persona_file', 'data/persona.md')
-            from pathlib import Path
-            Path(persona_file).parent.mkdir(parents=True, exist_ok=True)
-            Path(persona_file).write_text(self.persona_desc_text.toPlainText(), encoding='utf-8')
-
-            self.config.set('ai.provider', self.ai_provider_combo.currentText())
-            self.config.set('ai.api_key', self.api_key_input.text().strip())
-            self.config.set('ai.model', self.model_input.text())
-            self.config.set('ai.base_url', self.base_url_input.text())
-
-            self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
-            self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
-            keywords = [
-                line.strip()
-                for line in self.video_keywords_input.toPlainText().splitlines()
-                if line.strip()
-            ]
-            self.config.set('search.keywords', keywords)
-            self.config.set(
-                'analysis.transcription_mode',
-                self.transcription_mode_combo.currentData() or 'off',
-            )
-            self.config.set(
-                'analysis.local_transcription_model',
-                self.local_model_combo.currentData() or 'medium',
-            )
-            self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
-            apply_reply_scope(
-                self.config, self.reply_scope_combo.currentData() or 'all'
-            )
-            self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
-            self.config.set(
-                'interaction.like_replied_comments',
-                self.like_replied_comment_check.isChecked(),
-            )
-            self.config.set(
-                'interaction.reply_private_messages',
-                self.reply_private_messages_check.isChecked(),
-            )
-            self.config.set(
-                'limits.min_score_to_mention_owner',
-                self.owner_mention_score_spin.value(),
-            )
-
-            interval_min = self.browse_interval_min_spin.value()
-            interval_max = self.browse_interval_max_spin.value()
-            self.config.set('schedule.browse_interval_min_minutes', min(interval_min, interval_max))
-            self.config.set('schedule.browse_interval_max_minutes', max(interval_min, interval_max))
-            self.config.set('schedule.reply_check_interval_minutes', self.reply_check_interval_spin.value())
-            self.config.set('schedule.deepseek_offpeak_only', self.deepseek_offpeak_check.isChecked())
-            self.config.set(
-                'schedule.deepseek_offpeak_windows',
-                self.deepseek_offpeak_windows_input.text().strip()
-            )
+            with self.config.batch():
+                self._apply_settings_to_config()
             self.schedule_settings_saved.emit()
             self.ai_settings_saved.emit()
             self.analysis_settings_saved.emit()
@@ -833,6 +1040,80 @@ class SettingsPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存设置失败:\n{e}")
             logger.error(f"保存设置失败: {e}")
+
+    def _apply_settings_to_config(self):
+        """把界面值写进配置对象；由 save_settings 统一提交。"""
+        self.config.set('bilibili.owner_uid', self.owner_uid_input.text())
+
+        self.config.set('bilibili.owner_name', self.owner_name_input.text())
+
+        self.config.set('persona.name', self.persona_name_input.text())
+        self.config.set('persona.enabled', self.persona_enabled_check.isChecked())
+        persona_file = self.config.get('persona.persona_file', 'data/persona.md')
+        from pathlib import Path
+        Path(persona_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(persona_file).write_text(self.persona_desc_text.toPlainText(), encoding='utf-8')
+
+        self.config.set('ai.provider', self.ai_provider_combo.currentText())
+        self.config.set('ai.api_key', self.api_key_input.text().strip())
+        self.config.set('ai.model', self.model_input.text())
+        self.config.set('ai.base_url', self.base_url_input.text())
+        self.config.set('evolution.enabled', self.evolution_enabled_check.isChecked())
+        self.config.set(
+            'evolution.anti_repetition', self.anti_repetition_check.isChecked()
+        )
+        self.config.set(
+            'evolution.learn_interval_hours', self.evolution_interval_spin.value()
+        )
+        self.config.set('ai.timeout_seconds', self.ai_timeout_spin.value())
+        self.config.set('ai.max_retries', self.ai_retries_spin.value())
+        self.config.set('ai.max_output_tokens', self.ai_max_output_spin.value())
+
+        self.config.set('limits.max_comments_per_day', self.max_comments_spin.value())
+        self.config.set('limits.max_writes_per_round', self.max_writes_spin.value())
+        self.config.set('limits.max_videos_per_run', self.max_videos_spin.value())
+        keywords = [
+            line.strip()
+            for line in self.video_keywords_input.toPlainText().splitlines()
+            if line.strip()
+        ]
+        self.config.set('search.keywords', keywords)
+        self.config.set(
+            'analysis.transcription_mode',
+            self.transcription_mode_combo.currentData() or 'off',
+        )
+        self.config.set(
+            'analysis.local_transcription_model',
+            self.local_model_combo.currentData() or 'medium',
+        )
+        self.config.set('interaction.comment_monitor', self.comment_monitor_check.isChecked())
+        apply_reply_scope(
+            self.config, self.reply_scope_combo.currentData() or 'all'
+        )
+        self.config.set('interaction.auto_reply', self.auto_reply_check.isChecked())
+        self.config.set(
+            'interaction.like_replied_comments',
+            self.like_replied_comment_check.isChecked(),
+        )
+        self.config.set(
+            'interaction.reply_private_messages',
+            self.reply_private_messages_check.isChecked(),
+        )
+        self.config.set(
+            'limits.min_score_to_mention_owner',
+            self.owner_mention_score_spin.value(),
+        )
+
+        interval_min = self.browse_interval_min_spin.value()
+        interval_max = self.browse_interval_max_spin.value()
+        self.config.set('schedule.browse_interval_min_minutes', min(interval_min, interval_max))
+        self.config.set('schedule.browse_interval_max_minutes', max(interval_min, interval_max))
+        self.config.set('schedule.reply_check_interval_minutes', self.reply_check_interval_spin.value())
+        self.config.set('schedule.deepseek_offpeak_only', self.deepseek_offpeak_check.isChecked())
+        self.config.set(
+            'schedule.deepseek_offpeak_windows',
+            self.deepseek_offpeak_windows_input.text().strip()
+        )
 
     def on_transcription_mode_changed(self):
         self._update_transcription_controls()

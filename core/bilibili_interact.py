@@ -1,5 +1,7 @@
 """B站视频互动、动态与弹幕。"""
 
+import random
+
 from bilibili_api import dynamic, favorite_list, user, video
 from bilibili_api.user import RelationType
 from bilibili_api.utils.danmaku import Danmaku

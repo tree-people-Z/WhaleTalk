@@ -1,5 +1,6 @@
 """Download and describe images attached to B站 comments."""
 
+import asyncio
 import hashlib
 from pathlib import Path
 from typing import Any, Dict, List
@@ -52,7 +53,7 @@ async def describe_comment_images(
         for url in (comment.get('images') or [])[:2]:
             if described >= max_images:
                 break
-            path = _download(url)
+            path = await asyncio.to_thread(_download, url)
             if path is None:
                 continue
             cache = path.with_suffix(path.suffix + '.txt')

@@ -35,10 +35,15 @@ class UpdateDownloadWorker(QThread):
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
 
-    def __init__(self, asset_url: str, asset_digest: str = "", parent=None):
+    def __init__(
+        self, asset_url: str, asset_digest: str = "", parent=None,
+        asset_name: str = "", checksums_url: str = "",
+    ):
         super().__init__(parent)
         self.asset_url = asset_url
         self.asset_digest = asset_digest
+        self.asset_name = asset_name
+        self.checksums_url = checksums_url
         self._cancelled = False
 
     def cancel(self):
@@ -55,6 +60,8 @@ class UpdateDownloadWorker(QThread):
                 self.asset_digest,
                 progress=lambda done, total: self.progress.emit(done, total),
                 should_cancel=lambda: self._cancelled,
+                asset_name=self.asset_name,
+                checksums_url=self.checksums_url,
             )
             source = extract_update(archive, staging / "extracted")
             self.ready.emit(str(source))

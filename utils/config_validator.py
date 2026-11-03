@@ -73,8 +73,39 @@ def validate_config(config) -> tuple[bool, str]:
             )
     except (TypeError, ValueError):
         errors.append('❌ 每日评论上限格式不正确，应为整数')
+
+    max_writes = config.get('limits.max_writes_per_round', 8)
+    try:
+        max_writes = int(max_writes)
+        if not 1 <= max_writes <= 30:
+            errors.append(
+                f'❌ 单轮写操作上限应在 1-30 之间，当前为 {max_writes}'
+            )
+    except (TypeError, ValueError):
+        errors.append('❌ 单轮写操作上限格式不正确，应为整数')
     
-    # 4. 时间间隔验证
+    # 4. 在线学习参数
+    learn_hours = config.get('evolution.learn_interval_hours', 12)
+    try:
+        learn_hours = int(learn_hours)
+        if not 1 <= learn_hours <= 168:
+            errors.append(
+                f'❌ 在线学习间隔应在 1-168 小时之间，当前为 {learn_hours}'
+            )
+    except (TypeError, ValueError):
+        errors.append('❌ 在线学习间隔格式不正确，应为整数')
+
+    max_items = config.get('evolution.max_items', 60)
+    try:
+        max_items = int(max_items)
+        if not 10 <= max_items <= 200:
+            errors.append(
+                f'❌ 成长档案条目上限应在 10-200 之间，当前为 {max_items}'
+            )
+    except (TypeError, ValueError):
+        errors.append('❌ 成长档案条目上限格式不正确，应为整数')
+
+    # 5. 时间间隔验证
     interval_min = config.get('schedule.browse_interval_min_minutes', 30)
     interval_max = config.get('schedule.browse_interval_max_minutes', 60)
     try:

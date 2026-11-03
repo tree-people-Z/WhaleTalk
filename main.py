@@ -154,6 +154,21 @@ def main():
         app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyle("Fusion")  # 使用Fusion风格
 
+    # 单实例保护：双开会同时自动运营，容易重复评论/私信并触发风控。
+    from PyQt6.QtWidgets import QMessageBox
+    from utils.single_instance import acquire_instance_lock
+
+    instance_lock = acquire_instance_lock(Path('data/app.lock'))
+    if instance_lock is None:
+        logger.warning("已有实例在运行，本次启动已退出")
+        QMessageBox.information(
+            None, "鲸语已在运行",
+            "检测到鲸语已经在后台运行。\n"
+            "请从系统托盘打开它，避免两个程序同时操作账号。"
+        )
+        return 0
+    app.aboutToQuit.connect(instance_lock.unlock)
+
     # 设置高DPI支持
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
@@ -181,6 +196,7 @@ def main():
     # 运行应用
     exit_code = app.exec()
 
+    instance_lock.unlock()
     logger.info(f"程序退出，退出码: {exit_code}")
     return exit_code
 

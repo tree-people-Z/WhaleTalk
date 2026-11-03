@@ -2,6 +2,7 @@
 
 import inspect
 import json
+import time
 from typing import Any
 
 from loguru import logger
@@ -47,6 +48,7 @@ class BiliTool:
         self.writes = 0
         self.video_refs: list[dict] = []
         self._video_cache: dict[str, dict] = {}
+        self._own_texts_cache: tuple[float, set] = (0.0, set())
         self._specs = self._build_specs()
 
     @staticmethod
@@ -148,9 +150,22 @@ class BiliTool:
     def method_names(self) -> set:
         return {item['name'] for item in self._specs}
 
+    def reset_writes(self) -> None:
+        """新一轮开始时清零单轮写操作计数。"""
+        self.writes = 0
+
+    def _max_writes_per_round(self) -> int:
+        try:
+            return max(0, int(self.config.get('limits.max_writes_per_round', 8)))
+        except (TypeError, ValueError, AttributeError):
+            return 8
+
     def _check_write(self, method: str, args: dict) -> str:
         if method not in _WRITE_METHODS:
             return ''
+        maximum_round = self._max_writes_per_round()
+        if maximum_round and self.writes >= maximum_round:
+            return f'本轮写操作已达上限 {maximum_round} 次，停止执行'
         if method in {'post_comment', 'send_private_message', 'send_danmaku',
                       'post_video_dynamic'}:
             try:
@@ -301,12 +316,50 @@ class BiliTool:
                 self._video_cache[cache_key] = result
                 if len(self._video_cache) > 200:
                     self._video_cache.pop(next(iter(self._video_cache)), None)
+            self._observe_result(method, result)
             return result
         except TypeError as exc:
             return {'error': f'参数不匹配: {exc}'}
         except Exception as exc:  # noqa: BLE001
             logger.warning(f'自由 Agent 调用 {method} 失败: {exc}')
             return {'error': str(exc)}
+
+    def _own_texts(self) -> set:
+        """最近自己发过的内容，避免把学习素材学成自己的口癖。"""
+        if self.db is None:
+            return set()
+        cached_at, cached = self._own_texts_cache
+        if time.monotonic() - cached_at < 300:
+            return cached
+        try:
+            texts = set(self.db.get_recent_own_comments(limit=100))
+        except Exception:  # noqa: BLE001
+            texts = set()
+        self._own_texts_cache = (time.monotonic(), texts)
+        return texts
+
+    def _observe_result(self, method: str, result: Any) -> None:
+        """把公开评论存成在线学习素材（用于学语言、梗和社区表达）。"""
+        if self.db is None or not isinstance(result, list):
+            return
+        if method not in {'get_comments', 'get_comment_thread', 'get_at_messages'}:
+            return
+        own = self._own_texts()
+        texts = []
+        for item in result[:8]:
+            if not isinstance(item, dict):
+                continue
+            content = str(
+                item.get('content') or item.get('message') or ''
+            ).strip()
+            if content and content not in own:
+                texts.append(content)
+        if not texts:
+            return
+        try:
+            self.db.record_observed_texts(texts, source=method)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'记录公开文本失败: {exc}')
 
     async def _record_comment(
         self, args: dict, bvid: str, success: bool, video_info: dict | None

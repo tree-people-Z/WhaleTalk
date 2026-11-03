@@ -7,6 +7,8 @@ from loguru import logger
 
 from core.bili_tool import BiliTool
 from core.free_context import DIARY_TOOLS, append_diary, build_agent_context, read_diary
+from core.self_evolution import record_growth_usage
+from core.style_guard import prepare_outgoing_text
 from core.system_prompts import load_prompt
 
 MAX_STEPS = 8
@@ -106,13 +108,23 @@ class ConversationAgent:
             text = str(args.get('text') or '').strip()
             if not text or self.send_dm is None:
                 return {'error': '回复内容为空'}
+            text = await prepare_outgoing_text(
+                self.ai, self.db, self.config, text, purpose='reply_dm'
+            )
             ok = await self.send_dm(event, text)
+            if ok:
+                record_growth_usage(text, self.db)
             return {'ok': bool(ok), 'text': text}
         if name == 'reply_comment':
             text = str(args.get('text') or '').strip()
             if not text:
                 return {'error': '回复内容为空'}
+            text = await prepare_outgoing_text(
+                self.ai, self.db, self.config, text, purpose='reply_comment'
+            )
             ok = await self.send_reply(event, text)
+            if ok:
+                record_growth_usage(text, self.db)
             return {'ok': bool(ok), 'text': text}
         return {'error': f'未知工具: {name}'}
 
@@ -135,8 +147,8 @@ class ConversationAgent:
                 'content': '当前事件：' + json.dumps(event, ensure_ascii=False, default=str),
             },
         ]
-        for step in range(MAX_STEPS):
-            response = await self.ai.chat(messages, temperature=0.7, max_tokens=700)
+        for _ in range(MAX_STEPS):
+            response = await self.ai.chat(messages, temperature=0.7, max_tokens=1500)
             if not response:
                 return False
             decision = _parse(response)
@@ -151,9 +163,17 @@ class ConversationAgent:
                 text = str(decision.get('text') or '').strip()
                 if not text:
                     return False
+                text = await prepare_outgoing_text(
+                    self.ai, self.db, self.config, text,
+                    purpose='reply_dm' if event.get('scope') == 'dm' else 'reply_comment',
+                )
                 if event.get('scope') == 'dm' and self.send_dm is not None:
-                    return bool(await self.send_dm(event, text))
-                return bool(await self.send_reply(event, text))
+                    ok = bool(await self.send_dm(event, text))
+                else:
+                    ok = bool(await self.send_reply(event, text))
+                if ok:
+                    record_growth_usage(text, self.db)
+                return ok
             tool = str(decision.get('tool') or '')
             args = decision.get('arguments') or {}
             if not isinstance(args, dict):

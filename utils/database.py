@@ -1,185 +1,35 @@
 """
 数据库模块
-使用SQLite存储历史记录
+使用SQLite存储历史记录（模型见 utils/db_models.py，迁移见 utils/db_migrations.py）
 """
 
-from pathlib import Path
+import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, inspect, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
+from sqlalchemy import create_engine, func
+from sqlalchemy.orm import scoped_session, sessionmaker
 
-Base = declarative_base()
-
-
-class VideoRecord(Base):
-    """视频记录表"""
-    __tablename__ = 'videos'
-
-    id = Column(Integer, primary_key=True)
-    bvid = Column(String(20), unique=True, nullable=False, index=True)
-    aid = Column(Integer)
-    title = Column(String(200))
-    author = Column(String(100))
-    duration = Column(Integer)
-    pubdate = Column(DateTime)
-
-    # 分析结果
-    analyzed_at = Column(DateTime)
-    score = Column(Integer)  # 0-20分
-    worthy = Column(Boolean)
-    reason = Column(Text)
-    summary = Column(Text)
-
-    # 操作记录
-    commented = Column(Boolean, default=False)
-    comment_text = Column(Text)
-    commented_at = Column(DateTime)
-
-    # 元数据
-    created_at = Column(DateTime, default=datetime.now)
-
-
-class CommentRecord(Base):
-    """评论记录表"""
-    __tablename__ = 'comments'
-
-    id = Column(Integer, primary_key=True)
-    bvid = Column(String(20), nullable=False, index=True)
-    aid = Column(Integer)
-    rpid = Column(Integer)  # 评论ID
-    parent_rpid = Column(Integer)  # 被回复的评论ID
-    thread_root = Column(Integer)  # 楼层根评论ID（用于合并同一栋楼）
-
-    comment_type = Column(String(20))  # 'post'=发出, 'reply'=回复
-    content = Column(Text)
-    target_user = Column(String(100))  # 回复的用户
-    parent_content = Column(Text)  # 被回复评论的原文，用于按楼展示
-
-    success = Column(Boolean)
-    error_message = Column(Text)
-
-    created_at = Column(DateTime, default=datetime.now)
-
-
-class LikeRecord(Base):
-    """视频点赞记录"""
-    __tablename__ = 'likes'
-
-    id = Column(Integer, primary_key=True)
-    bvid = Column(String(20), nullable=False, index=True)
-    aid = Column(Integer)
-    success = Column(Boolean)
-    error_message = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
-
-
-class MemoryEvent(Base):
-    """长期记忆：一次与网友的互动。"""
-    __tablename__ = 'memory_events'
-
-    id = Column(Integer, primary_key=True)
-    event_type = Column(String(30), index=True)  # reply/comment/greeting/requested_video
-    user_name = Column(String(100))
-    user_mid = Column(Integer, index=True)
-    aid = Column(Integer)
-    bvid = Column(String(20))
-    video_title = Column(Text)
-    content = Column(Text)       # 对方说的话
-    my_content = Column(Text)    # 我说的话
-    outcome = Column(String(30), default='sent')
-    created_at = Column(DateTime, default=datetime.now, index=True)
-
-
-class ThreadState(Base):
-    """Per-thread conversation state for model-driven replies."""
-    __tablename__ = 'thread_states'
-
-    id = Column(Integer, primary_key=True)
-    thread_root = Column(Integer, unique=True, index=True)
-    bot_participated = Column(Boolean, default=False)
-    reply_count = Column(Integer, default=0)
-    last_reply_at = Column(DateTime)
-    updated_at = Column(DateTime, default=datetime.now)
-
-
-class MediaAsset(Base):
-    """Collected images for later reuse (DM images, dynamic images, etc.)."""
-    __tablename__ = 'media_assets'
-
-    id = Column(Integer, primary_key=True)
-    path = Column(Text, unique=True)
-    source = Column(String(30))
-    source_url = Column(Text)
-    description = Column(Text)
-    tags = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
-    used_count = Column(Integer, default=0)
-
-
-class PrivateChatState(Base):
-    """Last replied private-message timestamp per conversation."""
-    __tablename__ = 'private_chat_state'
-
-    id = Column(Integer, primary_key=True)
-    talker_id = Column(Integer, unique=True, index=True)
-    last_replied_ts = Column(Integer, default=0)
-    updated_at = Column(DateTime, default=datetime.now)
-
-
-class AgentSession(Base):
-    """One free-agent run and the actions it actually performed."""
-    __tablename__ = 'agent_sessions'
-
-    id = Column(Integer, primary_key=True)
-    created_at = Column(DateTime, default=datetime.now, index=True)
-    summary = Column(Text, default='')
-    actions_json = Column(Text, default='[]')
-    videos_json = Column(Text, default='[]')
-    comments_sent = Column(Integer, default=0)
-
-
-class SearchKeywordRecord(Base):
-    """Search terms actually used, for keyword rotation."""
-    __tablename__ = 'search_keywords'
-
-    id = Column(Integer, primary_key=True)
-    keyword = Column(String(100), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.now, index=True)
-
-
-class AgentEvent(Base):
-    """Persistent inbox state so the same @/comment/DM is handled once."""
-    __tablename__ = 'agent_events'
-
-    id = Column(Integer, primary_key=True)
-    event_key = Column(String(160), unique=True, nullable=False, index=True)
-    event_type = Column(String(30), index=True)
-    payload_json = Column(Text, default='{}')
-    status = Column(String(20), default='delivered', index=True)
-    delivery_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    seen_at = Column(DateTime, default=datetime.now)
-    last_delivered_at = Column(DateTime, default=datetime.now)
-    handled_at = Column(DateTime)
-
-
-class DailyQuota(Base):
-    """每日配额表"""
-    __tablename__ = 'daily_quota'
-
-    id = Column(Integer, primary_key=True)
-    date = Column(String(10), unique=True, nullable=False, index=True)  # YYYY-MM-DD
-
-    comments_sent = Column(Integer, default=0)
-    videos_analyzed = Column(Integer, default=0)
-    runs_completed = Column(Integer, default=0)
-
-    last_run_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.now)
-
+from utils.db_migrations import apply_sqlite_pragmas, migrate_schema
+from utils.db_models import (  # noqa: F401 - 向后兼容的重新导出
+    AgentEvent,
+    AgentSession,
+    Base,
+    CommentRecord,
+    DailyQuota,
+    GrowthItem,
+    LikeRecord,
+    MediaAsset,
+    MemoryEvent,
+    ObservedText,
+    PrivateChatState,
+    SearchKeywordRecord,
+    ThreadState,
+    VideoRecord,
+)
 
 class Database:
     """数据库管理器"""
@@ -189,47 +39,35 @@ class Database:
         db_file = Path(db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
 
-        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
+        self.engine = create_engine(
+            f'sqlite:///{db_path}',
+            echo=False,
+            connect_args={'timeout': 30},
+            pool_pre_ping=True,
+        )
+        apply_sqlite_pragmas(self.engine)
         Base.metadata.create_all(self.engine)
-        # Lightweight SQLite migration for databases created by earlier versions.
-        columns = {col['name'] for col in inspect(self.engine).get_columns('comments')}
-        if 'parent_rpid' not in columns:
-            with self.engine.begin() as connection:
-                connection.execute(text('ALTER TABLE comments ADD COLUMN parent_rpid INTEGER'))
-        if 'parent_content' not in columns:
-            with self.engine.begin() as connection:
-                connection.execute(text('ALTER TABLE comments ADD COLUMN parent_content TEXT'))
-        if 'thread_root' not in columns:
-            with self.engine.begin() as connection:
-                connection.execute(text('ALTER TABLE comments ADD COLUMN thread_root INTEGER'))
-        if 'target_user' not in columns:
-            with self.engine.begin() as connection:
-                connection.execute(text('ALTER TABLE comments ADD COLUMN target_user VARCHAR(100)'))
-        session_columns = {
-            col['name'] for col in inspect(self.engine).get_columns('agent_sessions')
-        }
-        if 'videos_json' not in session_columns:
-            with self.engine.begin() as connection:
-                connection.execute(text(
-                    "ALTER TABLE agent_sessions ADD COLUMN videos_json TEXT DEFAULT '[]'"
-                ))
-        event_columns = {
-            col['name'] for col in inspect(self.engine).get_columns('agent_events')
-        }
-        for name, ddl in (
-            ('status', "ALTER TABLE agent_events ADD COLUMN status VARCHAR(20) DEFAULT 'delivered'"),
-            ('delivery_count', "ALTER TABLE agent_events ADD COLUMN delivery_count INTEGER DEFAULT 0"),
-            ('last_delivered_at', "ALTER TABLE agent_events ADD COLUMN last_delivered_at DATETIME"),
-            ('handled_at', "ALTER TABLE agent_events ADD COLUMN handled_at DATETIME"),
-        ):
-            if name not in event_columns:
-                with self.engine.begin() as connection:
-                    connection.execute(text(ddl))
+        migrate_schema(self.engine)
 
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        # 每个线程一个 Session：GUI 定时器与 Agent 工作线程不会共用连接。
+        self._session_factory = scoped_session(
+            sessionmaker(bind=self.engine, expire_on_commit=False)
+        )
 
         logger.info(f"数据库已初始化: {db_path}")
+
+    @property
+    def session(self):
+        """返回当前线程的 Session（scoped_session 保证线程隔离）。"""
+        return self._session_factory()
+
+    def close_session(self):
+        """只释放当前线程的 Session，不关闭共享连接池。"""
+        self._session_factory.remove()
+
+    def dispose(self):
+        """关闭所有连接（退出前调用）。"""
+        self.close()
 
     def add_video_record(
         self,
@@ -366,12 +204,6 @@ class Database:
         self.session.commit()
         return asset
 
-    def get_today_memory_event_count(self, event_type: str) -> int:
-        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        return self.session.query(MemoryEvent).filter(
-            MemoryEvent.event_type == event_type,
-            MemoryEvent.created_at >= start,
-        ).count()
 
     def get_dm_state(self, talker_id: int) -> int:
         state = self.session.query(PrivateChatState).filter_by(
@@ -542,12 +374,6 @@ class Database:
             })
         return results
 
-    def get_recent_videos(self, limit: int = 50) -> List[VideoRecord]:
-        """获取最近的视频记录"""
-        return self.session.query(VideoRecord)\
-            .order_by(VideoRecord.created_at.desc())\
-            .limit(limit)\
-            .all()
 
     def ensure_video_record(
         self, bvid: str, aid: int, title: str = '', author: str = ''
@@ -732,19 +558,6 @@ class Database:
         state.updated_at = now
         self.session.commit()
 
-    def get_comment_outcomes_since(self, since: datetime) -> List[Dict[str, Any]]:
-        """Read success/failure outcomes since a timestamp (for style health)."""
-        records = self.session.query(CommentRecord).filter(
-            CommentRecord.created_at >= since
-        ).all()
-        return [
-            {
-                'success': bool(record.success),
-                'error': record.error_message or '',
-                'created_at': record.created_at,
-            }
-            for record in records
-        ]
 
     def get_recent_comments(
         self, limit: int = 20, include_replies: bool = False
@@ -802,6 +615,288 @@ class Database:
             .filter(CommentRecord.rpid.isnot(None)).all()
         }
 
+    # ------------------------------------------------------------ 在线学习
+    def record_observed_texts(
+        self, texts: List[str], source: str = 'comment'
+    ) -> int:
+        """记录 B 站公开文本，供后续提炼语言/梗/经验。"""
+        added = 0
+        now = datetime.now()
+        for raw in texts or []:
+            text = str(raw or '').strip()
+            if not 6 <= len(text) <= 400:
+                continue
+            digest = hashlib.sha1(text.encode('utf-8')).hexdigest()
+            row = self.session.query(ObservedText).filter_by(
+                digest=digest
+            ).first()
+            if row:
+                row.seen_count = int(row.seen_count or 0) + 1
+                row.last_seen_at = now
+                continue
+            self.session.add(ObservedText(
+                digest=digest,
+                text=text,
+                source=str(source or '')[:40],
+                seen_count=1,
+                created_at=now,
+                last_seen_at=now,
+            ))
+            added += 1
+        if added:
+            self.session.commit()
+        return added
+
+    def get_observed_texts(
+        self, since_days: int = 7, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        since = datetime.now() - timedelta(days=max(1, int(since_days)))
+        rows = self.session.query(ObservedText).filter(
+            ObservedText.last_seen_at >= since
+        ).order_by(
+            ObservedText.seen_count.desc(),
+            ObservedText.last_seen_at.desc(),
+        ).limit(max(1, int(limit))).all()
+        return [
+            {
+                'text': row.text or '',
+                'source': row.source or '',
+                'seen_count': int(row.seen_count or 0),
+            }
+            for row in rows
+        ]
+
+    def prune_observed_texts(
+        self, keep_days: int = 30, max_rows: int = 2000
+    ) -> int:
+        cutoff = datetime.now() - timedelta(days=max(1, int(keep_days)))
+        removed = self.session.query(ObservedText).filter(
+            ObservedText.last_seen_at < cutoff
+        ).delete(synchronize_session=False)
+        total = self.session.query(ObservedText).count()
+        if total > max_rows:
+            stale_ids = [
+                row.id for row in self.session.query(ObservedText.id)
+                .order_by(ObservedText.last_seen_at.asc())
+                .limit(total - max_rows).all()
+            ]
+            if stale_ids:
+                removed += self.session.query(ObservedText).filter(
+                    ObservedText.id.in_(stale_ids)
+                ).delete(synchronize_session=False)
+        self.session.commit()
+        return int(removed or 0)
+
+    def upsert_growth_item(
+        self,
+        kind: str,
+        title: str,
+        content: str = '',
+        example: str = '',
+        source: str = '',
+        weight: int = 100,
+    ) -> Optional[int]:
+        kind = str(kind or 'knowledge').strip()[:20]
+        title = str(title or '').strip()[:80]
+        if not kind or not title:
+            return None
+        key = f'{kind}:{title.casefold()}'
+        row = self.session.query(GrowthItem).filter_by(key=key).first()
+        now = datetime.now()
+        if row:
+            row.content = str(content or row.content or '')[:500]
+            row.example = str(example or row.example or '')[:300]
+            row.weight = min(200, int(row.weight or 0) + 10)
+            row.enabled = True
+            row.last_seen_at = now
+        else:
+            row = GrowthItem(
+                key=key,
+                kind=kind,
+                title=title,
+                content=str(content or '')[:500],
+                example=str(example or '')[:300],
+                source=str(source or '')[:60],
+                weight=max(0, min(200, int(weight))),
+                last_seen_at=now,
+                created_at=now,
+            )
+            self.session.add(row)
+        self.session.commit()
+        return int(row.id)
+
+    def get_growth_items(
+        self, kinds: Optional[List[str]] = None, limit: int = 60,
+        enabled_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        query = self.session.query(GrowthItem)
+        if enabled_only:
+            query = query.filter(GrowthItem.enabled == True)  # noqa: E712
+        if kinds:
+            query = query.filter(GrowthItem.kind.in_(kinds))
+        rows = query.order_by(
+            GrowthItem.weight.desc(),
+            GrowthItem.last_seen_at.desc(),
+        ).limit(max(1, int(limit))).all()
+        return [
+            {
+                'id': row.id,
+                'kind': row.kind,
+                'title': row.title,
+                'content': row.content or '',
+                'example': row.example or '',
+                'weight': int(row.weight or 0),
+                'use_count': int(row.use_count or 0),
+                'last_used_at': row.last_used_at,
+                'created_at': row.created_at,
+            }
+            for row in rows
+        ]
+
+    def mark_growth_used(self, item_ids: List[int]) -> int:
+        ids = [int(item) for item in (item_ids or []) if item]
+        if not ids:
+            return 0
+        now = datetime.now()
+        updated = self.session.query(GrowthItem).filter(
+            GrowthItem.id.in_(ids)
+        ).update(
+            {
+                GrowthItem.use_count: GrowthItem.use_count + 1,
+                GrowthItem.last_used_at: now,
+            },
+            synchronize_session=False,
+        )
+        self.session.commit()
+        return int(updated or 0)
+
+    def decay_growth_items(
+        self, days: int = 14, amount: int = 12
+    ) -> int:
+        cutoff = datetime.now() - timedelta(days=max(1, int(days)))
+        rows = self.session.query(GrowthItem).filter(
+            GrowthItem.enabled == True,  # noqa: E712
+            GrowthItem.created_at < cutoff,
+            (GrowthItem.last_used_at.is_(None))
+            | (GrowthItem.last_used_at < cutoff),
+        ).all()
+        changed = 0
+        for row in rows:
+            row.weight = max(0, int(row.weight or 0) - max(1, int(amount)))
+            if row.weight <= 0:
+                row.enabled = False
+            changed += 1
+        if changed:
+            self.session.commit()
+        return changed
+
+    def prune_growth_items(self, max_items: int = 60) -> int:
+        max_items = max(10, int(max_items))
+        rows = self.session.query(GrowthItem).order_by(
+            GrowthItem.enabled.desc(),
+            GrowthItem.weight.desc(),
+            GrowthItem.last_seen_at.desc(),
+        ).all()
+        removed = 0
+        for index, row in enumerate(rows):
+            if index < max_items:
+                continue
+            self.session.delete(row)
+            removed += 1
+        if removed:
+            self.session.commit()
+        return removed
+
+    def get_recent_own_comments(self, limit: int = 20) -> List[str]:
+        rows = self.session.query(CommentRecord.content).filter(
+            CommentRecord.success == True,  # noqa: E712
+        ).order_by(CommentRecord.created_at.desc()).limit(
+            max(1, int(limit))
+        ).all()
+        return [row[0] or '' for row in rows if (row[0] or '').strip()]
+
+    def delete_growth_item(self, item_id: int) -> int:
+        removed = self.session.query(GrowthItem).filter(
+            GrowthItem.id == int(item_id)
+        ).delete(synchronize_session=False)
+        self.session.commit()
+        return int(removed or 0)
+
+    def clear_growth_items(self) -> int:
+        removed = self.session.query(GrowthItem).delete(
+            synchronize_session=False
+        )
+        self.session.commit()
+        return int(removed or 0)
+
+    def growth_counts(self) -> Dict[str, int]:
+        rows = self.session.query(
+            GrowthItem.kind, func.count(GrowthItem.id)
+        ).filter(GrowthItem.enabled == True).group_by(  # noqa: E712
+            GrowthItem.kind
+        ).all()
+        return {str(kind): int(count) for kind, count in rows}
+
+    def get_activity_days(self, days: int = 7) -> Dict[str, Any]:
+        """最近 N 天的发送/回复/Agent 轮次，用于仪表盘迷你趋势图。"""
+        days = max(1, min(30, int(days or 7)))
+        start = (datetime.now() - timedelta(days=days - 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        dates = [
+            (start + timedelta(days=offset)).date().isoformat()
+            for offset in range(days)
+        ]
+        posts = {date: 0 for date in dates}
+        replies = {date: 0 for date in dates}
+        runs = {date: 0 for date in dates}
+
+        rows = self.session.query(
+            func.date(CommentRecord.created_at),
+            CommentRecord.comment_type,
+            func.count(CommentRecord.id),
+        ).filter(
+            CommentRecord.success == True,  # noqa: E712
+            CommentRecord.created_at >= start,
+        ).group_by(
+            func.date(CommentRecord.created_at), CommentRecord.comment_type
+        ).all()
+        for day, comment_type, count in rows:
+            key = str(day)[:10]
+            if key not in posts:
+                continue
+            if comment_type == 'reply':
+                replies[key] += int(count or 0)
+            else:
+                posts[key] += int(count or 0)
+
+        run_rows = self.session.query(
+            func.date(AgentSession.created_at), func.count(AgentSession.id)
+        ).filter(AgentSession.created_at >= start).group_by(
+            func.date(AgentSession.created_at)
+        ).all()
+        for day, count in run_rows:
+            key = str(day)[:10]
+            if key in runs:
+                runs[key] = int(count or 0)
+
+        return {
+            'dates': dates,
+            'posts': [posts[date] for date in dates],
+            'replies': [replies[date] for date in dates],
+            'sent': [posts[date] + replies[date] for date in dates],
+            'runs': [runs[date] for date in dates],
+        }
+
+    def get_today_agent_runs(self) -> int:
+        """今天完成的 Agent 轮次。"""
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(
+            self.session.query(AgentSession).filter(
+                AgentSession.created_at >= start
+            ).count()
+        )
+
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         total_videos = self.session.query(VideoRecord).count()
@@ -825,7 +920,7 @@ class Database:
         }
 
     def close(self):
-        """关闭数据库连接"""
-        self.session.close()
+        """关闭数据库连接（当前线程 Session + 连接池）。"""
+        self._session_factory.remove()
         self.engine.dispose()
         logger.info("数据库连接已关闭")

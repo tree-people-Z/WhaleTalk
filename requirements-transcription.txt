@@ -1,2 +1,3 @@
 # Optional local speech recognition; install/download it from Settings.
-faster-whisper>=1.1.0
+# Keep the minor version pinned: faster-whisper 2.x changes the model API.
+faster-whisper>=1.1.0,<2

@@ -1,6 +1,11 @@
-"""Install required Python packages on first launch when they are missing."""
+"""Install required Python packages on first launch when they are missing.
+
+Set ``WHALETALK_NO_AUTO_INSTALL=1`` to disable automatic installation and
+print the pip command instead (recommended for managed environments).
+"""
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,10 +23,7 @@ REQUIRED_IMPORTS = {
     'anthropic': 'anthropic',
     'APScheduler': 'apscheduler',
     'SQLAlchemy': 'sqlalchemy',
-    'qrcode[pil]': 'qrcode',
     'Pillow': 'PIL',
-    'PyYAML': 'yaml',
-    'python-dotenv': 'dotenv',
     'requests': 'requests',
     'loguru': 'loguru',
 }
@@ -48,9 +50,21 @@ def ensure_required_dependencies():
     missing = missing_required_packages()
     if not missing:
         return
+    install_command = (
+        f"{sys.executable} -m pip install -r "
+        f"{REQUIREMENTS.name}"
+    )
     if sys.stdout is not None:
         print(f"缺少运行依赖: {', '.join(missing)}", flush=True)
+    if os.environ.get('WHALETALK_NO_AUTO_INSTALL', '').strip().lower() in {
+        '1', 'true', 'yes', 'on',
+    }:
+        raise RuntimeError(
+            f"缺少运行依赖且已禁用自动安装，请手动执行: {install_command}"
+        )
+    if sys.stdout is not None:
         print("正在自动安装项目依赖，请保持网络连接...", flush=True)
+        print("（如需禁用自动安装，设置 WHALETALK_NO_AUTO_INSTALL=1）", flush=True)
     from utils.subprocess_helpers import hidden_window_kwargs
 
     result = subprocess.run(

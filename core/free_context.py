@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.long_term_memory import load_memory
+from core.self_evolution import render_growth_context
 from core.system_prompts import load_prompt
 from utils.persona_defaults import load_configured_persona
 
@@ -26,15 +27,28 @@ def _diary_files(days: int = 3) -> list[Path]:
     return [path for _, path in sorted(files)]
 
 
-def load_recent_diaries(days: int = 3, max_chars: int = 8000) -> str:
+def load_recent_diaries(days: int = 3, max_chars: int = 12000) -> str:
+    """按天分配预算，取每天日记的结尾（最新内容）。
+
+    旧实现把三天拼起来再统一截断，单日日记一长，最新的日记就完全进不了
+    上下文。现在每天各占一份预算，并取结尾，保证“最近三天”都能看到。
+    """
+    files = _diary_files(days)
+    if not files:
+        return ''
+    overhead = 40 * len(files)
+    per_day = max(500, (max_chars - overhead) // max(1, len(files)))
     parts = []
-    for path in _diary_files(days):
+    for path in files:
         try:
             text = path.read_text(encoding='utf-8').strip()
         except OSError:
             continue
-        if text:
-            parts.append(f"## {path.stem}\n{text}")
+        if not text:
+            continue
+        if len(text) > per_day:
+            text = '…（前文省略）\n' + text[-per_day:]
+        parts.append(f"## {path.stem}\n{text}")
     return '\n\n'.join(parts)[:max_chars]
 
 
@@ -78,10 +92,15 @@ def read_diary(day: str = '', max_chars: int = 12000) -> str:
 
 
 def append_diary(content: str, day: Optional[date] = None) -> Path:
-    """Append free-form text to the day's diary; no template is imposed."""
+    """Append free-form text to the day's diary; no template is imposed.
+
+    单次追加限制在 4000 字，避免一次写进几万字把后面的上下文挤掉。
+    """
     content = (content or '').strip()
     if not content:
         raise ValueError('日记内容为空')
+    if len(content) > 4000:
+        content = content[:4000].rstrip() + '\n…（当天记录过长，已截断）'
     day = day or date.today()
     DIARY_DIR.mkdir(parents=True, exist_ok=True)
     path = DIARY_DIR / f'{day.isoformat()}.md'
@@ -110,10 +129,12 @@ DIARY_TOOLS = [
 ]
 
 
-def build_agent_context(config, diary_days: int = 3) -> str:
+def build_agent_context(config, diary_days: int = 3, db=None) -> str:
     persona = load_configured_persona(config, 5000)
     diaries = load_recent_diaries(diary_days)
     memory = load_memory(4000)
+    growth = render_growth_context(db, config) if db is not None else ''
+    human_style = load_prompt('human_style')
     keywords = config.get('search.keywords', []) if config is not None else []
     if isinstance(keywords, str):
         keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
@@ -145,11 +166,15 @@ def build_agent_context(config, diary_days: int = 3) -> str:
         owner_mention=share_target,
         score_threshold=str(score_threshold),
     ) or f'视频分数超过 {score_threshold}/20 时，可以 {share_target}。')
+    growth_block = f'{growth}\n\n' if growth else ''
+    style_block = f'# 说话方式\n{human_style}\n\n' if human_style else ''
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
         f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
         f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
+        f'{growth_block}'
         f'{account}\n\n'
         f'{share}\n\n'
-        f'{preference}'
-    )
+        f'{preference}\n\n'
+        f'{style_block}'
+    ).rstrip()

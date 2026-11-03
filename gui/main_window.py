@@ -10,10 +10,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTabWidget, QTextEdit,
     QGroupBox, QMessageBox, QStatusBar, QTableWidget,
     QTableWidgetItem, QHeaderView, QProgressDialog, QApplication,
-    QSystemTrayIcon, QMenu
+    QSystemTrayIcon, QMenu, QButtonGroup
 )
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QAction
+from PyQt6.QtGui import QFont, QIcon, QPixmap, QDesktopServices, QAction
 from PyQt6.QtCore import QUrl
 from loguru import logger
 
@@ -29,48 +29,11 @@ from core.bilibili_api import BilibiliAPI
 from core.ai_client import AIClient
 from core.free_agent import FreeAgent
 from core.scheduler import TaskScheduler
+from gui.analysis_worker import AnalysisWorker
 from gui.memory_worker import MemoryWorker
 from utils.database import Database
 from utils.config_manager import ConfigManager
-from utils.updater import launch_update_installer
-
-
-class AnalysisWorker(QThread):
-    """Agent 工作线程"""
-    finished = pyqtSignal(dict)
-    error = pyqtSignal(str)
-
-    def __init__(self, analyzer, operation='analysis'):
-        super().__init__()
-        self.analyzer = analyzer
-        self.operation = operation
-
-    def run(self):
-        """运行 Agent 任务"""
-        import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            if self.operation == 'replies':
-                result = loop.run_until_complete(self.analyzer.check_replies())
-            else:
-                result = loop.run_until_complete(self.analyzer.run_analysis_cycle())
-            self.finished.emit(result)
-        except asyncio.CancelledError:
-            self.finished.emit({'status': 'cancelled'})
-        except Exception as e:
-            logger.error(f"Agent 任务异常: {e}")
-            self.error.emit(str(e))
-        finally:
-            try:
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
+from utils.updater import APP_VERSION, launch_update_installer
 
 
 class MainWindow(QMainWindow):
@@ -88,8 +51,7 @@ class MainWindow(QMainWindow):
         self.db = Database()
         self.bili_api = None
         self.ai_client = None
-        self.analyzer = None  # 添加这行
-        self.video_analyzer = None
+        self.agent = None
         self.scheduler = None
         self.worker = None
         self.reply_worker = None
@@ -111,6 +73,7 @@ class MainWindow(QMainWindow):
             format="{time:HH:mm:ss} | {level:<8} | {message}",
         )
         self.init_components()
+        self.settings_page.set_ai_provider(lambda: self.ai_client)
         self.load_status()
         self._attach_dashboard()
 
@@ -173,24 +136,30 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(1040, 760)
 
-        # 主布局
+        # 主布局：左侧导航 + 右侧内容（成熟产品常见的桌面布局）
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 20, 24, 16)
+        shell = QHBoxLayout(main_widget)
+        shell.setSpacing(0)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.addWidget(self._create_sidebar())
 
-        # 顶部状态栏
-        status_group = self._create_status_section()
-        layout.addWidget(status_group)
+        content = QWidget()
+        content.setObjectName("contentShell")
+        layout = QVBoxLayout(content)
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 18, 24, 16)
+        layout.addWidget(self._create_header())
 
-        # 标签页
+        # 标签页（隐藏原生 tab bar，由左侧导航驱动）
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("contentTabs")
         self.tabs.setIconSize(QSize(18, 18))
+        self.tabs.tabBar().hide()
 
         # 仪表盘标签（新增 - 作为首页）
         self.dashboard_tab = DashboardTab(
-            self.analyzer, 
+            self.agent,
             self.bili_api, 
             self.config, 
             self.db
@@ -201,10 +170,6 @@ class MainWindow(QMainWindow):
         self.console_tab = self._create_console_tab()
         self.tabs.addTab(self.console_tab, load_icon('console'), "控制台")
 
-        # 历史记录标签
-        self.history_tab = self._create_history_tab()
-        self.tabs.addTab(self.history_tab, load_icon('history'), "历史记录")
-
         # 评论对话标签
         self.comments_tab = CommentsTab(self.db)
         self.tabs.addTab(self.comments_tab, load_icon('comments'), "评论")
@@ -213,8 +178,12 @@ class MainWindow(QMainWindow):
         self.messages_tab = MessagesTab()
         self.tabs.addTab(self.messages_tab, load_icon('messages'), "私信")
 
+        # 历史记录标签
+        self.history_tab = self._create_history_tab()
+        self.tabs.addTab(self.history_tab, load_icon('history'), "历史记录")
+
         # 设置标签
-        self.settings_page = SettingsPage(self.config)
+        self.settings_page = SettingsPage(self.config, self.db)
         self.settings_page.auto_run_btn.clicked.connect(self.toggle_auto_run)
         self.settings_page.schedule_settings_saved.connect(self.refresh_scheduler_settings)
         self.settings_page.ai_settings_saved.connect(self.refresh_ai_settings)
@@ -231,46 +200,180 @@ class MainWindow(QMainWindow):
             self.dashboard_tab.sync_mention_score
         )
 
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
+        shell.addWidget(content, 1)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        # 侧边导航与页面标题同步
+        self._on_tab_changed(0)
 
         # 状态栏
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("就绪")
 
-    def _create_status_section(self) -> QGroupBox:
-        """创建状态区域"""
-        group = QGroupBox("📊 运行状态")
-        layout = QVBoxLayout()
+    def _create_sidebar(self) -> QWidget:
+        """左侧导航：品牌、分组页面入口、账号与版本信息。"""
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(216)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(14, 18, 14, 16)
+        layout.setSpacing(6)
+
+        brand = QHBoxLayout()
+        brand.setSpacing(10)
+        logo = QLabel()
+        whale_path = Path(__file__).resolve().parent.parent / 'assets' / 'whale-assistant.png'
+        if whale_path.exists():
+            logo.setPixmap(
+                QPixmap(str(whale_path)).scaled(
+                    32, 32, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        else:
+            logo.setPixmap(load_icon('dashboard').pixmap(28, 28))
+        brand.addWidget(logo)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(0)
+        title = QLabel("鲸语")
+        title.setObjectName("brandTitle")
+        subtitle = QLabel("AI 运营助手")
+        subtitle.setObjectName("brandSubtitle")
+        brand_text.addWidget(title)
+        brand_text.addWidget(subtitle)
+        brand.addLayout(brand_text)
+        brand.addStretch()
+        layout.addLayout(brand)
+        layout.addSpacing(14)
+
+        self._nav_group = QButtonGroup(self)
+        self._nav_group.setExclusive(True)
+        self.nav_buttons = []
+
+        def add_section(text: str):
+            label = QLabel(text)
+            label.setObjectName("sideSection")
+            layout.addWidget(label)
+
+        def add_nav(index: int, icon: str, text: str):
+            button = QPushButton(text)
+            button.setObjectName("navButton")
+            button.setCheckable(True)
+            button.setIcon(load_icon(icon))
+            button.setIconSize(QSize(18, 18))
+            button.setMinimumHeight(38)
+            button.clicked.connect(
+                lambda _checked=False, page=index: self.tabs.setCurrentIndex(page)
+            )
+            self._nav_group.addButton(button, index)
+            self.nav_buttons.append(button)
+            layout.addWidget(button)
+
+        add_section("工作台")
+        add_nav(0, 'dashboard', "仪表盘")
+        add_nav(1, 'console', "控制台")
+        add_section("互动")
+        add_nav(2, 'comments', "评论")
+        add_nav(3, 'messages', "私信")
+        add_section("记录")
+        add_nav(4, 'history', "历史记录")
+        add_section("系统")
+        add_nav(5, 'settings', "设置")
+
+        layout.addStretch()
+
+        self.sidebar_account = QLabel("未登录 B 站")
+        self.sidebar_account.setObjectName("sideAccount")
+        self.sidebar_account.setWordWrap(True)
+        layout.addWidget(self.sidebar_account)
+
+        version_row = QHBoxLayout()
+        version = QLabel(f"v{APP_VERSION}")
+        version.setObjectName("sideVersion")
+        version_row.addWidget(version)
+        version_row.addStretch()
+        self.sidebar_update_hint = QLabel("")
+        self.sidebar_update_hint.setObjectName("sideVersion")
+        version_row.addWidget(self.sidebar_update_hint)
+        layout.addLayout(version_row)
+        return sidebar
+
+    def _create_header(self) -> QWidget:
+        """内容区顶部：页面标题、运行统计与主要操作。"""
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # 登录状态行
-        login_layout = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        self.page_title = QLabel("仪表盘")
+        self.page_title.setObjectName("pageTitle")
+        self.page_subtitle = QLabel("账号状态、今日数据与最近动作")
+        self.page_subtitle.setObjectName("pageSubtitle")
+        titles.addWidget(self.page_title)
+        titles.addWidget(self.page_subtitle)
+        layout.addLayout(titles)
+        layout.addStretch()
+
+        # 统计信息只在窗口足够宽时显示，避免窄窗口挤压操作按钮
+        self.stats_label = QLabel("今日: 0 条发送")
+        self.stats_label.setObjectName("headerMeta")
+        self.stats_label.setVisible(False)
+
         self.login_status_label = QLabel("● 未登录")
-        self.login_status_label.setObjectName("statusLabel")
-        self.login_status_label.setStyleSheet("color: #dc3545; font-size: 14px; font-weight: 600;")
-        login_layout.addWidget(self.login_status_label)
-        login_layout.addStretch()
+        self.login_status_label.setObjectName("statusPill")
+        layout.addWidget(self.login_status_label)
 
-        self.login_btn = QPushButton("登录B站")
+        self.login_btn = QPushButton("登录 B 站")
+        self.login_btn.setObjectName("ghostButton")
         self.login_btn.setIcon(load_icon('login'))
+        self.login_btn.setMinimumHeight(34)
         self.login_btn.clicked.connect(self.show_login_dialog)
-        self.login_btn.setMinimumHeight(36)
-        login_layout.addWidget(self.login_btn)
+        layout.addWidget(self.login_btn)
 
-        layout.addLayout(login_layout)
+        self.auto_run_btn = QPushButton("启动自动运营")
+        self.auto_run_btn.setObjectName("ghostButton")
+        self.auto_run_btn.setIcon(load_icon('play'))
+        self.auto_run_btn.setMinimumHeight(36)
+        self.auto_run_btn.clicked.connect(self.toggle_auto_run)
+        layout.addWidget(self.auto_run_btn)
 
-        # 统计信息
-        stats_layout = QHBoxLayout()
-        self.stats_label = QLabel("今日: 0条发送 | 总计: 0个视频 | 0条评论")
-        self.stats_label.setStyleSheet("color: #586069; font-size: 13px;")
-        stats_layout.addWidget(self.stats_label)
-        stats_layout.addStretch()
-        layout.addLayout(stats_layout)
+        self.run_now_btn = QPushButton("立即运行一轮")
+        self.run_now_btn.setObjectName("primaryButton")
+        self.run_now_btn.setIcon(load_icon('play'))
+        self.run_now_btn.setMinimumHeight(36)
+        self.run_now_btn.clicked.connect(self.run_analysis_now)
+        layout.addWidget(self.run_now_btn)
+        return header
 
-        group.setLayout(layout)
-        return group
+    _PAGE_META = {
+        '仪表盘': ('仪表盘', '账号状态、今日数据与最近动作'),
+        '控制台': ('控制台', '运行日志与手动触发'),
+        '历史记录': ('历史记录', '已发送的评论与对应视频'),
+        '评论': ('评论', '按楼查看对话与回复提醒'),
+        '私信': ('私信', '读取并回复 B 站私信'),
+        '设置': ('设置', '账号、模型、人设与运行策略'),
+    }
+
+    def _set_login_state(self, logged_in: bool, name: str = ''):
+        """同步顶部状态胶囊与侧边栏账号信息。"""
+        state = 'ok' if logged_in else 'off'
+        self.login_status_label.setText(f"● 已登录 {name}".strip() if logged_in else "● 未登录")
+        self.login_status_label.setProperty('state', state)
+        self.login_status_label.style().unpolish(self.login_status_label)
+        self.login_status_label.style().polish(self.login_status_label)
+        self.login_btn.setText("切换账号" if logged_in else "登录 B 站")
+        self.login_btn.setIcon(load_icon('login'))
+        self.sidebar_account.setText(
+            f"B 站 · {name}" if logged_in and name else
+            "B 站 · 已登录" if logged_in else "未登录 B 站"
+        )
+        if hasattr(self, 'dashboard_tab'):
+            self.dashboard_tab.update_dashboard()
 
     def _create_console_tab(self) -> QWidget:
         """创建控制台标签"""
@@ -278,41 +381,17 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setSpacing(15)
 
-        # 控制按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-
-        self.run_now_btn = QPushButton("现在运行一轮")
-        self.run_now_btn.setObjectName("primaryButton")
-        self.run_now_btn.setIcon(load_icon('play'))
-        self.run_now_btn.clicked.connect(self.run_analysis_now)
-        self.run_now_btn.setMinimumHeight(45)
-        self.run_now_btn.setStyleSheet("""
-            QPushButton#primaryButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2ea44f, stop:1 #2c974b);
-                font-size: 14px;
-                font-weight: 600;
-            }
-            QPushButton#primaryButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2c974b, stop:1 #298e46);
-            }
-        """)
-        btn_layout.addWidget(self.run_now_btn)
-
-        self.auto_run_btn = QPushButton("启动自动运营")
-        self.auto_run_btn.setIcon(load_icon('play'))
-        self.auto_run_btn.clicked.connect(self.toggle_auto_run)
-        self.auto_run_btn.setMinimumHeight(45)
-        self.auto_run_btn.setStyleSheet("font-size: 14px; font-weight: 600;")
-        btn_layout.addWidget(self.auto_run_btn)
-
-        layout.addLayout(btn_layout)
-
         # 日志显示
         log_group = QGroupBox("运行日志")
         log_layout = QVBoxLayout()
+        toolbar = QHBoxLayout()
+        toolbar.addStretch()
+        clear_btn = QPushButton("清空日志")
+        clear_btn.setObjectName("ghostButton")
+        clear_btn.setMinimumHeight(30)
+        clear_btn.clicked.connect(lambda: self.log_text.clear())
+        toolbar.addWidget(clear_btn)
+        log_layout.addLayout(toolbar)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
@@ -370,19 +449,14 @@ class MainWindow(QMainWindow):
             # 初始化AI客户端
             ai_config = self.config.get('ai', {})
             if ai_config.get('api_key'):
-                self.ai_client = AIClient(
-                    provider=ai_config.get('provider', 'openai'),
-                    api_key=ai_config.get('api_key'),
-                    model=ai_config.get('model'),
-                    base_url=ai_config.get('base_url')
-                )
+                self.ai_client = self._create_ai_client(ai_config)
                 self.log("✅ AI客户端已初始化")
             else:
                 self.log("⚠️ 未配置AI API密钥，请前往设置页面配置")
 
             # 初始化自由 Agent
             if self.bili_api and self.ai_client:
-                self.video_analyzer = FreeAgent(
+                self.agent = FreeAgent(
                     self.bili_api,
                     self.ai_client,
                     self.db,
@@ -392,7 +466,7 @@ class MainWindow(QMainWindow):
 
             # 初始化调度器
             self.scheduler = TaskScheduler(self.config)
-            if self.video_analyzer:
+            if self.agent:
                 self.scheduler.set_wake_callback(self.scheduled_run)
                 self.scheduler.set_reply_check_callback(self.scheduled_reply_check)
 
@@ -415,14 +489,15 @@ class MainWindow(QMainWindow):
                             len(self.bili_api.credential.sessdata) > 20)
 
             if is_logged_in or has_credential:
-                self.login_status_label.setText("● 已登录")
-                self.login_status_label.setStyleSheet("color: #2ea44f; font-size: 14px; font-weight: 600;")
-                self.login_btn.setText("切换账号")
-                self.login_btn.setIcon(load_icon('login'))
+                info = {}
+                try:
+                    info = loop.run_until_complete(self.bili_api.get_self_info()) or {}
+                except Exception:  # noqa: BLE001
+                    info = {}
+                self._set_login_state(True, str(info.get('name') or ''))
                 self.log("✅ B站账号已登录")
             else:
-                self.login_status_label.setText("● 未登录")
-                self.login_status_label.setStyleSheet("color: #dc3545; font-size: 14px; font-weight: 600;")
+                self._set_login_state(False)
                 self.log("请先登录B站账号")
         except Exception as e:
             logger.error(f"检查登录状态失败: {e}")
@@ -450,27 +525,29 @@ class MainWindow(QMainWindow):
         """更新统计信息"""
         stats = self.db.get_statistics()
         self.stats_label.setText(
-            f"今日: {stats['today_comments']}条发送"
-            f"（{stats.get('today_posts', 0)}评论+{stats.get('today_replies', 0)}回复） | "
-            f"总计: {stats.get('total_agent_runs', 0)}轮 Agent | "
-            f"{stats['total_comments_sent']}条发送"
+            f"今日 {stats['today_comments']} 条发送 · "
+            f"累计 {stats.get('total_agent_runs', 0)} 轮 Agent · "
+            f"{stats['total_comments_sent']} 条记录"
         )
 
     def show_login_dialog(self):
         """显示登录对话框"""
         dialog = LoginDialog(self.bili_api, self)
         if dialog.exec():
-            self.login_status_label.setText("● 已登录")
-            self.login_status_label.setStyleSheet("color: #2ea44f; font-size: 14px; font-weight: 600;")
-            self.login_btn.setText("切换账号")
-            self.login_btn.setIcon(load_icon('login'))
+            info = {}
+            try:
+                import asyncio
+                info = asyncio.run(self.bili_api.get_self_info()) or {}
+            except Exception:  # noqa: BLE001
+                info = {}
+            self._set_login_state(True, str(info.get('name') or ''))
             self.log("✅ 登录成功！")
             self.messages_tab.set_bili_api(self.bili_api)
             self.comments_tab.set_bili_api(self.bili_api)
 
     def run_analysis_now(self):
         """立即运行一轮自由 Agent"""
-        if not self.video_analyzer:
+        if not self.agent:
             QMessageBox.warning(self, "错误", "请先配置AI API密钥")
             return
 
@@ -488,7 +565,7 @@ class MainWindow(QMainWindow):
         self.log("开始自由 Agent 一轮...")
 
         # 创建工作线程
-        self.worker = AnalysisWorker(self.video_analyzer)
+        self.worker = AnalysisWorker(self.agent)
         self.worker.finished.connect(self.on_analysis_finished)
         self.worker.error.connect(self.on_analysis_error)
         self.worker.start()
@@ -532,7 +609,7 @@ class MainWindow(QMainWindow):
 
     def scheduled_reply_check(self):
         """按间隔检查评论回复；自动回复是否执行由配置决定。"""
-        if (not self.video_analyzer
+        if (not self.agent
                 or not self.config.get('interaction.comment_monitor', False)
                 or not self.bili_api or not self.bili_api.credential
                 or (self.worker and self.worker.isRunning())
@@ -541,7 +618,7 @@ class MainWindow(QMainWindow):
         if QThread.currentThread() != self.thread():
             self.scheduled_reply_check_requested.emit()
             return True
-        self.reply_worker = AnalysisWorker(self.video_analyzer, operation='replies')
+        self.reply_worker = AnalysisWorker(self.agent, operation='replies')
         self.reply_worker.finished.connect(self.on_reply_check_finished)
         self.reply_worker.error.connect(lambda error: self.log(f"❌ 回复检查失败: {error}"))
         self.reply_worker.start()
@@ -560,6 +637,18 @@ class MainWindow(QMainWindow):
     def _ai_signature(self):
         return tuple(self.config.get(f'ai.{key}', '') for key in ('provider', 'api_key', 'model', 'base_url'))
 
+    def _create_ai_client(self, ai_config):
+        """按当前配置创建 AI 客户端（统一超时与重试策略）。"""
+        return AIClient(
+            provider=ai_config.get('provider', 'openai'),
+            api_key=ai_config.get('api_key'),
+            model=ai_config.get('model'),
+            base_url=ai_config.get('base_url'),
+            timeout=self.config.get('ai.timeout_seconds', 60),
+            max_retries=self.config.get('ai.max_retries', 2),
+            max_output_tokens=self.config.get('ai.max_output_tokens', 8000),
+        )
+
     def refresh_ai_settings(self):
         """AI连接参数变化后重建客户端和 Agent，使保存的设置立即生效。"""
         signature = self._ai_signature()
@@ -571,20 +660,23 @@ class MainWindow(QMainWindow):
             return
         provider, api_key, model, base_url = signature
         try:
-            self.ai_client = AIClient(
-                provider=provider, api_key=api_key, model=model, base_url=base_url
-            ) if api_key else None
-            self.video_analyzer = FreeAgent(
+            self.ai_client = self._create_ai_client({
+                'provider': provider,
+                'api_key': api_key,
+                'model': model,
+                'base_url': base_url,
+            }) if api_key else None
+            self.agent = FreeAgent(
                 self.bili_api, self.ai_client, self.db, self.config
             ) if self.bili_api and self.ai_client else None
             scheduler_was_running = bool(self.scheduler and self.scheduler.is_running)
             if scheduler_was_running:
                 self.scheduler.stop()
             self.scheduler = TaskScheduler(self.config)
-            if self.video_analyzer:
+            if self.agent:
                 self.scheduler.set_wake_callback(self.scheduled_run)
                 self.scheduler.set_reply_check_callback(self.scheduled_reply_check)
-            if scheduler_was_running and self.video_analyzer:
+            if scheduler_was_running and self.agent:
                 self.scheduler.start()
             self._active_ai_signature = signature
             self.log("✅ AI设置已应用，客户端已重建")
@@ -598,7 +690,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'dashboard_tab'):
             return
         try:
-            self.dashboard_tab.set_analyzer(self.video_analyzer)
+            self.dashboard_tab.set_analyzer(self.agent)
+            self.dashboard_tab.set_bili_api(self.bili_api)
             self.dashboard_tab.set_status_provider(self._dashboard_status)
             self.dashboard_tab.set_notification_provider(self._dashboard_notifications)
         except Exception as exc:  # noqa: BLE001
@@ -606,7 +699,7 @@ class MainWindow(QMainWindow):
 
     def _dashboard_status(self) -> dict:
         """仪表盘运行状态"""
-        if not self.video_analyzer:
+        if not self.agent:
             return {
                 'running': False,
                 'label': '未配置 AI',
@@ -663,7 +756,7 @@ class MainWindow(QMainWindow):
             self.config.set('schedule.auto_run', False)
             self.log("自动运营已停止")
         else:
-            if not self.video_analyzer:
+            if not self.agent:
                 QMessageBox.warning(self, "无法启动", "请先配置有效的AI API密钥。")
                 return
             if not self.bili_api or not self.bili_api.credential:
@@ -741,11 +834,30 @@ class MainWindow(QMainWindow):
 
     def _append_runtime_log(self, message: str):
         """Append structured runtime logs safely from workers to the GUI."""
-        self.log_text.append(message)
+        import html
+
+        text = html.escape(str(message))
+        color = '#374151'
+        if '| ERROR' in text:
+            color = '#b42318'
+        elif '| WARNING' in text:
+            color = '#8a5d00'
+        elif '✅' in text or '成功' in text:
+            color = '#1e7b3c'
+        self.log_text.append(
+            f'<span style="color:{color}; white-space:pre-wrap;">{text}</span>'
+        )
 
     def _on_tab_changed(self, index: int):
-        """切换到对话页时按需刷新数据。"""
+        """切换页面时同步标题、侧边栏，并按需刷新数据。"""
         widget = self.tabs.widget(index)
+        if hasattr(self, 'page_title') and widget is not None:
+            name = self.tabs.tabText(index)
+            title, subtitle = self._PAGE_META.get(name, (name, ''))
+            self.page_title.setText(title)
+            self.page_subtitle.setText(subtitle)
+        if hasattr(self, 'nav_buttons') and 0 <= index < len(self.nav_buttons):
+            self.nav_buttons[index].setChecked(True)
         if widget is self.comments_tab:
             self._clear_reply_badge()
             self.comments_tab.refresh_if_stale(0)
@@ -753,6 +865,8 @@ class MainWindow(QMainWindow):
             self.messages_tab.refresh_if_stale()
         elif widget is self.history_tab:
             self.load_history()
+        elif widget is self.settings_page:
+            self.settings_page.refresh_growth_list()
 
     def _apply_reply_poll_interval(self):
         """应用设置中的回复检查间隔。"""
@@ -829,6 +943,8 @@ class MainWindow(QMainWindow):
             return
         if result.get("status") == "update":
             version = result.get("version", "")
+            if hasattr(self, 'sidebar_update_hint'):
+                self.sidebar_update_hint.setText(f"可更新 v{version}")
             self.settings_page.check_update_btn.setText(f"更新到 v{version}")
             self.settings_page.check_update_btn.setIcon(load_icon('update'))
             self.statusBar.showMessage(
@@ -849,7 +965,11 @@ class MainWindow(QMainWindow):
         dialog.setAutoClose(False)
         dialog.setAutoReset(False)
         worker = UpdateDownloadWorker(
-            result.get("asset_url", ""), result.get("asset_digest", ""), self
+            result.get("asset_url", ""),
+            result.get("asset_digest", ""),
+            self,
+            asset_name=result.get("asset_name", ""),
+            checksums_url=result.get("checksums_url", ""),
         )
         self._update_download = worker
         self._update_progress = dialog
@@ -897,7 +1017,9 @@ class MainWindow(QMainWindow):
             return
         if self._memory_worker is not None and self._memory_worker.isRunning():
             return
-        self._memory_worker = MemoryWorker(self.ai_client, self.db, self)
+        self._memory_worker = MemoryWorker(
+            self.ai_client, self.db, self.config, self
+        )
         self._memory_worker.done.connect(self._on_memory_done)
         self._memory_worker.finished.connect(self._on_memory_finished)
         self._memory_worker.start()
@@ -992,6 +1114,7 @@ class MainWindow(QMainWindow):
                 self._tray_hint_shown = True
             event.ignore()
             return
+        self.settings_page.flush_pending_save()
         self._update_timer.stop()
         self._update_recheck_timer.stop()
         self._reply_poll_timer.stop()
@@ -1043,8 +1166,8 @@ class MainWindow(QMainWindow):
         workers = [worker for worker in (self.worker, self.reply_worker)
                    if worker and worker.isRunning()]
         if workers:
-            if self.video_analyzer:
-                self.video_analyzer.request_stop()
+            if self.agent:
+                self.agent.request_stop()
             for worker in workers:
                 worker.requestInterruption()
             stopped = True
@@ -1058,7 +1181,7 @@ class MainWindow(QMainWindow):
         if getattr(self, 'tray_icon', None) is not None:
             self.tray_icon.hide()
         try:
-            self.db.close()
+            self.db.dispose()
         except Exception as exc:  # noqa: BLE001
             logger.debug(f'关闭数据库时出错: {exc}')
         event.accept()

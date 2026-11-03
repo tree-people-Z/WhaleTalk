@@ -71,7 +71,7 @@ PyInstaller 的 Analysis 和单文件压缩基本是单线程，20 核也不能�
 
 - `core/free_agent.py`：`FreeAgent.run_analysis_cycle()`
 - `gui/main_window.py`：自动运营和“现在运行一轮”都调用它
-- 固定流水线 `core/video_analyzer.py` 已不参与自动运营
+- 旧的固定流水线（`core/video_analyzer.py`）已移除，只保留自由 Agent
 
 ### 每轮流程
 
@@ -106,7 +106,7 @@ bili_api / read_diary / write_diary
 
 `core/free_context.py`：
 
-- `build_agent_context()`：人设 + 近三天日记 + `memory.md`
+- `build_agent_context()`：人设 + 近三天日记 + `memory.md` + 成长档案 + 说话方式
 - `read_diary()`：列日期、读某天、读全部
 - `append_diary()`：追加到当天日记，不强制格式
 
@@ -117,11 +117,12 @@ bili_api / read_diary / write_diary
 写操作仍在程序层限流：
 
 - 每日评论/回复上限 `limits.max_comments_per_day`（默认 60）
-- 单轮写操作上限 8
+- 单轮写操作上限 `limits.max_writes_per_round`（默认 8）
 - 12014 / 412 冷却
 - 评论记录写入数据库，供上限统计
 
-这些限制不写入人设，也不要求模型遵守。
+这些限制由 `core/bili_tool.py` 与 `core/bilibili_guard.py` 强制执行，
+不写入人设，也不要求模型遵守。
 
 ## 设置页
 
@@ -146,12 +147,31 @@ bili_api / read_diary / write_diary
 
 API 密钥、B 站登录凭证、配置、历史数据库、日记和模型保存在 `data/` 下，并由 Git 忽略。请勿提交本地配置或凭证。
 
+在 Windows 上，`data/config.json` 里的 API Key 和 `data/cookies.json` 里的
+B 站 Cookie 会用 DPAPI（当前 Windows 用户）加密存储，文件内容是 `dpapi:` 开头的密文。
+把 `data/` 复制到其他机器/其他 Windows 用户下时，这些凭据需要重新填写。
+
 评论/私信图片按需下载；发往视觉模型的内容按所配置 AI 服务的隐私政策处理。
+
+## 运行时保护
+
+- **单实例**：`data/app.lock` 由 QLockFile 持有，双开会被拒绝，避免两个 Agent
+  同时发评论/私信。
+- **网络**：AI 请求有超时（`ai.timeout_seconds`）和指数退避重试
+  （`ai.max_retries`）；只对连接错误、超时、429/5xx 重试。
+- **推理模型**：思考 token 也计入 `max_tokens`。`AIClient` 检测到
+  `finish_reason=length` 且推理占满预算时，会自动翻倍提高预算重试，
+  上限由 `ai.max_output_tokens`（默认 8000）控制。
+- **数据库**：SQLite 使用 WAL；每个线程独立 Session（`scoped_session`），
+  GUI 定时器与 Agent 工作线程不会争用同一个连接。
+- **依赖**：`requirements.txt` 锁定到测试通过的小版本（`~=`），避免上游大版本
+  改接口导致用户机器上突然报错。
 
 ## 发布检查清单
 
 - `python -m pytest -q` 全绿
-- `python -m compileall -q core gui utils tests` 通过
+- `python -m ruff check .` 通过（只启用 F/E9/B 致命规则）
+- `python -m compileall -q core gui utils tests main.py` 通过
 - 便携包内含 `ffmpeg.exe`、`FFMPEG_LICENSE.txt`
 - 全新解压后能启动，`data/` 正常创建
 - `data/` 不被提交，版本号与 Release 一致

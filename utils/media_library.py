@@ -1,5 +1,6 @@
 """Download and remember images for later reuse (DM/dynamic)."""
 
+import asyncio
 import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,7 +22,8 @@ async def collect_image(
     if not url or not url.startswith('http'):
         return None
     try:
-        response = requests.get(
+        response = await asyncio.to_thread(
+            requests.get,
             url,
             headers=headers or {
                 'User-Agent': 'Mozilla/5.0',

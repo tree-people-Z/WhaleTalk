@@ -1,0 +1,22 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["build", "dist", ".git", "__pycache__"]
+
+[tool.ruff.lint]
+# 先守住“会出错”的规则，风格类规则逐步收紧。
+select = ["F", "E9", "B"]
+ignore = [
+    "B008",  # 函数默认值调用（Qt 构造函数里很常见）
+    "B904",  # raise ... from err（现有代码风格）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

@@ -1,4 +1,7 @@
-"""One-off repair for comment rows written before bvid backfilling existed."""
+"""One-off repair for comment rows written before bvid backfilling existed.
+
+用法：python tools/backfill_comment_videos.py（在项目根目录运行）
+"""
 
 from loguru import logger
 

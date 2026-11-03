@@ -1,28 +1,29 @@
+# 依赖版本策略：锁定到当前测试通过的小版本（~=X.Y），只允许补丁升级。
+# 上游大版本经常改名/改接口（例如 bilibili-api 16 -> 17），不锁版本会在
+# 用户机器上出现“代码没改但突然报错”的问题。升级依赖时请同步跑 pytest。
+
 # B站API
-bilibili-api-python>=16.2.0
-aiohttp>=3.9.0
+bilibili-api-python~=17.4.2
+aiohttp~=3.14
 
 # GUI框架
-PyQt6>=6.6.0
+PyQt6~=6.11
 
 # AI模型调用
-openai>=1.0.0
-anthropic>=0.18.0
+openai~=3.19
+anthropic~=2.1
 
 # 任务调度
-APScheduler>=3.10.0
+APScheduler~=3.11
 
 # 数据存储
-sqlalchemy>=2.0.0
+sqlalchemy~=2.0.54
 
-# 二维码生成/识别
-qrcode[pil]>=7.4.0
-pillow>=10.0.0
+# 图像处理（画面压缩、评论图）
+pillow~=12.3
 
-# 工具库
-pyyaml>=6.0
-python-dotenv>=1.0.0
-requests>=2.31.0
+# HTTP
+requests~=2.34
 
 # 日志
-loguru>=0.7.0
+loguru~=0.7.3

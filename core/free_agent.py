@@ -1,9 +1,7 @@
 """Free-form agent: all B站 interfaces, persona/diary/memory, no fixed workflow."""
 
 import asyncio
-import hashlib
 import json
-import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +9,16 @@ from typing import Any, Dict
 
 from loguru import logger
 
+from core.agent_events import filter_agent_events
 from core.agent_protocol import parse_json_decision
+from core.agent_summary import (
+    compact_tool_results,
+    log_actions,
+    parse_model_audit,
+    summary_mismatch,
+)
+from core.self_evolution import record_growth_usage
+from core.style_guard import prepare_outgoing_text
 from core.bili_tool import BiliTool
 from core.free_context import (
     DIARY_TOOLS,
@@ -58,87 +65,6 @@ class FreeAgent:
     def request_stop(self):
         if self._stop is not None:
             self._stop.set()
-
-    def _filter_agent_events(self, method: str, params: dict, result: Any) -> Any:
-        """Drop already-delivered events so each @/comment/DM is handled once."""
-        if self.db is None or not isinstance(result, list):
-            return result
-        if method not in {
-            'get_at_messages', 'get_comments', 'get_comment_thread',
-            'get_private_messages',
-        }:
-            return result
-        if method == 'get_comments' and not (
-            params.get('root_rpids') or params.get('include_replies')
-        ):
-            return result
-        own = set()
-        if method in {'get_comments', 'get_comment_thread'}:
-            try:
-                own_ids = self.db.get_own_comment_rpids()
-                if isinstance(own_ids, (set, list, tuple)):
-                    own = set(own_ids)
-            except Exception:  # noqa: BLE001
-                own = set()
-
-        records = []
-        for item in result:
-            if not isinstance(item, dict):
-                continue
-            rpid = item.get('rpid')
-            if method in {'get_comments', 'get_comment_thread'} and rpid in own:
-                continue
-            if method == 'get_at_messages':
-                key = f'at:{rpid}'
-                event_type = 'at'
-            elif method == 'get_private_messages':
-                talker_id = params.get('talker_id') or ''
-                timestamp = item.get('timestamp') or 0
-                digest = hashlib.sha1(
-                    str(item.get('content') or '').encode('utf-8')
-                ).hexdigest()[:16]
-                key = f'dm:{talker_id}:{timestamp}:{digest}'
-                event_type = 'dm'
-            else:
-                key = f'comment:{rpid}'
-                event_type = 'comment'
-            records.append({
-                'key': key,
-                'type': event_type,
-                'payload': {
-                    'rpid': rpid,
-                    'user': item.get('user') or item.get('nickname') or '',
-                    'content': str(item.get('content') or '')[:300],
-                    'aid': item.get('aid'),
-                    'bvid': item.get('bvid'),
-                },
-                '_item': item,
-            })
-        if not records:
-            return result
-        states = self.db.get_agent_event_states([item['key'] for item in records])
-        now = datetime.now()
-        new_items = []
-        new_records = []
-        for record in records:
-            state = states.get(record['key']) or {}
-            status = str(state.get('status') or '')
-            if status in ('handled', 'ignored'):
-                continue
-            if status == 'delivered':
-                last = state.get('last_delivered_at')
-                count = int(state.get('delivery_count') or 0)
-                if last and count < 3 and (now - last).total_seconds() < 600:
-                    continue
-                if count >= 3:
-                    continue
-            new_items.append(record.pop('_item'))
-            new_records.append(record)
-        try:
-            self.db.deliver_agent_events(new_records)
-        except (AttributeError, TypeError, ValueError) as exc:
-            logger.debug(f'记录事件状态失败: {exc}')
-        return new_items
 
     def _keyword_hint(self) -> str:
         if self.db is None or not hasattr(self.db, 'get_recent_search_keywords'):
@@ -201,8 +127,19 @@ class FreeAgent:
             params = self._unwrap_arguments(
                 args.get('arguments') or args.get('params') or {}
             )
+            if method in {'post_comment', 'send_private_message', 'send_danmaku'}:
+                original = str(params.get('text') or '')
+                if original:
+                    rewritten = await prepare_outgoing_text(
+                        self.ai, self.db, self.config, original, purpose=method
+                    )
+                    if rewritten != original:
+                        params = dict(params)
+                        params['text'] = rewritten
             result = await self.bili_tool.call(method, params)
-            return self._filter_agent_events(method, params, result)
+            if result is True and params.get('text'):
+                record_growth_usage(str(params['text']), self.db)
+            return filter_agent_events(self.db, method, params, result)
         if name == 'inspect_video':
             return await self.inspect_video(
                 str(args.get('bvid') or ''),
@@ -330,6 +267,14 @@ class FreeAgent:
                         'content': str(item.get('content') or '')[:200],
                         'like': item.get('like') or 0,
                     })
+                if self.db is not None:
+                    try:
+                        self.db.record_observed_texts(
+                            [item['content'] for item in comment_items],
+                            source='inspect_video',
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f'记录观察文本失败: {exc}')
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f'读取评论失败 {bvid}: {exc}')
 
@@ -657,54 +602,10 @@ class FreeAgent:
             return f'{detail}：失败（{str(result.get("error"))[:100]}）'
         return f'{detail}：{"成功" if ok else "失败"}'
 
-    @staticmethod
-    def _parse_model_audit(summary: str) -> dict:
-        """解析模型自己报告的评分/@ 审计，只记录，不干预。"""
-        text = str(summary or '')
-        audit = {}
-        score = re.search(
-            r'最高分\s*[:：]?\s*(\d{1,2})\s*(?:/|／)\s*20', text
-        )
-        if score:
-            audit['max_score'] = int(score.group(1))
-        mention = re.search(
-            r'@\s*主人\s*[:：]?\s*(是|否|已|未)', text
-        )
-        if mention:
-            audit['mentioned_owner'] = mention.group(1) in {'是', '已'}
-        return audit
-
-    @staticmethod
-    def _summary_mismatch(summary: str, actions: list[str]) -> list[str]:
-        actual = '；'.join(actions)
-        claims = [
-            ('点赞', ('点赞', '点了赞', '给了.*赞', '赞了'), ('点赞',)),
-            ('收藏', ('收藏',), ('收藏',)),
-            ('评论/留言', ('留言', '评论了', '留了评论', '发了评论', '回复了', '回了'),
-             ('发送评论',)),
-            ('私信', ('发送私信', '发了私信', '回了私信', '回复.{0,6}私信', '私信.{0,6}(回|发)'),
-             ('发送私信',)),
-            ('关注', ('关注',), ('关注',)),
-            ('弹幕', ('弹幕',), ('发送弹幕',)),
-        ]
-        missing = []
-        for claim, patterns, markers in claims:
-            if not any(re.search(pattern, summary) for pattern in patterns):
-                continue
-            if not any(marker in actual for marker in markers):
-                missing.append(claim)
-        return missing
-
-    @staticmethod
-    def _log_actions(actions: list[str]) -> None:
-        if actions:
-            logger.info('🐋 本轮动作：' + '；'.join(actions))
-        else:
-            logger.info('🐋 本轮动作：没有调用工具')
-
-
     async def run_analysis_cycle(self) -> Dict[str, Any]:
         self._stop = asyncio.Event()
+        # 写操作上限是“单轮”限制，不能跨轮累计。
+        self.bili_tool.reset_writes()
         self_info = {}
         try:
             if hasattr(self.bili, 'get_self_info'):
@@ -733,7 +634,8 @@ class FreeAgent:
             for _ in range(MAX_STEPS):
                 if self._stop.is_set():
                     raise asyncio.CancelledError()
-                response = await self.ai.chat(messages, temperature=0.7, max_tokens=1000)
+                compact_tool_results(messages)
+                response = await self.ai.chat(messages, temperature=0.7, max_tokens=2000)
                 if not response:
                     break
                 decision = parse_json_decision(response)
@@ -756,7 +658,7 @@ class FreeAgent:
                         })
                         continue
                     summary = str(decision.get('reason') or '')
-                    missing = self._summary_mismatch(summary, successful_actions)
+                    missing = summary_mismatch(summary, successful_actions)
                     if missing and not retried_false_summary:
                         retried_false_summary = True
                         messages.append({'role': 'assistant', 'content': response})
@@ -841,10 +743,10 @@ class FreeAgent:
                 })
         finally:
             self._stop = None
-            self._log_actions(actions)
+            log_actions(actions)
         audit = {}
         if summary:
-            audit = self._parse_model_audit(summary)
+            audit = parse_model_audit(summary)
             if audit:
                 score_text = (
                     f"{audit['max_score']}/20"
@@ -860,7 +762,7 @@ class FreeAgent:
                 )
             else:
                 logger.info('🧾 模型自述审计：本轮未报告评分/@')
-            missing = self._summary_mismatch(summary, successful_actions)
+            missing = summary_mismatch(summary, successful_actions)
             if missing:
                 logger.warning(
                     '🐋 模型总结包含未执行的动作，已按实际动作改写'

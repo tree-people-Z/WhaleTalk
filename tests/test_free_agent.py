@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from core.bili_tool import BiliTool
+from core.agent_summary import parse_model_audit, summary_mismatch
 from core.free_agent import FreeAgent
 from core import free_context
 from utils.database import Database
@@ -334,24 +335,23 @@ class FreeAgentTests(unittest.TestCase):
                 db.engine.dispose()
 
     def test_false_summary_is_replaced_by_successful_actions(self):
-        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
         self.assertIn(
             '点赞',
-            agent._summary_mismatch('给视频点赞并留言', ['搜索视频 鲸鱼娘：成功']),
+            summary_mismatch('给视频点赞并留言', ['搜索视频 鲸鱼娘：成功']),
         )
         self.assertEqual(
-            agent._summary_mismatch('搜索了鲸鱼娘', ['搜索视频 鲸鱼娘：成功']),
+            summary_mismatch('搜索了鲸鱼娘', ['搜索视频 鲸鱼娘：成功']),
             [],
         )
         self.assertEqual(
-            agent._summary_mismatch(
+            summary_mismatch(
                 '检查了@消息（空）、私信会话和评论额度（正常）',
                 ['检查@消息（0 条）：成功'],
             ),
             [],
         )
         self.assertEqual(
-            agent._summary_mismatch(
+            summary_mismatch(
                 '查了@消息和私信（均为空），确认评论额度正常',
                 ['检查@消息（0 条）：成功'],
             ),
@@ -359,16 +359,15 @@ class FreeAgentTests(unittest.TestCase):
         )
 
     def test_parse_model_audit(self):
-        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
-        audit = agent._parse_model_audit(
+        audit = parse_model_audit(
             '本轮看了几个视频。审计：最高分 17/20；@主人 是'
         )
         self.assertEqual(audit['max_score'], 17)
         self.assertTrue(audit['mentioned_owner'])
-        audit = agent._parse_model_audit('审计：最高分 12／20；@主人 否')
+        audit = parse_model_audit('审计：最高分 12／20；@主人 否')
         self.assertEqual(audit['max_score'], 12)
         self.assertFalse(audit['mentioned_owner'])
-        self.assertEqual(agent._parse_model_audit('本轮没有操作'), {})
+        self.assertEqual(parse_model_audit('本轮没有操作'), {})
 
     def test_false_summary_is_not_stored(self):
         agent = FreeAgent(FakeBili(), FalseSummaryAI(), Mock(), Mock())

@@ -10,8 +10,10 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from loguru import logger
+
 APP_NAME = "鲸语"
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.5.0"
 
 GITHUB_REPOSITORY = "tree-people-Z/WhaleTalk"
 RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
@@ -61,6 +63,30 @@ def _find_windows_asset(release: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _find_checksums_asset(release: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pick the release's SHA256SUMS.txt asset, if the maintainer uploaded one."""
+    for asset in release.get("assets", []):
+        name = str(asset.get("name", "")).lower()
+        if name in {"sha256sums.txt", "sha256sums", "checksums.txt"}:
+            return asset
+    return None
+
+
+def checksum_from_file(text: str, filename: str) -> str:
+    """Return the hex digest listed for ``filename`` in a SHA256SUMS file."""
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        digest, listed = parts[0].lower(), parts[-1].lstrip("*").strip()
+        if listed == filename or listed.endswith("/" + filename):
+            return digest if re.fullmatch(r"[0-9a-f]{64}", digest) else ""
+    return ""
+
+
 def check_for_update(timeout: float = 10.0) -> Dict[str, Any]:
     """Ask GitHub for the latest release.
 
@@ -85,6 +111,7 @@ def check_for_update(timeout: float = 10.0) -> Dict[str, Any]:
         return {"status": "latest", "version": APP_VERSION}
 
     asset = _find_windows_asset(release) or {}
+    checksums = _find_checksums_asset(release) or {}
     return {
         "status": "update",
         "version": version or tag,
@@ -95,7 +122,26 @@ def check_for_update(timeout: float = 10.0) -> Dict[str, Any]:
         "asset_name": asset.get("name") or "",
         "asset_size": asset.get("size") or 0,
         "asset_digest": asset.get("digest") or "",
+        "checksums_url": checksums.get("browser_download_url") or "",
     }
+
+
+def fetch_expected_digest(
+    checksums_url: str,
+    asset_name: str,
+    timeout: float = 20.0,
+) -> str:
+    """Download SHA256SUMS.txt and return the digest for ``asset_name``."""
+    if not checksums_url or not asset_name:
+        return ""
+    import requests
+
+    response = requests.get(
+        checksums_url, timeout=timeout,
+        headers={"User-Agent": _UPDATE_HEADERS["User-Agent"]},
+    )
+    response.raise_for_status()
+    return checksum_from_file(response.text, asset_name)
 
 
 def download_update(
@@ -105,9 +151,22 @@ def download_update(
     progress: Optional[Callable[[int, int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     timeout: float = 60.0,
+    asset_name: str = "",
+    checksums_url: str = "",
 ) -> Path:
-    """Stream the release asset to ``destination`` and verify its digest."""
+    """Stream the release asset to ``destination`` and verify its digest.
+
+    优先使用 GitHub 提供的 digest；没有时退回发布页的 SHA256SUMS.txt。
+    """
     import requests
+
+    if not expected_digest and checksums_url and asset_name:
+        try:
+            expected_digest = fetch_expected_digest(checksums_url, asset_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"读取 SHA256SUMS.txt 失败: {exc}")
+    if not expected_digest:
+        logger.warning("更新包没有可用的 SHA256 校验值，将跳过完整性校验")
 
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +192,9 @@ def download_update(
 
     if expected_digest:
         expected = expected_digest.split(":", 1)[-1].strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            destination.unlink(missing_ok=True)
+            raise RuntimeError("更新包校验值格式不正确")
         if hasher.hexdigest().lower() != expected:
             destination.unlink(missing_ok=True)
             raise RuntimeError("更新包校验失败，请重试")

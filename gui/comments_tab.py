@@ -228,7 +228,7 @@ class CommentsTab(QWidget):
             grouped.setdefault((aid, 'thread', root), []).append(record)
 
         merged = []
-        for (aid, _kind, _root), items in grouped.items():
+        for (_aid, _kind, _root), items in grouped.items():
             items.sort(key=lambda item: item.get('commented_at') or datetime.datetime.min)
             post_record = next(
                 (item for item in items if item.get('comment_type') == 'post'),

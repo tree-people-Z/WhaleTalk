@@ -2,7 +2,6 @@
 from cachetools import TTLCache
 from functools import wraps
 from typing import Callable, Any
-import asyncio
 
 # 全局缓存实例
 _video_cache = TTLCache(maxsize=500, ttl=3600)      # 视频信息缓存1小时

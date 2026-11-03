@@ -4,17 +4,16 @@ B站API封装模块
 """
 
 import asyncio
-import json
-import random
 import re
-import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from bilibili_api import login_v2, search, video, user
+from bilibili_api import search, video, user
 from bilibili_api import Credential
 from bilibili_api.search import SearchObjectType, OrderVideo
+from core.bilibili_auth import BiliAuthMixin
+from core.bilibili_guard import BiliGuardMixin
 from core.bilibili_dm import BiliDMMixin
 from core.bilibili_comment import BiliCommentMixin
 from core.bilibili_interact import BiliInteractMixin
@@ -22,7 +21,10 @@ from utils.simple_cache import cached_video
 from loguru import logger
 
 
-class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
+class BilibiliAPI(
+    BiliAuthMixin, BiliGuardMixin, BiliDMMixin,
+    BiliCommentMixin, BiliInteractMixin,
+):
     """B站API封装类"""
 
     def __init__(self, credential_path: Path = None):
@@ -45,6 +47,17 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
         except (ImportError, AttributeError) as exc:
             logger.debug(f"配置 B 站请求参数失败: {exc}")
 
+        # 上游库大版本会改接口，提前告警而不是等到扫码时才报错。
+        try:
+            from bilibili_api import login_v2
+            if not hasattr(login_v2.QrCodeLogin, 'check_state'):
+                logger.warning(
+                    'bilibili-api 版本与代码不匹配（缺少 login_v2.check_state），'
+                    '请按 requirements.txt 重新安装依赖'
+                )
+        except ImportError as exc:
+            logger.warning(f'bilibili-api 登录模块不可用: {exc}')
+
         # 风控状态
         self.blocked_until: Optional[datetime] = None
         # 评论发送上限（B站 12014）状态：冷却到次日 00:05
@@ -65,224 +78,6 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
         self._self_info: Optional[Dict[str, Any]] = None
         self._own_videos_cache: Optional[tuple] = None
 
-    def _load_credential(self):
-        """从文件加载凭证"""
-        if self.credential_path.exists():
-            try:
-                with open(self.credential_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.credential = Credential(
-                        sessdata=data.get('SESSDATA'),
-                        bili_jct=data.get('bili_jct'),
-                        buvid3=data.get('buvid3'),
-                        buvid4=data.get('buvid4'),
-                        dedeuserid=data.get('dedeuserid') or data.get('DedeUserID'),
-                        ac_time_value=data.get('ac_time_value'),
-                    )
-                logger.info("已加载B站登录凭证")
-            except Exception as e:
-                logger.warning(f"加载凭证失败: {e}")
-                self.credential = None
-
-    def _save_credential(
-        self,
-        sessdata: str,
-        bili_jct: str,
-        buvid3: str,
-        buvid4: str = '',
-        dedeuserid: str = '',
-        ac_time_value: str = '',
-    ):
-        """保存凭证到文件"""
-        self.credential_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            'SESSDATA': sessdata,
-            'bili_jct': bili_jct,
-            'buvid3': buvid3,
-            'buvid4': buvid4,
-            'dedeuserid': dedeuserid,
-            'ac_time_value': ac_time_value,
-            'saved_at': datetime.now().isoformat()
-        }
-        with open(self.credential_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-        self.credential = Credential(
-            sessdata=sessdata,
-            bili_jct=bili_jct,
-            buvid3=buvid3,
-            buvid4=buvid4 or None,
-            dedeuserid=dedeuserid or None,
-            ac_time_value=ac_time_value or None,
-        )
-        self._self_info = None
-        logger.info("凭证已保存")
-
-    async def login_with_qr(self) -> tuple[bool, Optional[bytes], Optional[any]]:
-        """
-        二维码登录
-
-        Returns:
-            (成功状态, 二维码图片字节, 登录对象)
-        """
-        try:
-            # 使用新版API创建二维码登录对象
-            qr_login = login_v2.QrCodeLogin()
-
-            # 生成二维码（异步方法）
-            await qr_login.generate_qrcode()
-
-            # 获取二维码图片对象
-            qr_picture = qr_login.get_qrcode_picture()
-
-            if not qr_picture:
-                logger.error("无法获取二维码图片")
-                return False, None, None
-
-            # 获取图片字节数据
-            qr_image = qr_picture.content
-
-            logger.info("二维码已生成，等待扫描...")
-
-            return True, qr_image, qr_login
-
-        except Exception as e:
-            logger.error(f"生成二维码失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return False, None, None
-
-    async def check_qr_status(self, qr_login: any) -> Dict[str, Any]:
-        """
-        检查二维码扫描状态
-
-        Args:
-            qr_login: QrCodeLogin对象
-
-        Returns:
-            {'status': 'success/waiting/expired', 'credential': {...}}
-        """
-        try:
-            from bilibili_api.login_v2 import API
-            from bilibili_api import Api
-            import aiohttp
-
-            # 手动检查状态
-            qr_key = qr_login._QrCodeLogin__qr_key
-            api = API["qrcode"]["web"]["get_events"]
-            params = {"qrcode_key": qr_key}
-            events = await Api(credential=Credential(), **api).update_params(**params).result
-
-            code = events.get("code")
-
-            if code == 0:
-                # 登录成功，获取crossDomain URL
-                cross_domain_url = events.get("url")
-                refresh_token = events.get("refresh_token")
-
-                logger.info(f"登录成功，正在获取cookies...")
-
-                # 访问crossDomain URL获取真正的cookies
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Referer': 'https://www.bilibili.com/',
-                }
-
-                connector = aiohttp.TCPConnector(ssl=False)
-                async with aiohttp.ClientSession(connector=connector) as session:
-                    async with session.get(cross_domain_url, headers=headers, allow_redirects=True) as resp:
-                        # 从cookies中提取
-                        sessdata = ""
-                        bili_jct = ""
-                        buvid3 = ""
-                        buvid4 = ""
-                        dedeuserid = ""
-                        ac_time_value = ""
-
-                        for cookie in session.cookie_jar:
-                            if cookie.key == 'SESSDATA' and not sessdata:
-                                sessdata = cookie.value
-                            elif cookie.key == 'bili_jct' and not bili_jct:
-                                bili_jct = cookie.value
-                            elif cookie.key == 'buvid3' and not buvid3:
-                                buvid3 = cookie.value
-                            elif cookie.key == 'buvid4' and not buvid4:
-                                buvid4 = cookie.value
-                            elif cookie.key == 'DedeUserID' and not dedeuserid:
-                                dedeuserid = cookie.value
-                            elif cookie.key == 'ac_time_value' and not ac_time_value:
-                                ac_time_value = cookie.value
-
-                        if sessdata and bili_jct:
-                            # URL解码
-                            from urllib.parse import unquote
-                            sessdata = unquote(sessdata)
-                            bili_jct = unquote(bili_jct)
-                            buvid3 = unquote(buvid3) if buvid3 else ""
-                            buvid4 = unquote(buvid4) if buvid4 else ""
-                            dedeuserid = unquote(dedeuserid) if dedeuserid else ""
-                            ac_time_value = (
-                                unquote(ac_time_value) if ac_time_value else ""
-                            )
-
-                            logger.info(f"成功获取凭证")
-
-                            # 保存凭证
-                            self._save_credential(
-                                sessdata, bili_jct, buvid3,
-                                buvid4, dedeuserid, ac_time_value,
-                            )
-
-                            # 创建Credential对象
-                            self.credential = Credential(
-                                sessdata=sessdata,
-                                bili_jct=bili_jct,
-                                buvid3=buvid3,
-                                buvid4=buvid4 or None,
-                                dedeuserid=dedeuserid or None,
-                                ac_time_value=ac_time_value or None,
-                            )
-
-                            return {
-                                'status': 'success',
-                                'credential': self.credential
-                            }
-                        else:
-                            logger.error("未能从crossDomain URL获取到cookies")
-                            return {'status': 'error', 'message': '未能获取cookies'}
-
-            elif code == 86101:
-                return {'status': 'waiting'}
-            elif code == 86090:
-                return {'status': 'waiting'}
-            elif code == 86038:
-                return {'status': 'expired', 'message': '二维码已过期'}
-            else:
-                return {'status': 'waiting'}
-
-        except Exception as e:
-            logger.error(f"检查二维码状态失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {'status': 'error', 'message': str(e)}
-
-    async def get_self_info(self) -> Dict[str, Any]:
-        """获取当前登录账号的 uid 和昵称（缓存）。"""
-        if self._self_info is not None:
-            return self._self_info
-        if not self.credential:
-            return {}
-        try:
-            info = await user.get_self_info(self.credential)
-            self._self_info = {
-                'uid': info.get('mid'),
-                'name': info.get('name') or '',
-            }
-        except Exception as exc:
-            logger.debug(f"获取登录账号信息失败: {exc}")
-            self._self_info = {}
-        return self._self_info
-
     async def get_own_videos(self, limit: int = 10) -> List[Dict[str, Any]]:
         """获取当前账号最近投稿的视频，用于回复自己视频下的评论。"""
         cache = getattr(self, '_own_videos_cache', None)
@@ -296,150 +91,12 @@ class BilibiliAPI(BiliDMMixin, BiliCommentMixin, BiliInteractMixin):
         self._own_videos_cache = (datetime.now(), videos)
         return videos
 
-    async def check_login(self) -> bool:
-        """检查登录状态"""
-        if not self.credential:
-            return False
 
-        try:
-            # 老版本 cookies 可能没有 buvid4，补一个可降低 412 概率。
-            if self.credential and not getattr(self.credential, 'buvid4', None):
-                try:
-                    from bilibili_api.utils.network import get_buvid
-                    _, buvid4 = await get_buvid()
-                    if buvid4:
-                        self.credential.buvid4 = buvid4
-                        self._save_credential(
-                            self.credential.sessdata or '',
-                            self.credential.bili_jct or '',
-                            self.credential.buvid3 or '',
-                            buvid4,
-                            self.credential.dedeuserid or '',
-                            self.credential.ac_time_value or '',
-                        )
-                        logger.info("已补充 buvid4 风控参数")
-                except (AttributeError, TypeError, ValueError) as exc:
-                    logger.debug(f"补充 buvid4 失败: {exc}")
-            info = await user.get_self_info(credential=self.credential)
-            if not isinstance(info, dict) or not info.get('name'):
-                logger.warning("登录状态检查失败: 未获取到用户信息")
-                return False
-            logger.info(f"登录有效，用户: {info.get('name')}")
-            return True
-        except Exception as e:
-            logger.warning(f"登录状态检查失败: {e}")
-            return False
 
-    def is_blocked(self) -> bool:
-        """检查是否处于风控状态"""
-        blocked_until = getattr(self, 'blocked_until', None)
-        if blocked_until:
-            if datetime.now() < blocked_until:
-                return True
-            else:
-                self.blocked_until = None
-        return False
 
-    def set_blocked(self, duration_minutes: int = 30):
-        """设置风控状态"""
-        self.blocked_until = datetime.now() + timedelta(minutes=duration_minutes)
-        logger.warning(f"触发风控，将暂停 {duration_minutes} 分钟")
 
-    def _load_posting_state(self):
-        path = getattr(self, '_posting_state_path', None)
-        if not path or not path.exists():
-            return
-        try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-            until = datetime.fromisoformat(data.get('until', ''))
-        except Exception:  # noqa: BLE001
-            return
-        if until and datetime.now() < until:
-            self.posting_blocked_until = until
-            self.posting_block_reason = data.get('reason', '')
-            logger.info(f"恢复评论发送冷却至 {until:%Y-%m-%d %H:%M}")
-        else:
-            try:
-                path.unlink()
-            except OSError:
-                pass
 
-    def _save_posting_state(self):
-        path = getattr(self, '_posting_state_path', None)
-        if not path:
-            return
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({
-                'until': self.posting_blocked_until.isoformat()
-                if self.posting_blocked_until else '',
-                'reason': self.posting_block_reason,
-            }, ensure_ascii=False), encoding='utf-8')
-        except OSError:
-            pass
 
-    def _clear_posting_state(self):
-        path = getattr(self, '_posting_state_path', None)
-        if path:
-            try:
-                path.unlink()
-            except OSError:
-                pass
-
-    def is_posting_blocked(self) -> bool:
-        """B站评论发送额度是否已用完（错误码 12014）。"""
-        until = getattr(self, 'posting_blocked_until', None)
-        if until:
-            if datetime.now() < until:
-                return True
-            self.posting_blocked_until = None
-            self._clear_posting_state()
-        return False
-
-    def set_posting_blocked(self, reason: str = ''):
-        """暂停发评论到次日凌晨，避免反复触发 12014。"""
-        reset = (datetime.now() + timedelta(days=1)).replace(
-            hour=0, minute=5, second=0, microsecond=0
-        )
-        self.posting_blocked_until = reset
-        self.posting_block_reason = reason
-        self._save_posting_state()
-        logger.warning(
-            f"B站评论发送已达上限（12014），暂停发评论至 "
-            f"{reset:%Y-%m-%d %H:%M}"
-        )
-
-    @staticmethod
-    def _short_error(message: str, limit: int = 160) -> str:
-        """Collapse B站 HTML error bodies so logs stay readable."""
-        text = re.sub(r'<[^>]+>', ' ', message or '')
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text[:limit] + ('…' if len(text) > limit else '')
-
-    async def _pace_comment_request(self) -> None:
-        """Serialize comment requests with a minimum interval.
-
-        The API object is shared by several workers, each of which runs its own
-        event loop. asyncio.Lock is bound to the loop that first uses it, so the
-        lock must be recreated when the running loop changes.
-        """
-        loop = asyncio.get_running_loop()
-        lock = getattr(self, '_comment_request_lock', None)
-        if lock is None or getattr(self, '_comment_request_lock_loop', None) is not loop:
-            lock = asyncio.Lock()
-            self._comment_request_lock = lock
-            self._comment_request_lock_loop = loop
-        async with lock:
-            # 固定间隔之外再加随机抖动，避免形成规律的机器请求节奏。
-            target = (
-                getattr(self, '_last_comment_request_at', 0.0)
-                + getattr(self, '_comment_min_interval', 2.0)
-                + random.uniform(0, 1.5)
-            )
-            wait = target - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._last_comment_request_at = time.monotonic()
 
     async def search_videos(
         self,
@@ -844,7 +501,7 @@ class BilibiliAPISync:
     def __del__(self):
         try:
             self.loop.close()
-        except:
+        except Exception:  # noqa: BLE001 - 解释器退出阶段无法可靠处理
             pass
 
     def _run(self, coro):

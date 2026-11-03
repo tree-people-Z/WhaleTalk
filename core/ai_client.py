@@ -3,6 +3,7 @@ AI客户端模块
 支持多种AI模型：OpenAI、Claude、各类国产大模型等
 """
 
+import asyncio
 import os
 import base64
 from pathlib import Path
@@ -33,34 +34,60 @@ class AIProvider(Enum):
 
 
 class AIClient:
-    """AI客户端统一接口"""
+    """AI客户端统一接口（全异步 + 超时 + 自动重试）"""
 
     def __init__(
         self,
         provider: str = "openai",
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        base_url: Optional[str] = None
+        base_url: Optional[str] = None,
+        timeout: float = 60.0,
+        max_retries: int = 2,
+        retry_backoff: float = 1.5,
+        max_output_tokens: int = 8000,
+        output_retries: int = 3,
     ):
         """
         初始化AI客户端
 
         Args:
-            provider: AI提供商 (openai/claude/deepseek/qwen)
+            provider: AI提供商 (openai/claude/deepseek/qwen)，其他名称按 OpenAI 兼容处理
             api_key: API密钥
             model: 模型名称
             base_url: 自定义API地址
+            timeout: 单次请求超时（秒）
+            max_retries: 网络/限流类错误的最大重试次数
+            retry_backoff: 重试退避基数（秒）
+            max_output_tokens: 推理模型输出预算上限（含推理 token）
+            output_retries: 输出被推理占满时，自动提高预算的次数
         """
-        self.provider = AIProvider(provider)
-        configured_api_key = api_key or os.getenv(f"{provider.upper()}_API_KEY")
+        provider_name = str(provider or 'openai').strip().lower()
+        try:
+            self.provider = AIProvider(provider_name)
+        except ValueError:
+            logger.warning(
+                f"未知的 AI 提供商 {provider_name!r}，按 OpenAI 兼容接口处理"
+            )
+            self.provider = AIProvider.OPENAI
+        configured_api_key = api_key or os.getenv(f"{provider_name.upper()}_API_KEY")
         self.api_key = configured_api_key.strip() if configured_api_key else None
         self.model = model or self._get_default_model()
         self.base_url = base_url
+        self.timeout = max(5.0, float(timeout or 60.0))
+        self.max_retries = max(0, int(max_retries))
+        self.retry_backoff = max(0.1, float(retry_backoff))
+        self.max_output_tokens = max(256, int(max_output_tokens or 8000))
+        self.output_retries = max(0, int(output_retries))
 
         # 初始化客户端
         self._init_client()
 
-        logger.info(f"AI客户端初始化: {self.provider.value} / {self.model}")
+        logger.info(
+            f"AI客户端初始化: {self.provider.value} / {self.model} "
+            f"(timeout={self.timeout:.0f}s, retries={self.max_retries}, "
+            f"max_output={self.max_output_tokens})"
+        )
 
     def _get_default_model(self) -> str:
         """获取默认模型名称"""
@@ -73,31 +100,91 @@ class AIClient:
         return defaults.get(self.provider, "gpt-4o-mini")
 
     def _init_client(self):
-        """初始化具体的AI客户端"""
-        if self.provider == AIProvider.OPENAI or self.provider == AIProvider.DEEPSEEK:
+        """初始化具体的AI客户端（异步 SDK，避免阻塞事件循环）"""
+        if self.provider in (AIProvider.OPENAI, AIProvider.DEEPSEEK, AIProvider.QWEN):
             if not OPENAI_AVAILABLE:
                 raise ImportError("请安装 openai 库: pip install openai")
 
-            client_kwargs = {"api_key": self.api_key}
+            client_kwargs = {
+                "api_key": self.api_key,
+                "timeout": self.timeout,
+                "max_retries": 0,  # 重试统一由本类控制，便于记录日志
+            }
             if self.base_url:
                 client_kwargs["base_url"] = self.base_url
             elif self.provider == AIProvider.DEEPSEEK:
                 client_kwargs["base_url"] = "https://api.deepseek.com"
+            elif self.provider == AIProvider.QWEN:
+                client_kwargs["base_url"] = (
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                )
 
-            self.client = openai.OpenAI(**client_kwargs)
+            self.client = openai.AsyncOpenAI(**client_kwargs)
 
         elif self.provider == AIProvider.CLAUDE:
             if not ANTHROPIC_AVAILABLE:
                 raise ImportError("请安装 anthropic 库: pip install anthropic")
-            self.client = anthropic.Anthropic(api_key=self.api_key)
-
-        elif self.provider == AIProvider.QWEN:
-            if not OPENAI_AVAILABLE:
-                raise ImportError("请安装 openai 库: pip install openai")
-            self.client = openai.OpenAI(
+            self.client = anthropic.AsyncAnthropic(
                 api_key=self.api_key,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                timeout=self.timeout,
+                max_retries=0,
             )
+
+    @staticmethod
+    def _is_retryable(error: Exception) -> bool:
+        """网络抖动、超时、限流和 5xx 可以重试；鉴权/参数错误不重试。"""
+        name = error.__class__.__name__.lower()
+        if any(key in name for key in (
+            'authentication', 'permission', 'badrequest', 'invalidrequest',
+            'notfound', 'unprocessable',
+        )):
+            return False
+        status = getattr(error, 'status_code', None) or getattr(
+            error, 'status', None
+        )
+        try:
+            status = int(status)
+        except (TypeError, ValueError):
+            status = None
+        if status is not None:
+            return status in (408, 409, 429) or status >= 500
+        return any(key in name for key in (
+            'timeout', 'connection', 'ratelimit', 'internalserver',
+            'serviceunavailable', 'apistatus', 'apiconnection',
+        ))
+
+    async def _request_once(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> tuple:
+        """发送一次请求，返回 (文本, finish_reason, reasoning_tokens)。"""
+        if self.provider == AIProvider.CLAUDE:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=messages,
+            )
+            text = ''.join(
+                block.text for block in response.content
+                if getattr(block, 'type', '') == 'text'
+            )
+            return text, str(getattr(response, 'stop_reason', '') or ''), 0
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        choice = response.choices[0]
+        text = choice.message.content or ''
+        usage = getattr(response, 'usage', None)
+        details = getattr(usage, 'completion_tokens_details', None)
+        reasoning = int(getattr(details, 'reasoning_tokens', 0) or 0)
+        return text, str(getattr(choice, 'finish_reason', '') or ''), reasoning
 
     async def chat(
         self,
@@ -105,41 +192,76 @@ class AIClient:
         temperature: float = 0.7,
         max_tokens: int = 2000
     ) -> Optional[str]:
+        """发送对话请求。
+
+        推理模型会把 max_tokens 先用于思考。输出为空且推理占满预算时，
+        自动提高预算重试，避免出现“模型没说话但也没报错”的空回合。
         """
-        发送对话请求
+        budget = max(32, int(max_tokens or 2000))
+        escalation = 0
+        last_error: Optional[Exception] = None
 
-        Args:
-            messages: 消息列表 [{"role": "user", "content": "..."}]
-            temperature: 温度参数
-            max_tokens: 最大token数
+        while True:
+            network_failed = False
+            escalated = False
+            for attempt in range(self.max_retries + 1):
+                try:
+                    text, finish, reasoning = await self._request_once(
+                        messages, temperature, budget
+                    )
+                except Exception as e:  # noqa: BLE001
+                    last_error = e
+                    if attempt >= self.max_retries or not self._is_retryable(e):
+                        network_failed = True
+                        break
+                    delay = self.retry_backoff * (2 ** attempt)
+                    logger.warning(
+                        f"AI 请求失败（第 {attempt + 1} 次），{delay:.1f}s 后重试: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-        Returns:
-            AI回复内容
-        """
-        try:
-            if self.provider == AIProvider.CLAUDE:
-                # Claude使用不同的API格式
-                response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    messages=messages
+                if text and text.strip():
+                    return text
+
+                can_escalate = (
+                    escalation < self.output_retries
+                    and budget < self.max_output_tokens
+                    and (
+                        finish in ('length', 'max_tokens')
+                        or reasoning >= int(budget * 0.9)
+                    )
                 )
-                return response.content[0].text
-
-            else:
-                # OpenAI兼容格式
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens
+                if not can_escalate:
+                    logger.warning(
+                        f"AI 返回空内容（finish={finish}, reasoning={reasoning}, "
+                        f"max_tokens={budget}）"
+                    )
+                    return None
+                if escalation >= self.output_retries - 1:
+                    new_budget = self.max_output_tokens
+                else:
+                    new_budget = min(
+                        self.max_output_tokens,
+                        max(budget * 2, budget + 1024),
+                    )
+                logger.warning(
+                    f"AI 输出被推理占用（finish={finish}, reasoning={reasoning}, "
+                    f"max_tokens={budget}），提高到 {new_budget} 重试"
                 )
-                return response.choices[0].message.content
+                budget = new_budget
+                escalation += 1
+                escalated = True
+                break
 
-        except Exception as e:
-            logger.error(f"AI请求失败: {e}")
-            return None
+            if network_failed or not escalated:
+                break
+            if escalation > self.output_retries:
+                break
+
+        if last_error is not None:
+            logger.error(f"AI请求失败: {last_error}")
+        return None
 
     def chat_sync(
         self,
@@ -147,16 +269,13 @@ class AIClient:
         temperature: float = 0.7,
         max_tokens: int = 2000
     ) -> Optional[str]:
-        """同步版本的chat（直接调用，不需要await）"""
-        import asyncio
+        """同步版本的 chat；不能在已运行的事件循环里调用。"""
         try:
-            loop = asyncio.get_event_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        return loop.run_until_complete(
-            self.chat(messages, temperature, max_tokens)
+            return asyncio.run(self.chat(messages, temperature, max_tokens))
+        raise RuntimeError(
+            'chat_sync 不能在运行中的事件循环里调用，请直接 await client.chat(...)'
         )
 
     async def analyze_video(
@@ -259,7 +378,7 @@ class AIClient:
                     'type': 'image',
                     'source': {'type': 'base64', 'media_type': mime_type, 'data': encoded},
                 })
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=2000,
                 temperature=0.5,
@@ -274,7 +393,7 @@ class AIClient:
                 'type': 'image_url',
                 'image_url': {'url': f'data:{mime_type};base64,{encoded}'},
             })
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {'role': 'system', 'content': '你是一个专业的视频内容分析助手。'},
