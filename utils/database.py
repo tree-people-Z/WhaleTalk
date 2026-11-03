@@ -567,9 +567,9 @@ class Database:
             .filter(CommentRecord.success == True)
         if not include_replies:
             query = query.filter(CommentRecord.comment_type == 'post')
-        records = query.order_by(CommentRecord.created_at.desc())\
-            .limit(limit)\
-            .all()
+        records = query.order_by(
+            CommentRecord.created_at.desc(), CommentRecord.id.desc()
+        ).limit(limit).all()
 
         results = []
         for record in records:
@@ -810,9 +810,9 @@ class Database:
     def get_recent_own_comments(self, limit: int = 20) -> List[str]:
         rows = self.session.query(CommentRecord.content).filter(
             CommentRecord.success == True,  # noqa: E712
-        ).order_by(CommentRecord.created_at.desc()).limit(
-            max(1, int(limit))
-        ).all()
+        ).order_by(
+            CommentRecord.created_at.desc(), CommentRecord.id.desc()
+        ).limit(max(1, int(limit))).all()
         return [row[0] or '' for row in rows if (row[0] or '').strip()]
 
     def delete_growth_item(self, item_id: int) -> int:
