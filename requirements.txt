@@ -18,6 +18,7 @@ APScheduler~=3.11
 
 # 数据存储
 sqlalchemy~=2.0.54
+cachetools~=7.2
 
 # 图像处理（画面压缩、评论图）
 pillow~=12.3

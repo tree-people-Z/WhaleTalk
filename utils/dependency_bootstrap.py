@@ -23,6 +23,7 @@ REQUIRED_IMPORTS = {
     'anthropic': 'anthropic',
     'APScheduler': 'apscheduler',
     'SQLAlchemy': 'sqlalchemy',
+    'cachetools': 'cachetools',
     'Pillow': 'PIL',
     'requests': 'requests',
     'loguru': 'loguru',
