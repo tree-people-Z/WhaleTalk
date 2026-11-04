@@ -4,9 +4,11 @@ import json
 import re
 from typing import Any, Dict, Optional
 
+# The model sometimes duplicates the pipe character (`<｜｜DSML｜｜>`), so every
+# marker position accepts one or more of either pipe variant.
 _DSML_INVOKE = re.compile(
-    r'<[|｜]DSML[|｜]\s*invoke\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
-    r'</[|｜]DSML[|｜]\s*invoke[^>]*>',
+    r'<[|｜]+DSML[|｜]+\s*invoke\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
+    r'</[|｜]+DSML[|｜]+\s*invoke[^>]*>',
     re.S,
 )
 # Closing tags may carry attributes that belong to the next parameter, e.g. the
@@ -14,14 +16,19 @@ _DSML_INVOKE = re.compile(
 # name should appear. Allow trailing attributes so one bad tag cannot swallow
 # the whole following parameter into the previous value.
 _DSML_PARAM = re.compile(
-    r'<[|｜]DSML[|｜]\s*parameter\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
-    r'</[|｜]DSML[|｜]\s*parameter[^>]*>',
+    r'<[|｜]+DSML[|｜]+\s*parameter\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
+    r'</[|｜]+DSML[|｜]+\s*parameter[^>]*>',
     re.S,
 )
 # Any leftover markup inside a single value (opening tag, closing tag, or the
 # fragment left over when the model pastes markup into an argument).
-_DSML_MARKUP = re.compile(r'</?[|｜]DSML[|｜][^>]*>?')
-_DSML_MARKUP_START = re.compile(r'</?[|｜]DSML[|｜]')
+_DSML_MARKUP = re.compile(r'</?[|｜]+DSML[|｜]+[^>]*>?')
+_DSML_MARKUP_START = re.compile(r'</?[|｜]*DSML[|｜]*')
+# Keys that make a parsed dict an actual agent decision.  A bare JSON object
+# harvested out of tool markup (`{}` or `{"keyword": "x"}`) has none of them.
+_DECISION_KEYS = frozenset(
+    {'action', 'tool', 'name', 'method', 'method_name', 'api', 'arguments', 'params', 'args', 'input'}
+)
 _BVID = re.compile(r'BV[0-9A-Za-z]{10}')
 _NON_BILI_TOOLS = {'inspect_video', 'read_diary', 'write_diary'}
 
@@ -128,7 +135,9 @@ def parse_json_decision(text: str) -> Optional[Dict[str, Any]]:
     text = (text or '').strip()
     if _DSML_INVOKE.search(text):
         # Native DeepSeek tool markup: never fall back to one of its JSON
-        # parameter fragments as if it were a decision.
+        # parameter fragments as if it were a decision.  A garbled/decorated
+        # marker (e.g. `<｜｜DSML｜｜>`) therefore fails via the decision-key
+        # validation below instead of silently turning `{}` into a decision.
         return parse_dsml_decision(text)
     dsml = parse_dsml_decision(text)
     if dsml is not None:
@@ -143,5 +152,8 @@ def parse_json_decision(text: str) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         return None
     if not isinstance(data, dict):
+        return None
+    if not _DECISION_KEYS.intersection(data):
+        # Leftover markup fragments (`{}`, `{"keyword": ...}`) are not decisions.
         return None
     return sanitize_arguments(data)

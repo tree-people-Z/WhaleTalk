@@ -108,6 +108,44 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertEqual(normalize_bvid(''), '')
         self.assertEqual(normalize_bvid('BV1test'), '')
 
+    def test_double_pipe_marker_is_parsed(self):
+        """The model sometimes emits `<｜｜DSML｜｜>`; it must still parse."""
+        doubled = DSML_TEXT.replace('<\uff5cDSML\uff5c', '<\uff5c\uff5cDSML\uff5c\uff5c')
+        doubled = doubled.replace('</\uff5cDSML\uff5c', '</\uff5c\uff5cDSML\uff5c\uff5c')
+        decision = parse_json_decision(doubled)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision['tool'], 'bili_api')
+        self.assertEqual(decision['arguments']['method'], 'search_videos')
+        self.assertEqual(
+            decision['arguments']['arguments'],
+            {'keyword': 'DeepSeek', 'order': 'pubdate'},
+        )
+
+    def test_double_pipe_markup_is_stripped(self):
+        dirty = 'BV1iwxD6NECk</\uff5c\uff5cDSML\uff5c\uff5c parameter name="x">10'
+        self.assertEqual(strip_tool_markup(dirty), 'BV1iwxD6NECk')
+        self.assertEqual(normalize_bvid(dirty), 'BV1iwxD6NECk')
+
+    def test_unparsable_markup_never_degrades_to_json_fragment(self):
+        """A broken tool block must not be read as `{}` or a params fragment."""
+        text = (
+            '<\uff5c\uff5cDSML\uff5c\uff5c calls>\n'
+            '<\uff5c\uff5cDSML\uff5c\uff5c parameter name="arguments">'
+            '{"keyword": "x"}</\uff5c\uff5cDSML\uff5c\uff5c parameter>\n'
+            '<\uff5c\uff5cDSML\uff5c\uff5c invoke name="bili_api">\n'
+            '</\uff5c\uff5cDSML\uff5c\uff5c calls>'
+        )
+        self.assertIsNone(parse_json_decision(text))
+
+    def test_unparsable_empty_arguments_block_returns_none(self):
+        text = (
+            '<\uff5c\uff5cDSML\uff5c\uff5c calls>\n'
+            '<\uff5c\uff5cDSML\uff5c\uff5c parameter name="arguments">{}</\uff5c\uff5cDSML\uff5c\uff5c parameter>\n'
+            '</\uff5c\uff5cDSML\uff5c\uff5c calls>'
+        )
+        self.assertIsNone(parse_json_decision(text))
+
+
 
 if __name__ == '__main__':
     unittest.main()

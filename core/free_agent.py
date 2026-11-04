@@ -11,7 +11,12 @@ from typing import Any, Dict
 from loguru import logger
 
 from core.agent_events import filter_agent_events
-from core.agent_protocol import normalize_bvid, parse_json_decision, sanitize_arguments
+from core.agent_protocol import (
+    normalize_bvid,
+    parse_json_decision,
+    sanitize_arguments,
+    strip_tool_markup,
+)
 from core.agent_summary import (
     compact_tool_results,
     log_actions,
@@ -711,7 +716,13 @@ class FreeAgent:
                         args['method'] = decision[key]
                 tool, args = self._normalize_call(tool, args)
                 if tool == 'bili_api' and not args.get('method'):
-                    logger.warning(f'🐋 未识别的工具调用: {response[:800]}')
+                    # Raw model markup must not be dumped into the log: it is
+                    # multi-line, hundreds of characters long, and burying the
+                    # real startup/error lines made the log unreadable.
+                    logger.warning(
+                        '🐋 未识别的工具调用: '
+                        f'{strip_tool_markup(response)[:200] or "（空响应）"}'
+                    )
                 try:
                     result = await self._call_tool(tool, args)
                 except Exception as exc:  # noqa: BLE001

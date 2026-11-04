@@ -129,8 +129,11 @@ def main():
     """程序主入口"""
     # 初始化日志
     logger = setup_logger()
+    # 版本号写进启动横幅，出问题时看日志首行即可确认跑的是哪个版本。
+    from utils.updater import APP_NAME, APP_VERSION
+
     logger.info("=" * 60)
-    logger.info("鲸语 · B站智能运营助手启动")
+    logger.info(f"{APP_NAME} · B站智能运营助手 v{APP_VERSION} 启动")
     logger.info("=" * 60)
 
     # 单文件版：首次启动解压内置 ffmpeg
