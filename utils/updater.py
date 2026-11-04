@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Optional
 from loguru import logger
 
 APP_NAME = "鲸语"
-APP_VERSION = "2.5.2"
+APP_VERSION = "2.5.3"
 
 GITHUB_REPOSITORY = "tree-people-Z/WhaleTalk"
 RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
@@ -231,11 +231,39 @@ function Write-Log($message) {{
     Add-Content -LiteralPath $Log -Value ("{{0}} {{1}}" -f (Get-Date -Format 'HH:mm:ss'), $message) -Encoding UTF8
 }}
 try {{
-    $deadline = (Get-Date).AddSeconds(180)
-    while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {{
-        Start-Sleep -Milliseconds 500
+    $app = Join-Path $Target 'WhaleTalk.exe'
+    function Wait-Exit([int]$seconds) {{
+        $until = (Get-Date).AddSeconds($seconds)
+        while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $until)) {{
+            Start-Sleep -Milliseconds 500
+        }}
+        return -not (Get-Process -Id {pid} -ErrorAction SilentlyContinue)
     }}
-    Start-Sleep -Milliseconds 800
+    $gone = Wait-Exit 45
+    if (-not $gone) {{
+        # 界面可能卡在长网络请求上拒绝了关闭：先请它自己体面退出。
+        Write-Log 'instance still running; sending --quit'
+        $helper = $null
+        try {{
+            $helper = Start-Process -FilePath $app -ArgumentList '--quit' -PassThru -WindowStyle Hidden
+        }} catch {{
+            Write-Log "quit helper failed to start: $_"
+        }}
+        $gone = Wait-Exit 30
+        if (-not $gone) {{
+            # 旧版本不认识 --quit，会拉起第二个界面（单实例提示框），清掉它。
+            if ($helper -and -not $helper.HasExited) {{
+                Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+            }}
+            Write-Log 'quit request was ignored (older build?)'
+        }}
+    }}
+    if (-not $gone) {{
+        Write-Log 'forcing stop of the running instance'
+        Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 1500
+    }}
+    Start-Sleep -Milliseconds 500
     Write-Log "applying $Source to $Target"
     $excluded = Join-Path $Target 'data'
     $null = robocopy $Source $Target /MIR /XD $excluded /R:1 /W:1 /NFL /NDL /NJH /NJS /NP

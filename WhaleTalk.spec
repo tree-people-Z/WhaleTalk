@@ -20,6 +20,8 @@ datas = [
 # The package also ships JSON tables under bilibili_api/data.
 hiddenimports = ["bilibili_api"] + collect_submodules("bilibili_api")
 hiddenimports += [
+    # 本地套接字（退出通道）在窗口版里没有静态引用路径，必须显式收集。
+    "PyQt6.QtNetwork",
     "gui.memory_worker",
     "core.conversation_agent",
     "core.free_agent",

@@ -1,4 +1,6 @@
-﻿import unittest
+﻿import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from utils import updater
@@ -54,6 +56,31 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check_for_update()
         self.assertEqual(result['status'], 'error')
         self.assertIn('offline', result['message'])
+
+    def test_update_script_quits_gracefully_before_forcing(self):
+        """升级脚本要先等自带退出，再发 --quit，最后才强杀。"""
+        script = updater._UPDATE_SCRIPT
+        self.assertIn('Wait-Exit 45', script)
+        self.assertIn('--quit', script)
+        self.assertIn('Stop-Process -Id {pid} -Force', script)
+        self.assertLess(script.index('Wait-Exit 45'), script.index('--quit'))
+        self.assertLess(
+            script.index('--quit'), script.index('Stop-Process -Id {pid} -Force')
+        )
+
+    def test_staged_script_is_fully_formatted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / 'WhaleTalk.update'
+            with patch.object(updater, 'update_staging_dir', return_value=staging), \
+                    patch('subprocess.Popen'):
+                script = updater.launch_update_installer(
+                    Path(directory) / 'src', Path(directory) / 'install', 4321
+                )
+            text = script.read_text(encoding='utf-8-sig')
+            self.assertIn('4321', text)
+            self.assertIn('WhaleTalk.exe', text)
+            self.assertNotIn('{pid}', text)
+            self.assertNotIn('{{', text)
 
 
 if __name__ == '__main__':

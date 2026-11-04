@@ -62,6 +62,8 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
         self._force_quit = False
+        # 启动更新或外部 --quit 时置位：后台任务等不到就继续关，不无限拖延。
+        self._shutdown_forced = False
         self._tray_hint_shown = False
         self.tray_icon = None
         self._setup_tray()
@@ -1008,9 +1010,7 @@ class MainWindow(QMainWindow):
             "更新准备完成",
             "程序将关闭并自动完成更新，随后会重新启动，请稍候…",
         )
-        self._force_quit = True
-        self.close()
-        QApplication.instance().quit()
+        self.quit_application(force=True)
 
     def _maybe_consolidate_memory(self):
         if self.ai_client is None:
@@ -1082,10 +1082,22 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    def _quit_from_tray(self):
+    def quit_application(self, force: bool = False):
+        """真正退出程序。
+
+        托盘菜单、更新流程、以及外部 ``--quit`` 请求都走这里，保证行为一致：
+        标记强制退出、保存设置、停调度、关数据库并释放单实例锁。
+
+        ``force=True`` 用于更新和外部退出请求：后台任务等不到时不再拒绝关闭，
+        否则更新脚本会白等到超时，最后还是得强杀。
+        """
         self._force_quit = True
+        self._shutdown_forced = self._shutdown_forced or force
         self.close()
         QApplication.instance().quit()
+
+    def _quit_from_tray(self):
+        self.quit_application()
 
     def apply_theme(self):
         """应用浅色界面主题。"""
@@ -1152,9 +1164,13 @@ class MainWindow(QMainWindow):
                 if worker is not None and worker.isRunning():
                     leftover.append(worker)
         if leftover:
-            self.log("后台任务仍在运行，请稍后再关闭窗口")
-            event.ignore()
-            return
+            if not self._shutdown_forced:
+                self.log("后台任务仍在运行，请稍后再关闭窗口")
+                event.ignore()
+                return
+            logger.warning(
+                f'更新/退出请求不再等待 {len(leftover)} 个后台任务，继续关闭'
+            )
 
         if self.scheduler and self.scheduler.is_running:
             self.scheduler.stop()
@@ -1170,13 +1186,16 @@ class MainWindow(QMainWindow):
                 self.agent.request_stop()
             for worker in workers:
                 worker.requestInterruption()
+            wait_ms = 30000 if self._shutdown_forced else 10000
             stopped = True
             for worker in workers:
-                stopped = worker.wait(10000) and stopped
+                stopped = worker.wait(wait_ms) and stopped
             if not stopped:
-                self.log("后台任务仍在等待网络请求结束，请稍后再次关闭窗口")
-                event.ignore()
-                return
+                if not self._shutdown_forced:
+                    self.log("后台任务仍在等待网络请求结束，请稍后再次关闭窗口")
+                    event.ignore()
+                    return
+                logger.warning('更新/退出请求不再等待本轮网络请求，继续关闭')
 
         if getattr(self, 'tray_icon', None) is not None:
             self.tray_icon.hide()

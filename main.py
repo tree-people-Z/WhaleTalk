@@ -112,8 +112,48 @@ def _transcription_self_check(argv) -> int:
     return 0
 
 
+def _quit_running_instance(data_dir: Path = Path('data'), wait_seconds: float = 30.0) -> int:
+    """``--quit``：请正在运行的实例正常退出，并等它真的结束。
+
+    托盘程序不响应 WM_CLOSE，强杀会留下残留锁和半截日志；这条通路让
+    升级脚本、部署脚本和人都能体面地把它关掉。
+    """
+    import time
+
+    from utils.app_ipc import is_running, request_quit
+    from utils.logger import setup_logger
+    from utils.single_instance import is_pid_alive, read_lock_pid
+
+    # 与主程序写同一份日志，退出是否体面一目了然。
+    logger = setup_logger()
+    lock_path = Path(data_dir) / 'app.lock'
+    pid = read_lock_pid(lock_path)
+    if not request_quit(Path(data_dir)):
+        logger.info('退出请求：当前没有正在运行的鲸语实例')
+        logger.complete()
+        return 0
+    logger.info(f'已发送退出请求（pid={pid or "?"}），等待进程结束')
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if pid is not None and not is_pid_alive(pid):
+            logger.info('鲸语已退出')
+            logger.complete()
+            return 0
+        if pid is None and not is_running(Path(data_dir)):
+            logger.info('鲸语已退出')
+            logger.complete()
+            return 0
+        time.sleep(0.3)
+    logger.warning(f'等待超时（{wait_seconds:.0f} 秒），进程仍未退出')
+    logger.complete()
+    return 1
+
+
 if '--transcription-self-test' in sys.argv:
     sys.exit(_transcription_self_check(sys.argv))
+
+if '--quit' in sys.argv:
+    sys.exit(_quit_running_instance())
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -181,6 +221,13 @@ def main():
     # 创建主窗口
     main_window = MainWindow()
     main_window.show()
+
+    # 外部退出通道：托盘程序收不到 WM_CLOSE，`--quit` 走本地套接字让它正常退出。
+    from utils.app_ipc import QuitServer
+
+    quit_server = QuitServer(Path('data'), parent=main_window)
+    quit_server.quit_requested.connect(lambda: main_window.quit_application(force=True))
+    app.aboutToQuit.connect(quit_server.close)
 
     # 配置检查：不阻塞启动，只在界面提示缺失项，避免首次安装无法进入。
     try:
