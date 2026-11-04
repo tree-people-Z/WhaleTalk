@@ -6,19 +6,66 @@ from typing import Any, Dict, Optional
 
 _DSML_INVOKE = re.compile(
     r'<[|｜]DSML[|｜]\s*invoke\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
-    r'</[|｜]DSML[|｜]\s*invoke>',
+    r'</[|｜]DSML[|｜]\s*invoke[^>]*>',
     re.S,
 )
+# Closing tags may carry attributes that belong to the next parameter, e.g. the
+# model writes `parameter name="comments" string="false">10` where only the tag
+# name should appear. Allow trailing attributes so one bad tag cannot swallow
+# the whole following parameter into the previous value.
 _DSML_PARAM = re.compile(
     r'<[|｜]DSML[|｜]\s*parameter\s+name=["\']([^"\']+)["\'][^>]*>(.*?)'
-    r'</[|｜]DSML[|｜]\s*parameter>',
+    r'</[|｜]DSML[|｜]\s*parameter[^>]*>',
     re.S,
 )
+# Any leftover markup inside a single value (opening tag, closing tag, or the
+# fragment left over when the model pastes markup into an argument).
+_DSML_MARKUP = re.compile(r'</?[|｜]DSML[|｜][^>]*>?')
+_DSML_MARKUP_START = re.compile(r'</?[|｜]DSML[|｜]')
+_BVID = re.compile(r'BV[0-9A-Za-z]{10}')
 _NON_BILI_TOOLS = {'inspect_video', 'read_diary', 'write_diary'}
 
 
+def strip_tool_markup(value: Any) -> str:
+    """Drop leaked tool-call markup from one model-provided value."""
+    text = str(value if value is not None else '')
+    start = _DSML_MARKUP_START.search(text)
+    if start:
+        # Everything from the stray tag onward belongs to markup, not to the value.
+        text = text[:start.start()]
+    return _DSML_MARKUP.sub('', text).strip()
+
+
+def normalize_bvid(value: Any) -> str:
+    """Return the first well-formed BV id inside a model-provided value."""
+    match = _BVID.search(strip_tool_markup(value))
+    return match.group(0) if match else ''
+
+
+def sanitize_arguments(value: Any) -> Any:
+    """Recursively clean parsed argument values and normalize BV ids."""
+    if isinstance(value, str):
+        return strip_tool_markup(value)
+    if isinstance(value, list):
+        return [sanitize_arguments(item) for item in value]
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            item = sanitize_arguments(item)
+            if key == 'bvid' and isinstance(item, str):
+                item = normalize_bvid(item) or item
+            cleaned[key] = item
+        return cleaned
+    return value
+
+
 def _clean_value(value: str) -> str:
-    return str(value or '').strip().strip('"').strip('}').strip().strip('"')
+    return strip_tool_markup(value).strip('"').strip('}').strip()
+
+
+def _clean_params(params: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned = sanitize_arguments(params)
+    return cleaned if isinstance(cleaned, dict) else {}
 
 
 def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
@@ -41,12 +88,11 @@ def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
             try:
                 params = json.loads(value) if value else {}
             except (TypeError, ValueError):
-                params = {'value': value}
+                params = {'value': strip_tool_markup(value)}
         else:
             params[name] = _clean_value(value)
+    params = _clean_params(params)
     if tool == 'bili_api':
-        if not isinstance(params, dict):
-            params = {}
         nested_method = _clean_value(params.get('method', ''))
         nested_args = params.get('arguments')
         if nested_method:
@@ -80,7 +126,7 @@ def parse_dsml_decision(text: str) -> Optional[Dict[str, Any]]:
 
 def parse_json_decision(text: str) -> Optional[Dict[str, Any]]:
     text = (text or '').strip()
-    if 'DSML' in text:
+    if _DSML_INVOKE.search(text):
         # Native DeepSeek tool markup: never fall back to one of its JSON
         # parameter fragments as if it were a decision.
         return parse_dsml_decision(text)
@@ -96,4 +142,6 @@ def parse_json_decision(text: str) -> Optional[Dict[str, Any]]:
         data = json.loads(text[start:end + 1])
     except (TypeError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    return sanitize_arguments(data)

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any, Dict
 from loguru import logger
 
 from core.agent_events import filter_agent_events
-from core.agent_protocol import parse_json_decision
+from core.agent_protocol import normalize_bvid, parse_json_decision, sanitize_arguments
 from core.agent_summary import (
     compact_tool_results,
     log_actions,
@@ -29,6 +30,15 @@ from core.free_context import (
 from core.system_prompts import load_prompt
 
 MAX_STEPS = 12
+
+
+def _int_arg(value: Any, default: int) -> int:
+    """Read an int argument even when the model appends markup or chatter."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        match = re.search(r'-?\d+', str(value if value is not None else ''))
+        return int(match.group(0)) if match else default
 
 INSPECT_VIDEO_TOOL = {
     'name': 'inspect_video',
@@ -122,6 +132,9 @@ class FreeAgent:
         return params if isinstance(params, dict) else {}
 
     async def _call_tool(self, name: str, args: dict) -> Any:
+        if not isinstance(args, dict):
+            return {'error': 'arguments 必须是对象'}
+        args = sanitize_arguments(args)
         if name == 'bili_api':
             method = str(args.get('method') or '')
             params = self._unwrap_arguments(
@@ -143,8 +156,8 @@ class FreeAgent:
         if name == 'inspect_video':
             return await self.inspect_video(
                 str(args.get('bvid') or ''),
-                frames=int(args.get('frames') if args.get('frames') is not None else 3),
-                comments=int(args.get('comments') if args.get('comments') is not None else 10),
+                frames=_int_arg(args.get('frames'), 3),
+                comments=_int_arg(args.get('comments'), 10),
             )
         if name == 'read_diary':
             return read_diary(str(args.get('day') or ''))
@@ -224,7 +237,8 @@ class FreeAgent:
 
     async def inspect_video(self, bvid: str, frames: int = 3, comments: int = 10) -> dict:
         """Read title/subtitle/comments and optionally describe sampled frames."""
-        bvid = (bvid or '').strip()
+        raw_bvid = str(bvid or '').strip()
+        bvid = normalize_bvid(raw_bvid) or raw_bvid
         if not bvid:
             return {'error': 'bvid 不能为空'}
         if not hasattr(self.bili, 'get_video_info'):

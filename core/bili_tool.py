@@ -7,6 +7,8 @@ from typing import Any
 
 from loguru import logger
 
+from core.agent_protocol import normalize_bvid, sanitize_arguments
+
 _EXCLUDED = {
     'login_with_qr', 'check_qr_status', 'check_login',
     'set_blocked', 'set_posting_blocked',
@@ -267,10 +269,13 @@ class BiliTool:
             key: value for key, value in args.items()
             if key not in {'tool', 'method', 'method_name', 'api'}
         }
+        # The model occasionally pastes tool-call markup into an argument, so
+        # clean every value before it reaches the B站 interface.
+        args = sanitize_arguments(args)
         blocked = self._check_write(method, args)
         if blocked:
             return {'error': blocked}
-        extra_bvid = str(args.get('bvid') or '')
+        extra_bvid = normalize_bvid(args.get('bvid')) or str(args.get('bvid') or '')
         call_args = {
             key: value for key, value in args.items()
             if key not in {'bvid', 'video_title'}

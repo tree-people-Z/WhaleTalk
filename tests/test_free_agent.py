@@ -118,6 +118,16 @@ class ResolveBili(FakeBili):
         return aid == 123
 
 
+class BvidBili(FakeBili):
+    def __init__(self):
+        super().__init__()
+        self.seen_bvid = ''
+
+    async def get_video_info(self, bvid: str):
+        self.seen_bvid = bvid
+        return {'bvid': bvid, 'aid': 123, 'title': 'T'}
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -137,6 +147,16 @@ class BiliToolTests(unittest.TestCase):
         self.assertTrue(asyncio.run(resolve_tool.call(
             'like_video', {'bvid': 'BV1test', 'tool': 'inspect_video'}
         )))
+
+    def test_bvid_markup_is_cleaned_before_api_call(self):
+        bili = BvidBili()
+        tool = BiliTool(bili, Mock(), Mock())
+        dirty = (
+            'BV1iwxD6NECk</\uff5cDSML\uff5c parameter name="comments" string="false">10'
+        )
+        result = asyncio.run(tool.call('get_video_info', {'bvid': dirty}))
+        self.assertEqual(bili.seen_bvid, 'BV1iwxD6NECk')
+        self.assertEqual(result['bvid'], 'BV1iwxD6NECk')
 
     def test_per_round_write_cap_is_removed(self):
         bili = FakeBili()
@@ -316,6 +336,21 @@ class FreeAgentTests(unittest.TestCase):
         self.assertEqual(result['title'], '测试视频')
         self.assertEqual(result['subtitle'], '这是字幕内容')
         self.assertEqual(result['comments'][0]['content'], '好看')
+
+    def test_inspect_video_cleans_bvid_markup(self):
+        agent = FreeAgent(InspectBili(), FakeAI(), Mock(), Mock())
+        dirty = (
+            'BV1iwxD6NECk</\uff5cDSML\uff5c parameter name="comments" string="false">1'
+        )
+        result = asyncio.run(agent.inspect_video(dirty, frames=0, comments=1))
+        self.assertEqual(result['bvid'], 'BV1iwxD6NECk')
+        self.assertNotIn('error', result)
+
+    def test_int_arg_tolerates_markup(self):
+        from core.free_agent import _int_arg
+        self.assertEqual(_int_arg('2</\uff5cDSML\uff5c parameter>', 3), 2)
+        self.assertEqual(_int_arg('', 3), 3)
+        self.assertEqual(_int_arg(None, 10), 10)
 
     def test_same_at_event_is_delivered_once(self):
         with tempfile.TemporaryDirectory() as directory:
