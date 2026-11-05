@@ -128,6 +128,11 @@ class BvidBili(FakeBili):
         return {'bvid': bvid, 'aid': 123, 'title': 'T'}
 
 
+class MissingVideoBili(FakeBili):
+    async def get_video_info(self, bvid: str):
+        return None
+
+
 class BiliToolTests(unittest.TestCase):
     def test_lists_and_calls_public_methods(self):
         tool = BiliTool(FakeBili(), Mock(), Mock())
@@ -157,6 +162,12 @@ class BiliToolTests(unittest.TestCase):
         result = asyncio.run(tool.call('get_video_info', {'bvid': dirty}))
         self.assertEqual(bili.seen_bvid, 'BV1iwxD6NECk')
         self.assertEqual(result['bvid'], 'BV1iwxD6NECk')
+
+    def test_missing_video_info_returns_error_and_is_not_remembered(self):
+        tool = BiliTool(MissingVideoBili(), Mock(), Mock())
+        result = asyncio.run(tool.call('get_video_info', {'bvid': 'BV1nope'}))
+        self.assertIn('error', result)
+        self.assertEqual(tool.video_refs, [])
 
     def test_per_round_write_cap_is_removed(self):
         bili = FakeBili()
@@ -351,6 +362,18 @@ class FreeAgentTests(unittest.TestCase):
         self.assertEqual(_int_arg('2</\uff5cDSML\uff5c parameter>', 3), 2)
         self.assertEqual(_int_arg('', 3), 3)
         self.assertEqual(_int_arg(None, 10), 10)
+
+    def test_failed_read_is_not_reported_as_success(self):
+        agent = FreeAgent(FakeBili(), FakeAI(), Mock(), Mock())
+        action = agent._describe_action(
+            'bili_api',
+            {'method': 'get_video_info', 'arguments': {'bvid': 'BV1nope'}},
+            None,
+        )
+        self.assertIn('获取视频信息 BV1nope', action)
+        self.assertIn('失败', action)
+        self.assertFalse(agent._action_ok(None))
+        self.assertTrue(agent._action_ok({'bvid': 'BV1ok', 'title': 't'}))
 
     def test_same_at_event_is_delivered_once(self):
         with tempfile.TemporaryDirectory() as directory:

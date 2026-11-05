@@ -29,6 +29,9 @@ _AID_METHODS = {
     'add_to_watch_later', 'report_watch', 'send_danmaku',
 }
 
+# 这些接口查不到视频时返回 None；直接回 null 会让模型以为读到了数据。
+_VIDEO_INFO_METHODS = {'get_video_info', 'get_video_info_by_aid'}
+
 
 def _short(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -87,10 +90,16 @@ class BiliTool:
         })
 
     def _collect_videos(self, method: str, args: dict, result: Any, info: dict | None) -> None:
+        failed = result is None or (
+            isinstance(result, dict) and bool(result.get('error'))
+        )
         payloads = []
         if isinstance(info, dict):
             payloads.append(info)
-        payloads.append(args)
+        # 调用失败时不要把请求参数里的 BV 号记成“本轮看过的视频”，
+        # 否则不存在的视频会带着空标题、aid=0 进运行记录。
+        if not failed:
+            payloads.append(args)
         if isinstance(result, dict):
             payloads.append(result)
         elif isinstance(result, list):
@@ -316,6 +325,10 @@ class BiliTool:
                     await self._record_comment(
                         call_args, extra_bvid, bool(result), video_info
                     )
+            if method in _VIDEO_INFO_METHODS and result is None:
+                target = extra_bvid or call_args.get('aid') or ''
+                logger.info(f'视频信息读取失败（视频不存在或无法访问）: {target}')
+                result = {'error': f'视频不存在或无法访问: {target}'}
             self._collect_videos(method, call_args, result, video_info)
             if cache_key and isinstance(result, dict) and result.get('bvid'):
                 self._video_cache[cache_key] = result

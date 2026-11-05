@@ -506,7 +506,9 @@ class FreeAgent:
 
     @staticmethod
     def _action_ok(result: Any) -> bool:
-        if result is False:
+        # 读接口没读到东西时会返回 None（例如 get_video_info 查不到视频）。
+        # 以前这种结果会被算成“成功”，写进日志、界面和数据库的总结里。
+        if result is None or result is False:
             return False
         if isinstance(result, dict) and result.get('error'):
             return False
@@ -619,6 +621,8 @@ class FreeAgent:
             detail += f'（{len(result)} 条）'
         if isinstance(result, dict) and result.get('error'):
             return f'{detail}：失败（{str(result.get("error"))[:100]}）'
+        if result is None:
+            return f'{detail}：失败（没有返回数据）'
         return f'{detail}：{"成功" if ok else "失败"}'
 
     async def run_analysis_cycle(self) -> Dict[str, Any]:

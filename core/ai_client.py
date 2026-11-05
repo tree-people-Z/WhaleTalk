@@ -79,6 +79,9 @@ class AIClient:
         self.retry_backoff = max(0.1, float(retry_backoff))
         self.max_output_tokens = max(256, int(max_output_tokens or 8000))
         self.output_retries = max(0, int(output_retries))
+        # 上一次调用被推理吃满预算而升级时记下新预算，后续请求直接从
+        # 这个下限开始，不必每轮都先发一次注定被截断的请求。
+        self._budget_floor = 0
 
         # 初始化客户端
         self._init_client()
@@ -198,6 +201,7 @@ class AIClient:
         自动提高预算重试，避免出现“模型没说话但也没报错”的空回合。
         """
         budget = max(32, int(max_tokens or 2000))
+        budget = max(budget, int(getattr(self, '_budget_floor', 0) or 0))
         escalation = 0
         last_error: Optional[Exception] = None
 
@@ -250,6 +254,9 @@ class AIClient:
                     f"max_tokens={budget}），提高到 {new_budget} 重试"
                 )
                 budget = new_budget
+                self._budget_floor = max(
+                    int(getattr(self, '_budget_floor', 0) or 0), new_budget
+                )
                 escalation += 1
                 escalated = True
                 break

@@ -102,6 +102,15 @@ class AIClientRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, '想清楚了')
         self.assertEqual(completions.budgets, [1000, 2024])
 
+    async def test_escalated_budget_is_reused_by_next_call(self):
+        completions = _ReasoningCompletions()
+        client = _client(completions)
+        client.max_output_tokens = 8000
+        client.output_retries = 3
+        await client.chat([{'role': 'user', 'content': 'hi'}], max_tokens=1000)
+        await client.chat([{'role': 'user', 'content': 'hi'}], max_tokens=600)
+        self.assertEqual(completions.budgets, [1000, 2024, 2024])
+
     def test_chat_sync_rejects_running_loop(self):
         client = _client(_FlakyCompletions(failures=0))
 

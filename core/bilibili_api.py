@@ -294,10 +294,17 @@ class BilibiliAPI(
                 }
             except Exception as e:  # noqa: BLE001
                 last_error = e
+                # -404/-403/-400 是确定的“视频不存在/无权访问”，
+                # 重试只会多打一次接口，还会把日志刷成 ERROR。
+                if getattr(e, 'code', None) in (-404, -403, -400):
+                    break
                 if attempt == 0:
                     await asyncio.sleep(0.5)
                     continue
-        logger.error(f"获取视频信息失败 {bvid}: {last_error}")
+        if getattr(last_error, 'code', None) in (-404, -403, -400):
+            logger.warning(f"视频不存在或无法访问 {bvid}: {last_error}")
+        else:
+            logger.error(f"获取视频信息失败 {bvid}: {last_error}")
         return None
 
     async def get_videos_info_batch(
