@@ -521,3 +521,96 @@ class FreeAgentTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class _FrameBili(InspectBili):
+    async def get_media_urls(self, bvid: str):
+        return {'video': 'http://example.invalid/v.mp4'}
+
+
+class _FrameAnalyzerStub:
+    def __init__(self):
+        self.ffmpeg_available = True
+
+    async def extract_frames(self, url, output_dir, count=3, duration=None):
+        return [f'{output_dir}/f{i}.jpg' for i in range(count)]
+
+    async def analyze_frame(self, path, ai_client):
+        return await ai_client.describe_image(path)
+
+
+class _DescribeAIRecorder:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = 0
+
+    async def describe_image(self, path):
+        self.calls += 1
+        return self.results.pop(0) if self.results else None
+
+    async def chat(self, *args, **kwargs):
+        return '{"action":"finish","reason":"不操作"}'
+
+
+class _EmptyThenFinishAI:
+    def __init__(self):
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return ''
+        return '{"action":"finish","reason":"本轮不操作"}'
+
+
+class _DictConfig(dict):
+    def get(self, key, default=None):
+        node = self
+        for part in key.split('.'):
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
+
+
+class FrameAnalysisTests(unittest.TestCase):
+    def _agent(self, ai, config=None):
+        agent = FreeAgent(_FrameBili(), ai, Mock(), config or Mock())
+        return agent
+
+    def test_frame_analysis_can_be_disabled_by_config(self):
+        config = _DictConfig({'analysis': {'enable_frame_analysis': False}})
+        agent = self._agent(_DescribeAIRecorder(['描述']), config)
+        self.assertFalse(agent.enable_frame_analysis)
+        with patch('core.frame_analyzer.FrameAnalyzer', _FrameAnalyzerStub):
+            result = asyncio.run(agent.inspect_video('BV1test', frames=3, comments=0))
+        self.assertEqual(result['frames'], [])
+        self.assertEqual(result['frame_note'], '画面分析已关闭')
+
+    def test_first_frame_failure_skips_remaining_frames_of_the_round(self):
+        ai = _DescribeAIRecorder([None, '不该被调用'])
+        agent = self._agent(ai)
+        with patch('core.frame_analyzer.FrameAnalyzer', _FrameAnalyzerStub):
+            result = asyncio.run(agent.inspect_video('BV1test', frames=3, comments=0))
+        self.assertEqual(ai.calls, 1)
+        self.assertIn('本轮跳过剩余帧', result['frame_note'])
+        self.assertTrue(agent._vision_failed_this_round)
+
+    def test_next_round_tries_vision_again(self):
+        ai = _DescribeAIRecorder([None, '描述', '描述', '描述'])
+        agent = self._agent(ai)
+        with patch('core.frame_analyzer.FrameAnalyzer', _FrameAnalyzerStub):
+            asyncio.run(agent.inspect_video('BV1test', frames=1, comments=0))
+            agent._vision_failed_this_round = False
+            result = asyncio.run(agent.inspect_video('BV1test', frames=1, comments=0))
+        self.assertEqual(ai.calls, 2)
+        self.assertNotEqual(result['frames'], [])
+        self.assertEqual(result['frame_note'], '')
+
+    def test_empty_reply_is_asked_again_in_the_same_round(self):
+        ai = _EmptyThenFinishAI()
+        agent = FreeAgent(FakeBili(), ai, Mock(), Mock())
+        with patch('core.free_agent.build_agent_context', return_value='ctx'):
+            result = asyncio.run(agent.run_analysis_cycle())
+        self.assertGreaterEqual(ai.calls, 2)
+        self.assertEqual(result['summary'], '本轮不操作')

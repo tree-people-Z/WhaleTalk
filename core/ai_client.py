@@ -47,6 +47,7 @@ class AIClient:
         retry_backoff: float = 1.5,
         max_output_tokens: int = 8000,
         output_retries: int = 3,
+        vision_timeout: float = 0.0,
     ):
         """
         初始化AI客户端
@@ -61,6 +62,8 @@ class AIClient:
             retry_backoff: 重试退避基数（秒）
             max_output_tokens: 推理模型输出预算上限（含推理 token）
             output_retries: 输出被推理占满时，自动提高预算的次数
+            vision_timeout: 画面描述等视觉请求的单独超时（秒）；0 表示
+                取 min(timeout, 20)，避免一帧截图占用整轮时间
         """
         provider_name = str(provider or 'openai').strip().lower()
         try:
@@ -79,6 +82,11 @@ class AIClient:
         self.retry_backoff = max(0.1, float(retry_backoff))
         self.max_output_tokens = max(256, int(max_output_tokens or 8000))
         self.output_retries = max(0, int(output_retries))
+        # 描述一张截图不值得等满 60 秒，默认单独给一个更短的超时。
+        self.vision_timeout = (
+            max(5.0, float(vision_timeout))
+            if vision_timeout else min(self.timeout, 20.0)
+        )
         # 上一次调用被推理吃满预算而升级时记下新预算，后续请求直接从
         # 这个下限开始，不必每轮都先发一次注定被截断的请求。
         self._budget_floor = 0
@@ -437,6 +445,13 @@ class AIClient:
             image.save(buffer, format='JPEG', quality=78, optimize=True)
         return 'image/jpeg', base64.b64encode(buffer.getvalue()).decode('ascii')
 
+    def _vision_request_timeout(self) -> float:
+        """视觉请求用的超时；未配置时退回到较短的默认值。"""
+        configured = getattr(self, 'vision_timeout', 0) or 0
+        if configured:
+            return float(configured)
+        return min(float(getattr(self, 'timeout', 60) or 60), 20.0)
+
     async def _chat_with_images(self, prompt: str, image_paths: List[str]) -> str:
         """Send sampled images using the provider's native vision message format."""
         self._ensure_client_for_loop()
@@ -456,6 +471,7 @@ class AIClient:
                 temperature=0.5,
                 system='你是一个专业的视频内容分析助手。',
                 messages=[{'role': 'user', 'content': content}],
+                timeout=self._vision_request_timeout(),
             )
             return ''.join(block.text for block in response.content if getattr(block, 'type', '') == 'text')
 
@@ -473,6 +489,7 @@ class AIClient:
             ],
             temperature=0.5,
             max_tokens=2000,
+            timeout=self._vision_request_timeout(),
         )
         return response.choices[0].message.content or ''
 

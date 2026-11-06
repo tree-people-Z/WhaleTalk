@@ -72,7 +72,12 @@ class FreeAgent:
         self._seen_io = set()
         self.self_uid = None
         self.self_name = ''
-        self.enable_frame_analysis = True
+        self.enable_frame_analysis = bool(
+            config.get('analysis.enable_frame_analysis', True)
+            if config else True
+        )
+        # 单轮内视觉接口失败后不再等剩余帧；下一轮照常尝试，不做冷却。
+        self._vision_failed_this_round = False
         self.local_transcriber = None
         from core.comment_manager import CommentManager
         self.comment_manager = CommentManager(bili_api, ai_client, db, config)
@@ -300,6 +305,12 @@ class FreeAgent:
         frame_items = []
         frame_note = ''
         frame_count = max(0, min(int(frames or 0), 5))
+        if frame_count and not self.enable_frame_analysis:
+            frame_count = 0
+            frame_note = '画面分析已关闭'
+        elif frame_count and self._vision_failed_this_round:
+            frame_count = 0
+            frame_note = '本轮画面分析已失败，跳过剩余帧'
         if frame_count:
             try:
                 from core.frame_analyzer import FrameAnalyzer
@@ -317,10 +328,11 @@ class FreeAgent:
                             video_url, str(output_dir), count=frame_count,
                             duration=info.get('duration'),
                         )
+                        can_describe = hasattr(self.ai, 'describe_image')
                         for path in paths:
                             description = ''
                             try:
-                                if hasattr(self.ai, 'describe_image'):
+                                if can_describe:
                                     description = str(
                                         await analyzer.analyze_frame(path, self.ai) or ''
                                     )
@@ -330,6 +342,11 @@ class FreeAgent:
                                 'path': path,
                                 'description': description[:500],
                             })
+                            if can_describe and not description:
+                                # 视觉接口失败时每帧都要等一个超时，本轮不再硬撑。
+                                self._vision_failed_this_round = True
+                                frame_note = '画面分析失败，本轮跳过剩余帧'
+                                break
                         if not paths:
                             frame_note = '抽帧没有成功'
             except Exception as exc:  # noqa: BLE001
@@ -629,6 +646,7 @@ class FreeAgent:
         self._stop = asyncio.Event()
         # 写操作上限是“单轮”限制，不能跨轮累计。
         self.bili_tool.reset_writes()
+        self._vision_failed_this_round = False
         self_info = {}
         try:
             if hasattr(self.bili, 'get_self_info'):
@@ -653,6 +671,7 @@ class FreeAgent:
         successful_actions: list[str] = []
         retried_empty_finish = False
         retried_false_summary = False
+        retried_empty_response = False
         try:
             for _ in range(MAX_STEPS):
                 if self._stop.is_set():
@@ -660,6 +679,14 @@ class FreeAgent:
                 compact_tool_results(messages)
                 response = await self.ai.chat(messages, temperature=0.7, max_tokens=2000)
                 if not response:
+                    if not retried_empty_response:
+                        # 上游偶发空回包：同一轮内重问一次，不要整轮作废。
+                        retried_empty_response = True
+                        messages.append({
+                            'role': 'user',
+                            'content': '上一条回复是空的。请只输出一个动作 JSON；不操作就输出 {"action":"finish","reason":"本轮没有操作"}。',
+                        })
+                        continue
                     break
                 decision = parse_json_decision(response)
                 if decision is None:

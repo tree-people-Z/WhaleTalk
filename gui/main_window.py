@@ -649,6 +649,7 @@ class MainWindow(QMainWindow):
             timeout=self.config.get('ai.timeout_seconds', 60),
             max_retries=self.config.get('ai.max_retries', 2),
             max_output_tokens=self.config.get('ai.max_output_tokens', 8000),
+            vision_timeout=self.config.get('ai.vision_timeout_seconds', 20),
         )
 
     def refresh_ai_settings(self):

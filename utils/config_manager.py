@@ -228,7 +228,8 @@ class ConfigManager:
                 "base_url": "https://api.deepseek.com",
                 "timeout_seconds": 60,
                 "max_retries": 2,
-                "max_output_tokens": 8000
+                "max_output_tokens": 8000,
+                "vision_timeout_seconds": 20
             },
             "persona": {
                 "name": "鲸鱼娘",

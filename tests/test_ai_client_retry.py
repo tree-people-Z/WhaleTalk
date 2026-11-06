@@ -191,3 +191,17 @@ class AIClientLoopTests(unittest.TestCase):
             return client.client
 
         self.assertEqual(asyncio.run(touch()).name, 'injected')
+
+
+class VisionTimeoutTests(unittest.TestCase):
+    def _client(self, **kwargs):
+        return AIClient(provider='openai', api_key='k', model='m', **kwargs)
+
+    def test_vision_timeout_defaults_shorter_than_request_timeout(self):
+        self.assertEqual(self._client(timeout=60).vision_timeout, 20.0)
+
+    def test_vision_timeout_can_be_overridden(self):
+        self.assertEqual(self._client(timeout=60, vision_timeout=8).vision_timeout, 8.0)
+
+    def test_vision_timeout_never_exceeds_short_request_timeout(self):
+        self.assertEqual(self._client(timeout=10).vision_timeout, 10.0)
