@@ -83,6 +83,10 @@ class AIClient:
         # 这个下限开始，不必每轮都先发一次注定被截断的请求。
         self._budget_floor = 0
 
+        # 上次构建 SDK 客户端时所在的事件循环；每个 GUI 轮次都会新建循环。
+        # 保存对象本身而不是 id()：CPython 会复用已释放对象的地址。
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+
         # 初始化客户端
         self._init_client()
 
@@ -134,9 +138,64 @@ class AIClient:
             )
 
     @staticmethod
+    def _is_loop_closed(error: Exception) -> bool:
+        """识别「换事件循环后复用旧客户端」这个典型错误。"""
+        return 'event loop is closed' in str(error).lower()
+
+    def _ensure_client_for_loop(self) -> None:
+        """在运行的事件循环变化时重建 SDK 客户端。
+
+        AsyncOpenAI/AsyncAnthropic 内部的 httpx 连接池绑定在首次使用它的
+        循环上，而 GUI 每一轮 Agent 都会新建、结束时再关闭一个循环。继续
+        复用旧客户端就会抛 Event loop is closed，让整轮空转。
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if not hasattr(self, '_client_loop'):
+            # 外部注入的客户端（例如测试替身）不归本类重建。
+            return
+        if self._client_loop is loop:
+            return
+        previous = getattr(self, 'client', None)
+        self._init_client()
+        self._client_loop = loop
+        if previous is not None and previous is not self.client:
+            self._discard_client(previous, loop)
+
+    @classmethod
+    def _discard_client(cls, client: Any, loop) -> None:
+        """尽力释放属于旧循环的客户端；失败不影响新请求。"""
+        for name in ('aclose', 'close'):
+            closer = getattr(client, name, None)
+            if not callable(closer):
+                continue
+            try:
+                result = closer()
+            except Exception:  # noqa: BLE001 - 旧循环可能已关闭
+                return
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                try:
+                    loop.create_task(cls._swallow(result))
+                except RuntimeError:  # noqa: BLE001 - 循环正在关闭
+                    pass
+            return
+
+    @staticmethod
+    async def _swallow(awaitable) -> None:
+        try:
+            await awaitable
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
     def _is_retryable(error: Exception) -> bool:
         """网络抖动、超时、限流和 5xx 可以重试；鉴权/参数错误不重试。"""
         name = error.__class__.__name__.lower()
+        if AIClient._is_loop_closed(error):
+            # 换循环后重建客户端即可恢复，值得重试。
+            return True
         if any(key in name for key in (
             'authentication', 'permission', 'badrequest', 'invalidrequest',
             'notfound', 'unprocessable',
@@ -163,6 +222,7 @@ class AIClient:
         max_tokens: int,
     ) -> tuple:
         """发送一次请求，返回 (文本, finish_reason, reasoning_tokens)。"""
+        self._ensure_client_for_loop()
         if self.provider == AIProvider.CLAUDE:
             response = await self.client.messages.create(
                 model=self.model,
@@ -215,6 +275,9 @@ class AIClient:
                     )
                 except Exception as e:  # noqa: BLE001
                     last_error = e
+                    if self._is_loop_closed(e) and hasattr(self, '_client_loop'):
+                        # 让下一次尝试重新构建客户端。
+                        self._client_loop = None
                     if attempt >= self.max_retries or not self._is_retryable(e):
                         network_failed = True
                         break
@@ -313,6 +376,7 @@ class AIClient:
             }
         """
         # 构建分析提示词
+        self._ensure_client_for_loop()
         prompt = self._build_analyze_prompt(
             title, subtitle, comments, persona, video_metrics=video_metrics,
             text_evidence_type=text_evidence_type
@@ -375,6 +439,7 @@ class AIClient:
 
     async def _chat_with_images(self, prompt: str, image_paths: List[str]) -> str:
         """Send sampled images using the provider's native vision message format."""
+        self._ensure_client_for_loop()
         images = [self._encode_image(path) for path in image_paths[:5] if Path(path).is_file()]
         if not images:
             return await self.chat([{'role': 'user', 'content': prompt}], temperature=0.5) or ''

@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 
 from core.ai_client import AIClient, AIProvider
@@ -124,3 +125,69 @@ class AIClientRetryTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class _LoopClosedThenOk:
+    def __init__(self):
+        self.calls = 0
+
+    async def create(self, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError('Event loop is closed')
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason='stop',
+                message=SimpleNamespace(content='换循环后恢复'),
+            )]
+        )
+
+
+class AIClientLoopTests(unittest.TestCase):
+    def test_loop_closed_error_is_retryable(self):
+        self.assertTrue(AIClient._is_retryable(RuntimeError('Event loop is closed')))
+
+    def test_loop_closed_error_is_retried_and_recovers(self):
+        completions = _LoopClosedThenOk()
+        client = _client(completions)
+        result = asyncio.run(client.chat([{'role': 'user', 'content': 'hi'}]))
+        self.assertEqual(result, '换循环后恢复')
+        self.assertEqual(completions.calls, 2)
+
+    def test_client_is_rebuilt_for_each_new_loop(self):
+        from types import SimpleNamespace
+
+        client = AIClient.__new__(AIClient)
+        client._client_loop = None
+        built = []
+
+        def fake_init():
+            stub = SimpleNamespace(name=f'client-{len(built)}')
+            built.append(stub)
+            client.client = stub
+
+        client._init_client = fake_init
+
+        async def touch():
+            client._ensure_client_for_loop()
+            current = client.client
+            client._ensure_client_for_loop()
+            return current
+
+        first = asyncio.run(touch())
+        second = asyncio.run(touch())
+        self.assertEqual(len(built), 2)
+        self.assertIsNot(first, second)
+
+    def test_injected_client_is_not_rebuilt(self):
+        from types import SimpleNamespace
+
+        client = AIClient.__new__(AIClient)
+        client.client = SimpleNamespace(name='injected')
+
+        async def touch():
+            client._ensure_client_for_loop()
+            return client.client
+
+        self.assertEqual(asyncio.run(touch()).name, 'injected')
