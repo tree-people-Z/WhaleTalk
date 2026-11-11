@@ -238,3 +238,19 @@ class HousekeepingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NothingToDoTests(unittest.TestCase):
+    def test_empty_run_still_records_last_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            diary_dir = root / 'to_owner'
+            diary_dir.mkdir()
+            config = _FakeConfig({})
+            with patch.object(diary_maintenance, 'STATE_FILE', root / 'state.json'):
+                stats = asyncio.run(compact_diaries(
+                    _FakeAI(''), config, directory=diary_dir,
+                    backup_dir=root / 'backup',
+                ))
+                self.assertEqual(stats['files'], 0)
+                self.assertTrue(ran_today(root / 'state.json'))

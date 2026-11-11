@@ -232,6 +232,16 @@ async def compact_diaries(
     files = select_files(diary_dir, days=days, min_chars=min_chars, only=only)
     stats = {'files': len(files), 'before': 0, 'after': 0, 'failed': 0}
     if not files or ai_client is None:
+        # 没有要处理的也记一笔：既能确认自动整理真的跑过，
+        # 也避免每 6 小时重复扫描。
+        if not dry_run and ai_client is not None and not only:
+            state = read_state()
+            state.update({
+                'last_run': datetime.now().isoformat(),
+                'files': 0,
+            })
+            write_state(state)
+            logger.info('📔 日记整理：没有需要压缩的日记')
         return stats
 
     if not dry_run:
