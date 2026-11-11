@@ -243,3 +243,101 @@ class CommentCheckEfficiencyTests(unittest.TestCase):
             return await collector.check_at_messages()
 
         self.assertEqual(len(asyncio.run(run())), 12)
+
+
+class ImplicitReplyDetectionTests(unittest.TestCase):
+    """对方点“回复”但不写 @ 时，也要认作对我说的。"""
+
+    def test_reply_to_older_own_comment_is_detected(self):
+        async def run():
+            bili = Mock()
+            bili.get_self_info = AsyncMock(return_value={'uid': 42, 'name': 'me'})
+            # 555 是我很早的一条回复，已经不在“最近 50 条”里
+            bili.get_comments = AsyncMock(return_value=[
+                {'rpid': 900, 'mid': 7, 'user': 'viewer', 'content': '接着聊',
+                 'root': 100, 'parent': 555},
+            ])
+            db = Mock()
+            db.get_replied_comment_ids = Mock(return_value=set())
+            db.get_own_comment_rpids = Mock(return_value={100, 555})
+            db.get_recent_comments = Mock(return_value=[
+                {'aid': 1, 'rpid': 100, 'thread_root': 100, 'bvid': 'BV1',
+                 'video_title': 'T'},
+            ])
+            from core.comment_events import CommentEventCollector
+            collector = CommentEventCollector(
+                bili, db, _CursorConfig({
+                    'interaction.comment_monitor': True,
+                    'interaction.reply_scope': 'owner',
+                }), set(),
+            )
+            return await collector.check_mentions()
+
+        mentions = asyncio.run(run())
+        self.assertEqual([m['rpid'] for m in mentions], [900])
+
+    def test_thread_limit_bounds_requests(self):
+        async def run():
+            bili = Mock()
+            bili.get_self_info = AsyncMock(return_value={'uid': 42, 'name': 'me'})
+            bili.get_comments = AsyncMock(return_value=[])
+            db = Mock()
+            db.get_replied_comment_ids = Mock(return_value=set())
+            db.get_own_comment_rpids = Mock(return_value=set())
+            db.get_recent_comments = Mock(return_value=[
+                {'aid': aid, 'rpid': aid * 10, 'thread_root': aid * 10,
+                 'bvid': f'BV{aid}'}
+                for aid in range(1, 21)
+            ])
+            from core.comment_events import CommentEventCollector
+            collector = CommentEventCollector(
+                bili, db, _CursorConfig({
+                    'interaction.comment_monitor': True,
+                    'interaction.reply_scope': 'owner',
+                    'interaction.max_threads_per_check': 6,
+                }), set(),
+            )
+            await collector.check_mentions()
+            return bili.get_comments
+
+        get_comments = asyncio.run(run())
+        self.assertEqual(get_comments.await_count, 6)
+
+
+class ThreadLimitConfigTests(unittest.TestCase):
+    def _manager(self, values, state):
+        from datetime import datetime as _dt
+        config = Mock()
+        config.get = lambda key, default=None: values.get(key, default)
+        bili = Mock()
+        bili.is_posting_blocked = Mock(return_value=False)
+        db = Mock()
+        db.get_own_comment_rpids = Mock(return_value=set())
+        db.get_thread_state = Mock(return_value=state)
+        manager = CommentManager(bili, Mock(), db, config)
+        manager._daily_send_quota_remaining = Mock(return_value=5)
+        return manager, _dt
+
+    def test_cooldown_can_be_relaxed(self):
+        from datetime import datetime as _dt
+        manager, _ = self._manager(
+            {'interaction.thread_cooldown_minutes': 0,
+             'interaction.max_replies_per_thread_day': 12},
+            {'reply_count': 1, 'last_reply_at': _dt.now()},
+        )
+        with patch(
+            'core.conversation_agent.ConversationAgent.handle',
+            AsyncMock(return_value=True),
+        ):
+            ok = asyncio.run(manager.reply_to_mention({'rpid': 9, 'root_rpid': 9}))
+        self.assertTrue(ok)
+
+    def test_daily_thread_cap_blocks(self):
+        from datetime import datetime as _dt
+        manager, _ = self._manager(
+            {'interaction.thread_cooldown_minutes': 0,
+             'interaction.max_replies_per_thread_day': 3},
+            {'reply_count': 3, 'last_reply_at': _dt.now()},
+        )
+        ok = asyncio.run(manager.reply_to_mention({'rpid': 9, 'root_rpid': 9}))
+        self.assertFalse(ok)

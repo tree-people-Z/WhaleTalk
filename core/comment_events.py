@@ -49,7 +49,8 @@ class CommentEventCollector:
             # 1. 检查我发送的评论和回复是否有回复
             # 同一个视频只拉一次评论，把我在这条视频下的多个楼层合并成一次请求；
             # 以前每条自己的评论都请求一次，20 条能打十几次同样的接口。
-            my_comments = self.db.get_recent_comments(limit=20, include_replies=True)
+            # 窗口放宽到 50 条：回复可能落在几条评论之前，只看最近 20 条会漏。
+            my_comments = self.db.get_recent_comments(limit=50, include_replies=True)
             found_rpids = set()
             self._round_comments = {}
             threads_by_aid = {}
@@ -59,6 +60,24 @@ class CommentEventCollector:
                 if not aid or not my_rpid:
                     continue
                 threads_by_aid.setdefault(int(aid), []).append(my_comment)
+
+            # 每轮最多检查几个视频，避免窗口放宽后请求暴涨。
+            try:
+                max_threads = int(
+                    self.config.get('interaction.max_threads_per_check', 12)
+                )
+            except (TypeError, ValueError):
+                max_threads = 12
+            if max_threads > 0 and len(threads_by_aid) > max_threads:
+                threads_by_aid = dict(
+                    sorted(
+                        threads_by_aid.items(),
+                        key=lambda item: max(
+                            int(comment.get('rpid') or 0) for comment in item[1]
+                        ),
+                        reverse=True,
+                    )[:max_threads]
+                )
 
             for aid, mine in threads_by_aid.items():
                 roots = {
@@ -97,9 +116,12 @@ class CommentEventCollector:
 
                     # 只有直接回复我，或在我的楼里直接回复我，才算对我说；
                     # 别人在我的楼里回复另一个网友时，不要插话。
-                    direct_to_me = parent in mine_by_rpid
+                    # 用“全部自己的 rpid”判断：对方点“回复”时 B站不一定写 @，
+                    # 而我的那条回复可能已经不在最近 50 条里。
+                    my_reply_targets = own_rpids | set(mine_by_rpid)
+                    direct_to_me = parent in my_reply_targets
                     top_level_to_me = (
-                        root in mine_by_rpid and parent in (0, None, root)
+                        root in my_reply_targets and parent in (0, None, root)
                     )
                     if not (direct_to_me or top_level_to_me):
                         continue

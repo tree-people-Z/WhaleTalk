@@ -77,11 +77,7 @@ class CommentManager:
                 return False
 
             root = mention.get('root_rpid') or rpid
-            from core.conversation_agent import (
-                MAX_REPLIES_PER_THREAD_DAY,
-                THREAD_COOLDOWN_MINUTES,
-                ConversationAgent,
-            )
+            from core.conversation_agent import ConversationAgent
             try:
                 own_rpids = self.db.get_own_comment_rpids()
             except Exception:  # noqa: BLE001
@@ -93,10 +89,25 @@ class CommentManager:
             last = state.get('last_reply_at')
             if last and last.date() != now.date():
                 reply_count = 0
-            if reply_count >= MAX_REPLIES_PER_THREAD_DAY:
+            # 这两个限制以前写死 10 分钟 / 每天 6 条，正常一来一回也被拦住；
+            # 现在可按对话节奏调整，仍然有上限防刷屏。
+            try:
+                max_per_day = int(
+                    self.config.get('interaction.max_replies_per_thread_day', 12)
+                )
+            except (TypeError, ValueError):
+                max_per_day = 12
+            try:
+                cooldown_minutes = float(
+                    self.config.get('interaction.thread_cooldown_minutes', 2)
+                )
+            except (TypeError, ValueError):
+                cooldown_minutes = 2
+            if max_per_day > 0 and reply_count >= max_per_day:
                 logger.info(f"同一楼今日回复已达上限: {root}")
                 return False
-            if last and (now - last).total_seconds() < THREAD_COOLDOWN_MINUTES * 60:
+            if (last and cooldown_minutes > 0
+                    and (now - last).total_seconds() < cooldown_minutes * 60):
                 logger.info(f"同一楼回复冷却中: {root}")
                 return False
 

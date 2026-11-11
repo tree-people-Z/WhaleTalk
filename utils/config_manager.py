@@ -305,6 +305,9 @@ class ConfigManager:
                 "own_video_count": 10,
                 "max_own_video_replies_per_check": 10,
                 "max_new_comments_per_check": 30,
+                "max_threads_per_check": 12,
+                "thread_cooldown_minutes": 2,
+                "max_replies_per_thread_day": 12,
                 "mention_owner_on_interesting": False
             },
             "diaries": {

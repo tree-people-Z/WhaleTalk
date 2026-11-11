@@ -76,6 +76,7 @@ class ConversationAgent:
             f'{build_agent_context(self.config)}\n\n'
             f'# 账号\n主人昵称：{owner}\n\n'
             f'# 可用工具\n{json.dumps(tools, ensure_ascii=False)}\n\n'
+            f'# 回不回\n{load_prompt("reply_rules")}\n\n'
             f'# 输出\n{load_prompt("conversation_output")}'
         )
 

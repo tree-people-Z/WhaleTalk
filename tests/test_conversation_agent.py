@@ -90,3 +90,16 @@ class ConversationAgentTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReplyRulesPromptTests(unittest.TestCase):
+    def test_system_prompt_contains_reply_rules(self):
+        from unittest.mock import patch
+        agent = ConversationAgent(None, None, FakeAI(), Config(), None)
+        with patch(
+            'core.conversation_agent.build_agent_context', return_value='ctx'
+        ):
+            prompt = agent._system_prompt({'scope': 'own_thread'})
+        self.assertIn('# 回不回', prompt)
+        self.assertIn('不一定会写 @', prompt)
+        self.assertIn('连着回过三次以上', prompt)
