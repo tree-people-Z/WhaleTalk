@@ -196,5 +196,61 @@ class EvolutionContextTests(unittest.TestCase):
                 db.close()
 
 
+class GrowthUsageMatchingTests(unittest.TestCase):
+    def test_example_fragment_counts_as_usage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'growth.db'))
+            try:
+                db.upsert_growth_item(
+                    'language', '大米饭=token',
+                    '把烧掉的 token 说成大米饭',
+                    '别一崩就梭哈仨月大米饭',
+                )
+                used = record_growth_usage(
+                    '别一崩就梭哈仨月大米饭，先看看官方返不返 token。', db
+                )
+                self.assertEqual(used, 1)
+            finally:
+                db.close()
+
+    def test_interaction_items_are_counted_too(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'growth.db'))
+            try:
+                db.upsert_growth_item(
+                    'interaction', '先认再补',
+                    '先说「这层我确实没点出来」，再补一句细节',
+                )
+                used = record_growth_usage('这层我确实没点出来，算你提醒一回。', db)
+                self.assertEqual(used, 1)
+            finally:
+                db.close()
+
+
+class GrowthContextBudgetTests(unittest.TestCase):
+    def test_interaction_kept_and_knowledge_capped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(str(Path(directory) / 'growth.db'))
+            config = ConfigManager(Path(directory) / 'config.json')
+            try:
+                for index in range(6):
+                    db.upsert_growth_item(
+                        'knowledge', f'知识点{index}', '很长的知识解释' * 8
+                    )
+                for index in range(3):
+                    db.upsert_growth_item(
+                        'interaction', f'接话经验{index}', '先认一句再补细节'
+                    )
+                text = render_growth_context(db, config)
+                self.assertIn('互动经验', text)
+                self.assertIn('接话经验0', text)
+                self.assertLessEqual(
+                    sum(1 for line in text.splitlines() if line.startswith('- 知识点')),
+                    2,
+                )
+            finally:
+                db.close()
+
+
 if __name__ == '__main__':
     unittest.main()

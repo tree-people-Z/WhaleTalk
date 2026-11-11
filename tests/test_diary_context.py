@@ -118,3 +118,73 @@ class MemoryFallbackTests(unittest.IsolatedAsyncioTestCase):
                 import json
                 state = json.loads((root / 'state.json').read_text(encoding='utf-8'))
                 self.assertEqual(state['last_consolidated'], today.isoformat())
+
+
+class DiaryLimitTests(unittest.TestCase):
+    def test_diary_allows_only_three_entries_per_day(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(free_context, 'DIARY_DIR', root):
+                for i in range(free_context.MAX_DIARY_ENTRIES_PER_DAY):
+                    free_context.append_diary(f'## 第{i}条\n今天有点事。')
+                with self.assertRaises(ValueError):
+                    free_context.append_diary('## 第四条\n还想写。')
+
+    def test_diary_rejects_when_day_is_full(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(free_context, 'DIARY_DIR', root):
+                free_context.append_diary('## 一\n' + '字' * 3000)
+                with self.assertRaises(ValueError):
+                    free_context.append_diary('## 二\n' + '字' * 2000)
+
+
+class VoiceSampleTests(unittest.TestCase):
+    def test_voice_samples_skip_at_short_and_report_lines(self):
+        class _DB:
+            def get_recent_own_comments(self, limit=20):
+                return [
+                    '@Tree-people 这条像在跟我说话，先接一句',
+                    '短',
+                    '这轮写操作三次，审计最高分 17/20',
+                    '尾巴都替她拍手了，嘴上讲攻略手先护住自己的位置。',
+                ]
+
+        samples = free_context.load_voice_samples(_DB())
+        self.assertEqual(samples, ['尾巴都替她拍手了，嘴上讲攻略手先护住自己的位置。'])
+
+    def test_context_contains_voice_samples_and_diary_rules(self):
+        class _DB:
+            def get_recent_own_comments(self, limit=20):
+                return ['这句我听懂了，先认一半再慢慢补剩下的那半。']
+
+            def get_growth_items(self, kinds=None, limit=60):
+                return []
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = ConfigManager(root / 'config.json')
+            context = free_context.build_agent_context(config, db=_DB())
+        self.assertIn('你最近在评论区说过的话', context)
+        self.assertIn('先认一半', context)
+        self.assertIn('日记怎么写', context)
+        self.assertIn('一天最多 3 条', context)
+
+
+class DiaryNoiseFilterTests(unittest.TestCase):
+    def test_audit_and_write_count_lines_are_dropped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.mkdir(exist_ok=True)
+            today = date.today().isoformat()
+            (root / f'{today}.md').write_text(
+                '## 时间\n看了两个视频，笑到尾巴打结。\n\n'
+                '这轮写操作三次（一赞一评＋日记），数着花的。\n\n'
+                '审计：最高分 15/20；@主人 是。\n',
+                encoding='utf-8',
+            )
+            with patch.object(free_context, 'DIARY_DIR', root):
+                text = free_context.load_recent_diaries(1, 2000)
+        self.assertIn('笑到尾巴打结', text)
+        self.assertNotIn('审计：', text)
+        self.assertNotIn('这轮写操作', text)

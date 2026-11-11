@@ -5,6 +5,8 @@ import re
 from loguru import logger
 
 _CATCHPHRASES = ('哼', '才不是', '才没')
+# 高频身体词：连着几条都在用，就成了模板
+_BODY_WORDS = ('尾巴', '耳朵', '胸鳍')
 
 
 def _normalize(text: str) -> str:
@@ -52,6 +54,21 @@ def find_style_issues(
             continue
         if any(title in item for item in recent[:5]):
             issues.append(f'刚学到的“{title}”最近已经用过')
+
+    for word in _BODY_WORDS:
+        if word not in text:
+            continue
+        window = recent[:10]
+        usage = sum(1 for item in window if word in item)
+        if window and usage / len(window) >= 0.6:
+            issues.append(f'“{word}”最近出现得太频繁')
+
+    # 结尾模板：最近几条收尾用同一句话
+    ending = normalized[-6:]
+    if len(ending) >= 4 and any(
+        _normalize(item)[-6:] == ending for item in recent[:5]
+    ):
+        issues.append('结尾和最近几条太像')
 
     if text.startswith('@'):
         at_rate = sum(1 for item in recent[:10] if item.startswith('@'))

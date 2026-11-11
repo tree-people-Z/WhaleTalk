@@ -82,5 +82,16 @@ class StyleGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ai.calls, 1)
 
 
+    def test_body_word_used_too_often_is_flagged(self):
+        recent = ['尾巴都翘起来了呢', '尾巴贴着椅背', '尾巴快拖地了']
+        issues = find_style_issues('这句我尾巴都直了', recent, [])
+        self.assertTrue(any('尾巴' in issue for issue in issues))
+
+    def test_same_ending_as_recent_comments_is_flagged(self):
+        recent = ['先不说了，白饭留一碗在锅里', '别熬了，白饭留一碗在锅里']
+        issues = find_style_issues('我也饿了，白饭留一碗在锅里', recent, [])
+        self.assertTrue(any('结尾' in issue for issue in issues))
+
+
 if __name__ == '__main__':
     unittest.main()

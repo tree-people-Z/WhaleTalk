@@ -736,6 +736,7 @@ class Database:
             query = query.filter(GrowthItem.kind.in_(kinds))
         rows = query.order_by(
             GrowthItem.weight.desc(),
+            GrowthItem.use_count.desc(),
             GrowthItem.last_seen_at.desc(),
         ).limit(max(1, int(limit))).all()
         return [

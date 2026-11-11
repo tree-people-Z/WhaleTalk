@@ -172,7 +172,11 @@ class FreeAgent:
         if name == 'read_diary':
             return read_diary(str(args.get('day') or ''))
         if name == 'write_diary':
-            path = append_diary(str(args.get('content') or ''))
+            try:
+                path = append_diary(str(args.get('content') or ''))
+            except ValueError as exc:
+                # 一天写够了就别再堆，让模型自己看到原因
+                return {'error': str(exc)}
             return {'ok': True, 'path': str(path)}
         return {'error': f'未知工具: {name}'}
 

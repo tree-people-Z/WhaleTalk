@@ -311,7 +311,7 @@ class ConfigManager:
                 "learn_interval_hours": 12,
                 "anti_repetition": True,
                 "max_items": 60,
-                "max_context_chars": 1800
+                "max_context_chars": 2400
             },
             "analysis": {
                 "enable_frame_analysis": True,

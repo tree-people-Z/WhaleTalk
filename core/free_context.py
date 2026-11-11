@@ -1,5 +1,6 @@
 """Context and diary helpers for the free-form agent."""
 
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,10 @@ from core.system_prompts import load_prompt
 from utils.persona_defaults import load_configured_persona
 
 DIARY_DIR = Path('data') / 'diaries' / 'to_owner'
+# 日记是“值得留下的东西”，不是每轮的报告：一天最多 3 条、合计约 3500 字。
+MAX_DIARY_ENTRIES_PER_DAY = 3
+MAX_DIARY_CHARS_PER_DAY = 4200
+_ENTRY_HEADER = re.compile(r'^## ', re.M)
 
 
 def _diary_files(days: int = 3) -> list[Path]:
@@ -27,7 +32,7 @@ def _diary_files(days: int = 3) -> list[Path]:
     return [path for _, path in sorted(files)]
 
 
-def load_recent_diaries(days: int = 3, max_chars: int = 12000) -> str:
+def load_recent_diaries(days: int = 3, max_chars: int = 5000) -> str:
     """按天分配预算，取每天日记的结尾（最新内容）。
 
     旧实现把三天拼起来再统一截断，单日日记一长，最新的日记就完全进不了
@@ -48,6 +53,14 @@ def load_recent_diaries(days: int = 3, max_chars: int = 12000) -> str:
             continue
         if len(text) > per_day:
             text = '…（前文省略）\n' + text[-per_day:]
+        # 日记里的审计行和“这轮写操作N次”是程序要求，不是她的语气，
+        # 放进上下文只会被当成范例模仿。
+        text = '\n'.join(
+            line for line in text.splitlines()
+            if not line.lstrip('- ').startswith(('审计：', '这轮写操作'))
+        ).strip()
+        if not text:
+            continue
         parts.append(f"## {path.stem}\n{text}")
     return '\n\n'.join(parts)[:max_chars]
 
@@ -105,6 +118,11 @@ def append_diary(content: str, day: Optional[date] = None) -> Path:
     DIARY_DIR.mkdir(parents=True, exist_ok=True)
     path = DIARY_DIR / f'{day.isoformat()}.md'
     existing = path.read_text(encoding='utf-8').rstrip() if path.is_file() else ''
+    entries = len(_ENTRY_HEADER.findall(existing))
+    if entries >= MAX_DIARY_ENTRIES_PER_DAY:
+        raise ValueError(f'今天已经写过 {entries} 条日记，够了；明天再写。')
+    if len(existing) + len(content) > MAX_DIARY_CHARS_PER_DAY:
+        raise ValueError('今天的日记已经够长了，把想记的留到明天，别重复写同一件事。')
     separator = '\n\n' if existing else ''
     path.write_text(existing + separator + content + '\n', encoding='utf-8')
     return path
@@ -122,19 +140,51 @@ DIARY_TOOLS = [
     {
         'name': 'write_diary',
         'description': (
-            '写今天的日记。内容、格式、长短都由你决定；会追加到当天日记。'
+            '写今天的日记（一天最多 3 条，每条 80–200 字）。只记值得留下的事：'
+            '拍片、发布、被主人夸或批评、想通一件事、心情转折。'
+            '不写巡视流水、评分、播放数、工具调用次数；没有值得记的就不写。'
         ),
         'parameters': {'content': 'string'},
     },
 ]
 
 
+def load_voice_samples(db, limit: int = 4) -> list:
+    """取她最近真实发过的评论，作为语气示例（只学节奏，不学结构）。"""
+    if db is None or not hasattr(db, 'get_recent_own_comments'):
+        return []
+    try:
+        recent = db.get_recent_own_comments(40)
+    except Exception:  # noqa: BLE001
+        return []
+    picked = []
+    seen = set()
+    for raw in recent or []:
+        text = str(raw or '').strip()
+        if not (18 <= len(text) <= 90):
+            continue
+        if text.startswith('@'):
+            continue
+        if any(word in text for word in ('审计', '评分', '这轮')):
+            continue
+        key = text[:6]
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(text)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
 def build_agent_context(config, diary_days: int = 3, db=None) -> str:
     persona = load_configured_persona(config, 5000)
-    diaries = load_recent_diaries(diary_days)
-    memory = load_memory(4000)
+    diaries = load_recent_diaries(diary_days, max_chars=5000)
+    memory = load_memory(3000)
     growth = render_growth_context(db, config) if db is not None else ''
     human_style = load_prompt('human_style')
+    diary_rules = load_prompt('diary_rules')
+    voice_samples = load_voice_samples(db)
     keywords = config.get('search.keywords', []) if config is not None else []
     if isinstance(keywords, str):
         keywords = [line.strip() for line in keywords.splitlines() if line.strip()]
@@ -168,13 +218,23 @@ def build_agent_context(config, diary_days: int = 3, db=None) -> str:
     ) or f'视频分数超过 {score_threshold}/20 时，可以 {share_target}。')
     growth_block = f'{growth}\n\n' if growth else ''
     style_block = f'# 说话方式\n{human_style}\n\n' if human_style else ''
+    diary_block = f'# 日记怎么写\n{diary_rules}\n\n' if diary_rules else ''
+    voice_block = ''
+    if voice_samples:
+        voice_block = (
+            '# 你最近在评论区说过的话\n'
+            + '\n'.join(f'- {item}' for item in voice_samples)
+            + '\n（只学语气和节奏，不要照抄句式和结构。）\n\n'
+        )
     return (
         f'# 人设\n{persona or "（没有人设文件）"}\n\n'
-        f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
-        f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
-        f'{growth_block}'
+        f'{style_block}'
+        f'{voice_block}'
+        f'{diary_block}'
         f'{account}\n\n'
         f'{share}\n\n'
         f'{preference}\n\n'
-        f'{style_block}'
+        f'# 最近三天日记\n{diaries or "（最近三天没有日记）"}\n\n'
+        f'# 长期记忆\n{memory or "（暂无长期记忆）"}\n\n'
+        f'{growth_block}'
     ).rstrip()
