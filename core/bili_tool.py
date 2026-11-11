@@ -109,7 +109,9 @@ class BiliTool:
             aid = item.get('aid') or item.get('avid') or 0
             title = str(item.get('title') or '')
             if bvid or aid:
-                self._remember_video(bvid, int(aid or 0), title)
+                # aid 可能是模型给错的字符串（例如 BV 号），交给
+                # _remember_video 内部容错，别让一次误填掀掉整轮。
+                self._remember_video(bvid, aid, title)
 
 
     def _build_specs(self) -> list[dict]:
@@ -198,7 +200,10 @@ class BiliTool:
         return ''
 
     async def _lookup_video(self, args: dict, bvid: str) -> dict | None:
-        aid = int(args.get('aid') or 0)
+        try:
+            aid = int(args.get('aid') or 0)
+        except (TypeError, ValueError):
+            aid = 0
         try:
             if bvid and hasattr(self.bili, 'get_video_info'):
                 return await self.bili.get_video_info(bvid)

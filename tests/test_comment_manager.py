@@ -111,3 +111,33 @@ class CommentManagerFilteringTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MarkAtSeenRoutingTests(unittest.TestCase):
+    def test_at_mention_marks_seen_on_event_collector(self):
+        from unittest.mock import patch
+        from core.comment_manager import CommentManager
+
+        async def run():
+            config = Mock()
+            config.get = lambda key, default=None: {
+                'interaction.comment_monitor': True,
+                'interaction.auto_reply': True,
+                'limits.max_comments_per_day': 60,
+            }.get(key, default)
+
+            manager = CommentManager(Mock(), Mock(), Mock(), config)
+            manager.check_mentions = AsyncMock(return_value=[])
+            manager.check_at_messages = AsyncMock(return_value=[
+                {'rpid': 99, 'type': 'at', 'user': 'viewer', 'content': '@我'},
+            ])
+            manager.reply_to_mention = AsyncMock(return_value=True)
+            manager.check_private_messages = AsyncMock(return_value=0)
+            manager.events._mark_at_seen = Mock()
+            with patch('core.comment_manager.asyncio.sleep', AsyncMock()):
+                result = await manager.check_and_reply()
+            return result, manager
+
+        result, manager = asyncio.run(run())
+        manager.events._mark_at_seen.assert_called_once_with(99)
+        self.assertEqual(result['replied'], 1)

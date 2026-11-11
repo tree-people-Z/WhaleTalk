@@ -614,3 +614,15 @@ class FrameAnalysisTests(unittest.TestCase):
             result = asyncio.run(agent.run_analysis_cycle())
         self.assertGreaterEqual(ai.calls, 2)
         self.assertEqual(result['summary'], '本轮不操作')
+
+
+class InspectWithoutFrameStateTests(unittest.TestCase):
+    """ConversationAgent 复用 FreeAgent.inspect_video，但没继承它的状态字段。"""
+
+    def test_inspect_video_works_without_frame_state_attributes(self):
+        agent = FreeAgent(InspectBili(), FakeAI(), Mock(), Mock())
+        del agent.enable_frame_analysis
+        del agent._vision_failed_this_round
+        result = asyncio.run(agent.inspect_video('BV1test', frames=0, comments=1))
+        self.assertEqual(result['title'], '测试视频')
+        self.assertEqual(result['comments'][0]['content'], '好看')

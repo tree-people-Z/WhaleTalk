@@ -396,7 +396,7 @@ class CommentManager:
                 if await self.reply_to_mention(mention):
                     replied += 1
                 if mention.get('type') == 'at':
-                    self._mark_at_seen(mention.get('rpid'))
+                    self.events._mark_at_seen(mention.get('rpid'))
                 await asyncio.sleep(2)
         dm_replied = await self.check_private_messages()
         return {

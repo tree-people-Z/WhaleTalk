@@ -305,10 +305,15 @@ class FreeAgent:
         frame_items = []
         frame_note = ''
         frame_count = max(0, min(int(frames or 0), 5))
-        if frame_count and not self.enable_frame_analysis:
+        # ConversationAgent 会复用本方法（未继承 FreeAgent），这两个状态用
+        # getattr 兜底，避免 AttributeError 掀掉整次回复。
+        frame_analysis_enabled = bool(
+            getattr(self, 'enable_frame_analysis', True)
+        )
+        if frame_count and not frame_analysis_enabled:
             frame_count = 0
             frame_note = '画面分析已关闭'
-        elif frame_count and self._vision_failed_this_round:
+        elif frame_count and getattr(self, '_vision_failed_this_round', False):
             frame_count = 0
             frame_note = '本轮画面分析已失败，跳过剩余帧'
         if frame_count:

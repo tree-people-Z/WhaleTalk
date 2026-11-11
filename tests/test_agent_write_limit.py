@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from unittest.mock import Mock
 
 from core.bili_tool import BiliTool
 
@@ -54,3 +56,23 @@ class WriteLimitTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CollectVideosToleranceTests(unittest.TestCase):
+    def test_bv_string_in_aid_does_not_raise(self):
+        tool = BiliTool(Mock(), Mock(), Mock())
+        tool._collect_videos(
+            'get_video_info',
+            {'bvid': 'BV1LkknYEEk8', 'aid': 'BV1LkknYEEk8'},
+            {'bvid': 'BV1LkknYEEk8', 'title': 'T'},
+            None,
+        )
+        self.assertEqual(tool.video_refs[0]['bvid'], 'BV1LkknYEEk8')
+        self.assertEqual(tool.video_refs[0]['aid'], 0)
+
+    def test_lookup_video_tolerates_bad_aid(self):
+        async def run():
+            tool = BiliTool(Mock(), Mock(), Mock())
+            return await tool._lookup_video({'aid': 'BV1LkknYEEk8'}, '')
+
+        self.assertIsNone(asyncio.run(run()))
