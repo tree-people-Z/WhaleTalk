@@ -51,6 +51,7 @@ class CommentEventCollector:
             # 以前每条自己的评论都请求一次，20 条能打十几次同样的接口。
             my_comments = self.db.get_recent_comments(limit=20, include_replies=True)
             found_rpids = set()
+            self._round_comments = {}
             threads_by_aid = {}
             for my_comment in my_comments:
                 aid = my_comment.get('aid')
@@ -73,6 +74,7 @@ class CommentEventCollector:
                     logger.debug(f"检查评论回复失败 aid={aid}: {e}")
                     continue
 
+                self._round_comments[aid] = comments
                 content_by_rpid = {
                     item.get('rpid'): item.get('content') or ''
                     for item in comments
@@ -229,12 +231,21 @@ class CommentEventCollector:
             newest_rpid = last_rpid
             video_added = 0
             try:
+                reused = getattr(self, '_round_comments', {}).get(aid)
                 for page in (1, 2):
-                    comments = await self.bili.get_comments(
-                        aid, sort=0, count=20, page=page
-                    )
+                    if page == 1 and reused:
+                        # 回复检查刚拉过这条视频，别再打一次接口
+                        comments = reused
+                    else:
+                        comments = await self.bili.get_comments(
+                            aid, sort=0, count=20, page=page
+                        )
                     if not comments:
                         break
+                    page_all_new = all(
+                        int(item.get('rpid') or 0) > last_rpid
+                        for item in comments
+                    )
                     for comment in comments:
                         rpid = comment.get('rpid')
                         try:
@@ -278,9 +289,16 @@ class CommentEventCollector:
                             break
                         if len(results) >= max_new:
                             break
+                    # 第二页只在“冷启动之后整页都是新的”时才看：
+                    # 评论按时间倒序，第二页只会更旧，平时没必要翻。
+                    need_second_page = (
+                        last_rpid > 0
+                        and len(comments) >= 20
+                        and page_all_new
+                    )
                     if (len(results) >= max_new
                             or video_added >= max(0, per_video_limit)
-                            or len(comments) < 20):
+                            or not need_second_page):
                         break
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"获取自己视频评论失败 aid={aid}: {exc}")

@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Optional
 from loguru import logger
 
 APP_NAME = "鲸语"
-APP_VERSION = "2.5.11"
+APP_VERSION = "2.5.12"
 
 GITHUB_REPOSITORY = "tree-people-Z/WhaleTalk"
 RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
