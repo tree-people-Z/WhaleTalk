@@ -85,3 +85,74 @@ class UpdaterTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+ATOM_FEED = '''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v9.9.9"/>
+    <content type="html">&lt;p&gt;新的日记载整理&lt;/p&gt;</content>
+  </entry>
+</feed>'''
+
+
+class _FakeResponse:
+    def __init__(self, status=200, payload=None, headers=None, content=b''):
+        self.status_code = status
+        self._payload = payload
+        self.headers = headers or {}
+        self.content = content
+        self.text = content.decode() if isinstance(content, bytes) else str(content or '')
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f'HTTP {self.status_code}')
+
+
+class UpdateFallbackTests(unittest.TestCase):
+    def _router(self, tag='v9.9.9', api_status=403):
+        def fake_get(url, **kwargs):
+            if 'api.github.com' in url:
+                return _FakeResponse(api_status)
+            if url.endswith('/releases/latest'):
+                return _FakeResponse(
+                    302,
+                    headers={'Location': f'https://github.com/tree-people-Z/WhaleTalk/releases/tag/{tag}'},
+                )
+            if url.endswith('releases.atom'):
+                return _FakeResponse(200, content=ATOM_FEED.replace('v9.9.9', tag).encode())
+            raise AssertionError(url)
+
+        return fake_get
+
+    def test_rate_limited_api_falls_back_to_release_page(self):
+        with patch('requests.get', side_effect=self._router()), \
+                patch('requests.head', return_value=_FakeResponse(200)):
+            result = updater.check_for_update()
+        self.assertEqual(result['status'], 'update')
+        self.assertEqual(result['version'], '9.9.9')
+        self.assertTrue(result['asset_url'].endswith('/v9.9.9/WhaleTalk-Windows-x64.zip'))
+        self.assertTrue(result['checksums_url'].endswith('/v9.9.9/SHA256SUMS.txt'))
+        self.assertIn('新的日记载整理', result['notes'])
+
+    def test_fallback_reports_latest(self):
+        with patch('requests.get', side_effect=self._router(tag='v1.0.0')), \
+                patch('requests.head', return_value=_FakeResponse(200)):
+            result = updater.check_for_update()
+        self.assertEqual(result['status'], 'latest')
+
+    def test_fallback_without_asset_offers_release_page(self):
+        with patch('requests.get', side_effect=self._router()), \
+                patch('requests.head', return_value=_FakeResponse(404)):
+            result = updater.check_for_update()
+        self.assertEqual(result['status'], 'update')
+        self.assertEqual(result['asset_url'], '')
+        self.assertEqual(result['url'], 'https://github.com/tree-people-Z/WhaleTalk/releases/tag/v9.9.9')
+
+    def test_html_notes_are_plain_text(self):
+        text = updater._html_to_text('<p>第一行</p><p>第二行<br/>换行</p>')
+        self.assertIn('第一行', text)
+        self.assertNotIn('<', text)

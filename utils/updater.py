@@ -13,12 +13,18 @@ from typing import Any, Callable, Dict, Optional
 from loguru import logger
 
 APP_NAME = "鲸语"
-APP_VERSION = "2.5.9"
+APP_VERSION = "2.5.10"
 
 GITHUB_REPOSITORY = "tree-people-Z/WhaleTalk"
 RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
 REPOSITORY_URL = f"https://github.com/{GITHUB_REPOSITORY}"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+# 未登录的 API 只有 60 次/小时；共用出口 IP 时很容易 403。
+# 这两个地址不受 API 配额限制，用作兜底。
+RELEASES_LATEST_PAGE = f"{RELEASES_URL}/latest"
+RELEASES_ATOM = f"{RELEASES_URL}.atom"
+WINDOWS_ASSET_NAME = "WhaleTalk-Windows-x64.zip"
+CHECKSUMS_ASSET_NAME = "SHA256SUMS.txt"
 
 _VERSION_PATTERN = re.compile(r"\d+")
 _UPDATE_HEADERS = {
@@ -87,23 +93,143 @@ def checksum_from_file(text: str, filename: str) -> str:
     return ""
 
 
+def _download_url(tag: str, name: str) -> str:
+    return f"{RELEASES_URL}/download/{tag}/{name}"
+
+
+def _html_to_text(value: str) -> str:
+    """粗略把发布说明的 HTML 变成纯文本。"""
+    from html import unescape
+
+    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', value or '', flags=re.S | re.I)
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.I)
+    text = re.sub(r'</(p|div|li|h\d)>', '\n', text, flags=re.I)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = unescape(text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip()[:4000]
+
+
+def _latest_tag_from_redirect(timeout: float) -> str:
+    import requests
+
+    try:
+        response = requests.get(
+            RELEASES_LATEST_PAGE, timeout=timeout,
+            headers={"User-Agent": _UPDATE_HEADERS["User-Agent"]},
+            allow_redirects=False,
+        )
+    except Exception:  # noqa: BLE001
+        return ''
+    location = str(response.headers.get('Location') or '')
+    marker = '/releases/tag/'
+    if response.status_code in (301, 302, 303, 307, 308) and marker in location:
+        return location.rsplit(marker, 1)[-1].strip()
+    return ''
+
+
+def _tag_and_notes_from_atom(timeout: float) -> tuple:
+    import requests
+    from xml.etree import ElementTree
+
+    try:
+        response = requests.get(
+            RELEASES_ATOM, timeout=timeout,
+            headers={"User-Agent": _UPDATE_HEADERS["User-Agent"]},
+        )
+        response.raise_for_status()
+        root = ElementTree.fromstring(response.content)
+    except Exception:  # noqa: BLE001
+        return '', ''
+    ns = {'a': 'http://www.w3.org/2005/Atom'}
+    entry = root.find('a:entry', ns)
+    if entry is None:
+        return '', ''
+    link = entry.find('a:link', ns)
+    href = str(link.get('href') or '') if link is not None else ''
+    tag = href.rsplit('/releases/tag/', 1)[-1].strip() if '/releases/tag/' in href else ''
+    content = entry.find('a:content', ns)
+    notes = _html_to_text(content.text if content is not None else '')
+    return tag, notes
+
+
+def _asset_exists(url: str, timeout: float = 8.0) -> bool:
+    import requests
+
+    try:
+        response = requests.head(
+            url, timeout=timeout, allow_redirects=True,
+            headers={"User-Agent": _UPDATE_HEADERS["User-Agent"]},
+        )
+        return int(getattr(response, 'status_code', 500) or 500) < 400
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _check_without_api(timeout: float = 10.0) -> Optional[Dict[str, Any]]:
+    """API 被限流（403）或连不上时的兜底：用发布页和 Atom 源判断版本。"""
+    tag = _latest_tag_from_redirect(timeout)
+    atom_tag, notes = _tag_and_notes_from_atom(timeout)
+    tag = tag or atom_tag
+    if not tag:
+        return None
+    version = tag[1:] if tag[:1] in ('v', 'V') else tag
+    if not is_newer_version(version, APP_VERSION):
+        return {"status": "latest", "version": APP_VERSION}
+    asset_url = _download_url(tag, WINDOWS_ASSET_NAME)
+    if not _asset_exists(asset_url, timeout=max(5.0, timeout)):
+        return {
+            "status": "update",
+            "version": version or tag,
+            "tag": tag,
+            "url": f"{RELEASES_URL}/tag/{tag}",
+            "notes": notes,
+            "asset_url": "",
+            "asset_name": "",
+            "asset_size": 0,
+            "asset_digest": "",
+            "checksums_url": "",
+        }
+    return {
+        "status": "update",
+        "version": version or tag,
+        "tag": tag,
+        "url": f"{RELEASES_URL}/tag/{tag}",
+        "notes": notes,
+        "asset_url": asset_url,
+        "asset_name": WINDOWS_ASSET_NAME,
+        "asset_size": 0,
+        "asset_digest": "",
+        "checksums_url": _download_url(tag, CHECKSUMS_ASSET_NAME),
+    }
+
+
 def check_for_update(timeout: float = 10.0) -> Dict[str, Any]:
     """Ask GitHub for the latest release.
 
     Returns a dict with ``status`` set to ``update``, ``latest`` or ``error``.
     It never raises so the GUI can call it from a worker thread unguarded.
+    API 被限流时自动改用发布页 / Atom 源，避免“检查更新失败”。
     """
+    api_message = ''
+    release = None
     try:
         import requests
 
         response = requests.get(LATEST_RELEASE_API, timeout=timeout, headers=_UPDATE_HEADERS)
-        if response.status_code == 404:
-            return {"status": "error", "message": "没有找到发布记录"}
-        if response.status_code != 200:
-            return {"status": "error", "message": f"GitHub 返回 HTTP {response.status_code}"}
-        release = response.json()
+        if response.status_code == 200:
+            release = response.json()
+        elif response.status_code == 404:
+            api_message = "没有找到发布记录"
+        else:
+            api_message = f"GitHub 返回 HTTP {response.status_code}"
     except Exception as exc:  # requests errors, timeouts, invalid JSON, ...
-        return {"status": "error", "message": str(exc) or exc.__class__.__name__}
+        api_message = str(exc) or exc.__class__.__name__
+
+    if release is None:
+        fallback = _check_without_api(timeout)
+        if fallback is not None:
+            return fallback
+        return {"status": "error", "message": api_message or "检查更新失败"}
 
     tag = str(release.get("tag_name") or "")
     version = tag[1:] if tag[:1] in ("v", "V") else tag

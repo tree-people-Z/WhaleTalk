@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/tree-people-Z/WhaleTalk/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/tree-people-Z/WhaleTalk/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/tree-people-Z/WhaleTalk/releases.atom"/>
+  <title>Release notes from WhaleTalk</title>
+  <updated>2026-11-11T13:44:45Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.9</id>
+    <updated>2026-11-11T13:46:46Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.9"/>
+    <title>鲸语 v2.5.9</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.9&lt;/h1&gt;
+&lt;p&gt;补一个 v2.5.8 的小尾巴：日记自动整理在「没有需要压缩的日记」时不会写状态，&lt;br&gt;
+导致没法确认它到底有没有跑过，还会每 6 小时重新扫描一次。&lt;/p&gt;
+&lt;h2&gt;修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;无文件可整理时也写入 &lt;code&gt;data/diary_maintenance.json&lt;/code&gt; 的 &lt;code&gt;last_run&lt;/code&gt;，&lt;br&gt;
+并在日志留一行 &lt;code&gt;📔 日记整理：没有需要压缩的日记&lt;/code&gt;。&lt;/li&gt;
+&lt;li&gt;这样「每天最多跑一次」的判断才有依据，日志里也能看到维护确实执行了。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;其余内容与 v2.5.8 相同（日记自动整理、成长档案 24 小时清理）。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.8</id>
+    <updated>2026-11-11T13:42:07Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.8"/>
+    <title>鲸语 v2.5.8</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.8&lt;/h1&gt;
+&lt;p&gt;这一版把「日记整理」变成后台自动做的日常维护，不用再手动跑脚本。&lt;/p&gt;
+&lt;h2&gt;日记自动整理&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;启动后 90 秒检查一次&lt;/strong&gt;，之后每 6 小时检查，&lt;strong&gt;每天最多真正跑一次&lt;/strong&gt;。&lt;/li&gt;
+&lt;li&gt;只处理&lt;strong&gt;3 天以前、且仍超过 1200 字&lt;/strong&gt;的日记：整理过的文件变短，下次自然跳过，&lt;br&gt;
+不会反复压缩。&lt;/li&gt;
+&lt;li&gt;每篇压到 250–450 字：保留拍片/发布、和主人的互动、学到的东西、情绪转折；&lt;br&gt;
+删掉逐轮视频清单、评分、播放数、工具调用次数、审计行。&lt;/li&gt;
+&lt;li&gt;整理前自动打包备份到 &lt;code&gt;data/diaries/backup/&lt;/code&gt;，只保留最近 3 份，可随时解压还原。&lt;/li&gt;
+&lt;li&gt;正在跑 Agent 或回复检查时会跳过，等下一轮空闲再做，不抢模型调用。&lt;/li&gt;
+&lt;li&gt;可以在 &lt;code&gt;config.json&lt;/code&gt; 里关掉或改阈值：
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;diaries.auto_compact&lt;/code&gt;（默认 true）&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;diaries.compact_after_days&lt;/code&gt;（默认 3）&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;diaries.compact_min_chars&lt;/code&gt;（默认 1200）&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;diaries.keep_backups&lt;/code&gt;（默认 3）&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;成长档案清理独立成日常维护&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;以前衰减/清理只发生在“在线学习真的跑了”之后，学习被 12 小时间隔跳过时就不清理。&lt;br&gt;
+现在单独成一步 &lt;code&gt;housekeeping&lt;/code&gt;，&lt;strong&gt;最多每 24 小时跑一次&lt;/strong&gt;（避免每 6 小时就衰减一轮，&lt;br&gt;
+把 14 天没用过的条目三天就清光）。&lt;/li&gt;
+&lt;li&gt;衰减、超量裁剪、观察文本清理一起做，结果写进日志。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;手动入口&lt;/h2&gt;
+&lt;div class=&quot;highlight highlight-source-shell notranslate position-relative overflow-auto&quot; data-snippet-clipboard-copy-content=&quot;python tools/compact_diaries.py --dry-run          # 只预演，不改文件
+python tools/compact_diaries.py                    # 按配置整理
+python tools/compact_diaries.py --only 2026-11-09  # 只整理某一天
+python tools/compact_diaries.py --housekeeping     # 顺便清一次成长档案&quot;&gt;&lt;pre&gt;python tools/compact_diaries.py --dry-run          &lt;span class=&quot;pl-c&quot;&gt;&lt;span class=&quot;pl-c&quot;&gt;#&lt;/span&gt; 只预演，不改文件&lt;/span&gt;
+python tools/compact_diaries.py                    &lt;span class=&quot;pl-c&quot;&gt;&lt;span class=&quot;pl-c&quot;&gt;#&lt;/span&gt; 按配置整理&lt;/span&gt;
+python tools/compact_diaries.py --only 2026-11-09  &lt;span class=&quot;pl-c&quot;&gt;&lt;span class=&quot;pl-c&quot;&gt;#&lt;/span&gt; 只整理某一天&lt;/span&gt;
+python tools/compact_diaries.py --housekeeping     &lt;span class=&quot;pl-c&quot;&gt;&lt;span class=&quot;pl-c&quot;&gt;#&lt;/span&gt; 顺便清一次成长档案&lt;/span&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;行为和数据格式没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.7</id>
+    <updated>2026-11-11T13:28:51Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.7"/>
+    <title>鲸语 v2.5.7</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.7&lt;/h1&gt;
+&lt;p&gt;这一版修“一轮跑得不差，但话说得像在写总结”的问题：日记每轮都写、越写越长，&lt;br&gt;
+真正教她说话的材料反而被挤出了上下文。&lt;/p&gt;
+&lt;h2&gt;日记&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;一天最多 3 条、每条 80–200 字&lt;/strong&gt;：以前每轮都追加一条，一天能写到两万多字。&lt;br&gt;
+现在只有拍片、发布、被主人夸或批评、想通一件事、心情转折才写；例行巡视不写。&lt;br&gt;
+超出限额时工具会返回原因，模型能看到并停手。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;不再写流水账&lt;/strong&gt;：日记里不写评分、播放数、时长、帧数、工具调用次数、审计行。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;上下文里的旧日记会清掉审计行&lt;/strong&gt;：以前注入的“日记”里全是 &lt;code&gt;审计：最高分…&lt;/code&gt;、&lt;br&gt;
+“这轮写操作三次”，模型照着学；现在这些行在进上下文前就被过滤。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;更像真人&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;新增“你最近在评论区说过的话”&lt;/strong&gt;：取最近 4 条真实评论作为语气范例，并明确&lt;br&gt;
+“只学语气和节奏，不要照抄句式和结构”。规则再多，也不如几句自己的原话。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;上下文重新分配&lt;/strong&gt;：日记从 12,000 字降到 5,000（每天只取结尾），长期记忆 4,000 → 3,000，&lt;br&gt;
+省出来的位置给评论范例和成长档案——实测总上下文 11.7k 字，比之前的 22k 更聚焦。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;发送前检查更严&lt;/strong&gt;：“尾巴/耳朵/胸鳍”这类高频身体词连着几条都在用会提示改写；&lt;br&gt;
+结尾和最近几条撞车也会提示。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;成长档案（在线学习）&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;用过的条目现在能被记到了&lt;/strong&gt;：以前只做标题精确匹配，41 条里 39 条永远 &lt;code&gt;use_count=0&lt;/code&gt;,&lt;br&gt;
+14 天不用就被衰减掉。现在标题、示例里的片段命中都算，语言类和接话经验都参与，&lt;br&gt;
+使用的条目会保住权重、排到前面。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;按类分配预算&lt;/strong&gt;：语言 640 字、接话经验 620 字、态度 320 字、兴趣 260 字、&lt;br&gt;
+知识 340 字且最多 2 条。以前知识类会占满名额，把“怎么接话”挤出去。&lt;/li&gt;
+&lt;li&gt;排序改为权重 → 使用次数 → 最近出现，常用的说法更靠前。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;长期记忆&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;事件改成一行一条（不写播放量、评分、帧数这类指标），最多 12 行。&lt;/li&gt;
+&lt;li&gt;“风格”段要求给&lt;strong&gt;原话示例&lt;/strong&gt;，不再只写“语气温和”这种描述；全文上限 2500 字。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;顺带修复（v2.5.6 的回归）&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;对话 Agent 复用视频读取时缺少画面分析状态，导致回复失败（28 次）。&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;@&lt;/code&gt; 消息回复成功后标记已读的路由写错，会中断整轮检查（17 次）。&lt;/li&gt;
+&lt;li&gt;模型把 BV 号填进 &lt;code&gt;aid&lt;/code&gt; 时会抛异常、掀掉整轮。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;行为和数据格式没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.6</id>
+    <updated>2026-11-06T06:40:01Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.6"/>
+    <title>鲸语 v2.5.6</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.6&lt;/h1&gt;
+&lt;p&gt;这一版修「一轮跑十分钟」：画面分析每帧都要等满 60 秒超时、失败后还继续等下一帧，&lt;br&gt;
+把一轮从 90 秒拖到 6–8 分钟。&lt;/p&gt;
+&lt;h2&gt;修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;视觉请求单独超时&lt;/strong&gt;：描述一张截图不值得等 60 秒。新增&lt;br&gt;
+&lt;code&gt;ai.vision_timeout_seconds&lt;/code&gt;（默认 20 秒），只作用于画面描述，正文对话仍是原来的超时。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;一帧失败就跳过本轮剩余帧&lt;/strong&gt;：多模态接口 429/超时时，不再把同一视频的另外两帧、&lt;br&gt;
+下一个视频的三帧依次等完。本轮直接跳过，&lt;strong&gt;下一轮照常尝试，不做冷却&lt;/strong&gt;。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;画面分析开关真正生效&lt;/strong&gt;：&lt;code&gt;analysis.enable_frame_analysis&lt;/code&gt; 之前在 &lt;code&gt;config.json&lt;/code&gt; 里&lt;br&gt;
+存在却没人读，代码写死为开。现在关掉它就不会再发起任何帧描述请求。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;空回包不再整轮作废&lt;/strong&gt;：模型偶发返回空内容（&lt;code&gt;finish=stop&lt;/code&gt;、推理只用了十几 token，&lt;br&gt;
+不是预算问题）时，以前直接结束本轮；现在同一轮内重问一次再决定。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;效果&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;视觉接口故障时，一轮从 6–8 分钟回到 1–2 分钟，只留一条 WARNING；&lt;/li&gt;
+&lt;li&gt;偶发空回包的代价从「整轮损失」降为「多一次调用」；&lt;/li&gt;
+&lt;li&gt;关掉画面分析后完全不做视觉请求。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;行为和数据格式没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.5</id>
+    <updated>2026-11-06T06:19:18Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.5"/>
+    <title>鲸语 v2.5.5</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.5&lt;/h1&gt;
+&lt;p&gt;这一版修「整轮空转」：界面看着一切正常，日志里却是一个接一个&lt;br&gt;
+&lt;code&gt;Event loop is closed&lt;/code&gt;，每轮都在一秒内结束、什么都没做。&lt;/p&gt;
+&lt;h2&gt;修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;AI 客户端跨事件循环复用&lt;/strong&gt;：&lt;code&gt;AIClient&lt;/code&gt; 启动时只建一个 OpenAI/Claude 客户端，&lt;br&gt;
+而它内部的 HTTP 连接池绑定在首次使用它的事件循环上；GUI 偏偏每一轮 Agent 都会&lt;br&gt;
+新建一个事件循环、跑完就关掉。于是下一轮拿到池里属于旧循环的 keep-alive 连接，&lt;br&gt;
+直接抛 &lt;code&gt;Event loop is closed&lt;/code&gt;。
+&lt;ul&gt;
+&lt;li&gt;现在每次请求前检查当前运行的事件循环，变了就重建客户端，旧的尽力释放。&lt;/li&gt;
+&lt;li&gt;判断用的是事件循环&lt;strong&gt;对象本身&lt;/strong&gt;而不是 &lt;code&gt;id()&lt;/code&gt;——CPython 会复用已释放对象的&lt;br&gt;
+地址，用 id 会漏判（测试里已经踩到）。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;这条错误不再直接判死&lt;/strong&gt;：&lt;code&gt;Event loop is closed&lt;/code&gt; 现在算可重试错误，重建客户端&lt;br&gt;
+后重试一次即可恢复，不会再整轮白跑。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;视觉分析同源修复&lt;/strong&gt;：抽帧后的单帧描述走的是同一套客户端，一并生效。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;影响&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;偶发整轮空转（日志里连续出现「没有调用工具」）会消失；&lt;/li&gt;
+&lt;li&gt;空回合后几秒内又触发一轮的连锁重试也随之减少。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;行为、配置和数据格式都没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.4</id>
+    <updated>2026-11-05T08:20:04Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.4"/>
+    <title>鲸语 v2.5.4</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.4&lt;/h1&gt;
+&lt;p&gt;这一版修「明明失败了却写成成功」：读不到的视频会以“成功”出现在界面、日志和&lt;br&gt;
+运行记录里，还会留下一条空标题的幽灵视频，让后续整理和总结都跟着错。&lt;/p&gt;
+&lt;h2&gt;修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;失败的读取被算成成功&lt;/strong&gt;：&lt;code&gt;get_video_info&lt;/code&gt; 查不到视频时返回空值，旧逻辑把它&lt;br&gt;
+当作执行成功，于是日志里出现「获取视频信息 BV…：成功」，而上一行刚刚报错。&lt;br&gt;
+现在空结果一律判为失败，界面、日志、数据库三处口径一致。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;幽灵视频进运行记录&lt;/strong&gt;：调用失败后，请求参数里的 BV 号仍会被记成“本轮看过的&lt;br&gt;
+视频”，带着空标题和 &lt;code&gt;aid=0&lt;/code&gt; 存进 &lt;code&gt;agent_sessions&lt;/code&gt;。现在失败不再记录，&lt;br&gt;
+只有真正读到的视频才会写入。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;模型误以为读到了内容&lt;/strong&gt;：接口查不到视频时原来返回 &lt;code&gt;null&lt;/code&gt;，模型无法区分&lt;br&gt;
+“没有这个视频”和“读到了空数据”，容易反复试同一个号。现在返回明确的&lt;br&gt;
+&lt;code&gt;视频不存在或无法访问: BV…&lt;/code&gt;，模型能看到失败并换一个。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;不存在的视频不再白重试&lt;/strong&gt;：&lt;code&gt;-404/-403/-400&lt;/code&gt; 是确定的“不存在/无权访问”，&lt;br&gt;
+旧代码仍会重试一次并打一条 ERROR。现在直接返回，日志降为 WARNING。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;每轮先浪费一次请求&lt;/strong&gt;：推理模型在新一轮仍从默认预算起步，思考吃满预算后&lt;br&gt;
+才翻倍重试。现在会记住升级后的预算，后续请求直接从这个下限开始。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;提示词&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;明确「BV 号只能来自工具返回结果（搜索、评论、私信、投稿列表），不能凭记忆&lt;br&gt;
+或从日记里自己编；工具说视频不存在就换一个」，从源头减少瞎猜。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;一并包含（v2.5.1 之后的改进）&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;v2.5.2：修复双竖线标记解析失败、残缺标记不再降级成 JSON 碎片、&lt;br&gt;
+未识别调用不再把模型原文灌进日志。&lt;/li&gt;
+&lt;li&gt;v2.5.3：新增 &lt;code&gt;--quit&lt;/code&gt; 优雅退出；升级流程改为「等 45 秒 → 发 &lt;code&gt;--quit&lt;/code&gt; 再等&lt;br&gt;
+30 秒 → 才强制结束」，不再白等 3 分钟；启动时清理上次强杀留下的&lt;br&gt;
+&lt;code&gt;data/app.lock&lt;/code&gt;。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;其他&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;新增 5 个回归测试，覆盖空结果判失败、失败不记录视频、&lt;code&gt;-404&lt;/code&gt; 不重试、&lt;br&gt;
+以及升级后的输出预算被后续请求复用。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;行为、配置和数据格式都没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.3</id>
+    <updated>2026-11-04T07:40:19Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.3"/>
+    <title>v2.5.3</title>
+    <content type="html">&lt;p&gt;v2.5.3&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.2</id>
+    <updated>2026-11-04T07:21:44Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.2"/>
+    <title>发布 v2.5.2：修复双竖线标记解析失败与日志噪音</title>
+    <content type="html">&lt;ul&gt;
+&lt;li&gt;DSML 标记两侧允许任意数量竖线，&amp;lt;｜｜DSML｜｜&amp;gt; 变体不再解析失败&lt;/li&gt;
+&lt;li&gt;解析结果必须含决策字段，残缺标记不再退化成 JSON 碎片（{} 被误当决策）&lt;/li&gt;
+&lt;li&gt;未识别工具调用的日志先清洗标记再截断到 200 字&lt;/li&gt;
+&lt;li&gt;启动横幅带版本号，日志首行可直接确认运行版本&lt;/li&gt;
+&lt;li&gt;新增 4 个回归测试&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.1</id>
+    <updated>2026-11-04T03:36:39Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.1"/>
+    <title>鲸语 v2.5.1</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.1&lt;/h1&gt;
+&lt;p&gt;这一版修复一个会让 Agent「看得见视频、却读不出内容」的参数解析问题。&lt;/p&gt;
+&lt;h2&gt;修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;工具参数被标记污染&lt;/strong&gt;：模型偶尔把工具调用的结束标签写成带属性的形式，&lt;br&gt;
+旧解析器会把下一个参数吞进上一个参数的值里，&lt;code&gt;bvid&lt;/code&gt; 变成&lt;br&gt;
+&lt;code&gt;BV1iwxD6NECk&lt;/code&gt; 加一串标签碎片，接口直接报「bvid 提供错误」，视频读取失败。&lt;br&gt;
+现在结束标签允许携带属性，一个坏标签不会再吃掉后面的参数。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;参数统一清洗&lt;/strong&gt;：所有 B 站接口参数在调用前都会清除残留的模型标记；&lt;br&gt;
+&lt;code&gt;bvid&lt;/code&gt; 还会从脏值里提取第一个合法 BV 号，避免无谓的整轮失败。&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;数值参数容错&lt;/strong&gt;：&lt;code&gt;inspect_video&lt;/code&gt; 的 &lt;code&gt;frames&lt;/code&gt;／&lt;code&gt;comments&lt;/code&gt; 被写脏时&lt;br&gt;
+提取其中的数字，不再因为一次格式错误丢掉整次视频分析。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;其他&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;JSON 形式的工具调用同样走这套清洗，含标记的 JSON 不再被整条丢弃。&lt;/li&gt;
+&lt;li&gt;新增 7 个回归测试，覆盖日志里真实出现的畸形标签场景。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;行为、配置和数据格式都没有变化，直接覆盖安装即可。&lt;/p&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1430847211/v2.5.0</id>
+    <updated>2026-11-03T07:00:28Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/tree-people-Z/WhaleTalk/releases/tag/v2.5.0"/>
+    <title>鲸语 v2.5.0</title>
+    <content type="html">&lt;h1&gt;鲸语 v2.5.0&lt;/h1&gt;
+&lt;p&gt;这一版让她的“成长”真正开始工作：不只是按人设说话，而是会把 B 站上看到的&lt;br&gt;
+语言、梗、兴趣、经验和知识慢慢变成自己的东西。&lt;/p&gt;
+&lt;h2&gt;在线学习&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;新增成长档案：语言/梗、兴趣、互动经验、知识、态度五类条目。&lt;/li&gt;
+&lt;li&gt;素材来自 B 站公开评论、互动记录和日记；公开文本去重、30 天后清理。&lt;/li&gt;
+&lt;li&gt;每条成长有来源、权重、使用次数；14 天不用会衰减，最多保留 60 条。&lt;/li&gt;
+&lt;li&gt;自动学习跟随 6 小时整理任务，默认 12 小时节流；设置页可手动“立即学习”。&lt;/li&gt;
+&lt;li&gt;核心人设 &lt;code&gt;data/persona.md&lt;/code&gt; 不会被自动修改；成长只作为上下文参考，&lt;br&gt;
+可随时查看、删除或清空。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;更像真人&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;系统提示新增“说话方式”：先接具体内容再表达态度；句子长短不齐；&lt;br&gt;
+不连续复用开头/口头禅；一条内容最多带一个新说法。&lt;/li&gt;
+&lt;li&gt;发送前风格检查：重复开头、口头禅频率过高、梗连续复用、@ 开头过多时，&lt;br&gt;
+先用一次模型调用改写，失败则保留原文。&lt;/li&gt;
+&lt;li&gt;评论区/私信/弹幕统一走这套检查。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;推理模型适配（重要）&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;修复“模型没报错、但返回空内容”的问题：推理模型会先把 &lt;code&gt;max_tokens&lt;/code&gt; 用于思考，&lt;br&gt;
+长提示下思考耗尽预算，正文就是空的。之前的空回合、空记忆、空回复大多由此产生。&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;AIClient&lt;/code&gt; 现在会识别 &lt;code&gt;finish_reason=length&lt;/code&gt; 且推理 token 占满预算的情况，&lt;br&gt;
+自动把输出预算翻倍重试（默认上限 8000），最多 4 次。&lt;/li&gt;
+&lt;li&gt;长期记忆、在线学习、自由 Agent、对话回复、风格改写都提高了基础输出预算。&lt;/li&gt;
+&lt;li&gt;设置页新增「推理模型输出预算」，可按所用模型调整（默认 8000 tokens）。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;记忆修复&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;长期记忆不再只认 &lt;code&gt;*_to_owner.md&lt;/code&gt;，自由 Agent 写的 &lt;code&gt;YYYY-MM-DD.md&lt;/code&gt; 也会整理；&lt;br&gt;
+10/27 之后积压的日记会在下次整理时补上。&lt;/li&gt;
+&lt;li&gt;“近三天日记”改为按天分配预算并取结尾，不再因为单日太长而丢掉当天内容。&lt;/li&gt;
+&lt;li&gt;单次日记追加限制 4000 字，避免一次写入把上下文挤爆。&lt;/li&gt;
+&lt;li&gt;记忆整理改为逐天合并，单次提示更短；输出预算不足时自动提高后重试。&lt;/li&gt;
+&lt;li&gt;若模型完全不支持长提示，才退回本地事件记录，保证记忆不断档。&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;UI&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;设置页新增「成长与语言」：学习开关、间隔、条目列表、立即学习、删除/清空。&lt;/li&gt;
+&lt;li&gt;仪表盘“账号与风控”面板显示成长档案条数与上次更新时间。&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>tree-people-Z</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/201334084?s=60&amp;v=4"/>
+  </entry>
+</feed>
