@@ -107,6 +107,12 @@ class MainWindow(QMainWindow):
         self._notified_reply_rpids = set()
         self._reply_poll_timer = QTimer(self)
         self._reply_poll_timer.timeout.connect(self.scheduled_reply_check)
+        # 因为 Agent/回复任务在跑而跳过时，1 分钟后再试一次；
+        # 否则短任务会把回复拖到下一个 30 分钟周期。
+        self._reply_retry_timer = QTimer(self)
+        self._reply_retry_timer.setSingleShot(True)
+        self._reply_retry_timer.setInterval(60 * 1000)
+        self._reply_retry_timer.timeout.connect(self.scheduled_reply_check)
         self._apply_reply_poll_interval()
         self._reply_poll_timer.start()
 
@@ -516,7 +522,6 @@ class MainWindow(QMainWindow):
             self.scheduler = TaskScheduler(self.config)
             if self.agent:
                 self.scheduler.set_wake_callback(self.scheduled_run)
-                self.scheduler.set_reply_check_callback(self.scheduled_reply_check)
 
         except Exception as e:
             logger.error(f"初始化组件失败: {e}")
@@ -657,15 +662,25 @@ class MainWindow(QMainWindow):
 
     def scheduled_reply_check(self):
         """按间隔检查评论回复；自动回复是否执行由配置决定。"""
+        busy = any(
+            getattr(worker, 'isRunning', lambda: False)()
+            for worker in (getattr(self, 'worker', None),
+                           getattr(self, 'reply_worker', None))
+            if worker is not None
+        )
         if (not self.agent
                 or not self.config.get('interaction.comment_monitor', False)
                 or not self.bili_api or not self.bili_api.credential
-                or (self.worker and self.worker.isRunning())
-                or (self.reply_worker and self.reply_worker.isRunning())):
+                or busy):
+            if busy and getattr(self, '_reply_retry_timer', None) is not None:
+                # 1 分钟后再试，别等下一个整周期
+                self._reply_retry_timer.start()
             return False
         if QThread.currentThread() != self.thread():
             self.scheduled_reply_check_requested.emit()
             return True
+        if getattr(self, '_reply_retry_timer', None) is not None:
+            self._reply_retry_timer.stop()
         self.reply_worker = AnalysisWorker(self.agent, operation='replies')
         self.reply_worker.finished.connect(self.on_reply_check_finished)
         self.reply_worker.error.connect(lambda error: self.log(f"❌ 回复检查失败: {error}"))
@@ -724,7 +739,6 @@ class MainWindow(QMainWindow):
             self.scheduler = TaskScheduler(self.config)
             if self.agent:
                 self.scheduler.set_wake_callback(self.scheduled_run)
-                self.scheduler.set_reply_check_callback(self.scheduled_reply_check)
             if scheduler_was_running and self.agent:
                 self.scheduler.start()
             self._active_ai_signature = signature

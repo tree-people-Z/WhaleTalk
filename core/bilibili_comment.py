@@ -41,7 +41,8 @@ class BiliCommentMixin:
         sort: int = 2,  # 2=热门, 0=时间
         count: int = 20,
         include_replies: bool = False,
-        root_rpids: Optional[set] = None
+        root_rpids: Optional[set] = None,
+        page: int = 1,
     ) -> List[Dict[str, Any]]:
         """获取视频评论"""
         if self.is_blocked():
@@ -61,7 +62,7 @@ class BiliCommentMixin:
             comments_cache = {}
             self._comments_cache = comments_cache
         if not include_replies:
-            cache_key = (aid, sort, count)
+            cache_key = (aid, sort, count, page)
             cached = comments_cache.get(cache_key)
             if cached and (datetime.now() - cached[0]).total_seconds() < 120:
                 return list(cached[1])
@@ -73,7 +74,7 @@ class BiliCommentMixin:
             comments_data = await comment.get_comments(
                 oid=aid,
                 type_=comment.CommentResourceType.VIDEO,
-                page_index=1,
+                page_index=max(1, int(page or 1)),
                 order=order_type,
                 credential=self.credential
             )

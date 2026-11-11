@@ -56,3 +56,19 @@ class BilibiliCommentTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CommentPagingTests(unittest.TestCase):
+    def test_page_argument_is_passed_to_api(self):
+        async def run():
+            api = BilibiliAPI.__new__(BilibiliAPI)
+            api.credential = object()
+            with patch(
+                'core.bilibili_comment.comment.get_comments',
+                new=AsyncMock(return_value={'replies': []}),
+            ) as get_comments:
+                await api.get_comments(42, count=20, page=2)
+            return get_comments
+
+        get_comments = asyncio.run(run())
+        self.assertEqual(get_comments.await_args.kwargs['page_index'], 2)

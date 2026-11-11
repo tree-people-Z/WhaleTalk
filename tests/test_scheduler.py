@@ -51,50 +51,38 @@ class SchedulerTests(unittest.TestCase):
         scheduler = TaskScheduler(self.make_config(**{'ai.provider': 'openai'}))
         self.assertTrue(scheduler._is_low_price_time(datetime(2026, 10, 23, 10, 0)))
 
-    def test_poll_prioritizes_replies_and_keeps_browse_due(self):
+    def test_poll_only_schedules_browse(self):
+        # 回复检查已交给界面上的常驻定时器，调度器不再触发它。
         scheduler = TaskScheduler(self.make_config())
-        reply = Mock()
         browse = Mock()
-        scheduler.set_reply_check_callback(reply)
         scheduler.set_wake_callback(browse)
         scheduler.is_running = True
-        now = datetime(2026, 10, 24, 10, 0)  # weekend = off-peak
-        scheduler._next_reply_check_at = now
+        now = datetime(2026, 10, 24, 10, 0)  # 周末 = 非高峰
         scheduler._next_browse_at = now
-        with patch('core.scheduler.datetime') as dt, \
-             patch.object(scheduler, '_next_time', return_value=now):
+        with patch('core.scheduler.datetime') as dt,              patch.object(scheduler, '_next_time', return_value=now):
             dt.now.return_value = now
             scheduler._poll_tasks()
-        reply.assert_called_once_with()
-        browse.assert_not_called()
-        self.assertEqual(scheduler._next_browse_at, now)
+        browse.assert_called_once_with()
 
-    def test_peak_hours_still_check_replies_but_defer_video_browsing(self):
+    def test_peak_hours_defer_video_browsing(self):
         scheduler = TaskScheduler(self.make_config())
-        reply = Mock()
         browse = Mock()
-        scheduler.set_reply_check_callback(reply)
         scheduler.set_wake_callback(browse)
         scheduler.is_running = True
-        now = datetime(2026, 10, 23, 10, 0)
-        scheduler._next_reply_check_at = now
+        now = datetime(2026, 10, 23, 10, 0)  # 工作日高峰
         scheduler._next_browse_at = now
         with patch('core.scheduler.datetime') as dt:
             dt.now.return_value = now
             scheduler._poll_tasks()
-        reply.assert_called_once_with()
         browse.assert_not_called()
+        self.assertEqual(scheduler._next_browse_at, now)
 
-    def test_manual_triggers_work_while_automatic_scheduler_is_stopped(self):
+    def test_manual_browse_works_while_automatic_scheduler_is_stopped(self):
         scheduler = TaskScheduler(self.make_config(**{'schedule.auto_run': False}))
         browse = Mock()
-        reply = Mock()
         scheduler.set_wake_callback(browse)
-        scheduler.set_reply_check_callback(reply)
         scheduler.run_now()
-        scheduler.run_reply_check_now()
         browse.assert_called_once_with()
-        reply.assert_called_once_with()
 
     def test_due_browse_is_retained_when_main_window_is_busy(self):
         scheduler = TaskScheduler(self.make_config())
@@ -110,19 +98,6 @@ class SchedulerTests(unittest.TestCase):
             self.assertEqual(scheduler._next_browse_at, now)
             scheduler._poll_tasks()
         self.assertEqual(callback.call_count, 2)
-
-    def test_reply_check_callback_may_decline_and_keep_task_due(self):
-        scheduler = TaskScheduler(self.make_config())
-        callback = Mock(return_value=False)
-        scheduler.set_reply_check_callback(callback)
-        scheduler.is_running = True
-        now = datetime(2026, 10, 24, 10, 0)
-        scheduler._next_reply_check_at = now
-        with patch('core.scheduler.datetime') as dt:
-            dt.now.return_value = now
-            scheduler._poll_tasks()
-        self.assertEqual(scheduler._next_reply_check_at, now)
-
 
 if __name__ == '__main__':
     unittest.main()

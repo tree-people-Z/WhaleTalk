@@ -22,13 +22,10 @@ class TaskScheduler:
         self.on_wake_callback: Optional[Callable] = None
         self.on_reply_check_callback: Optional[Callable] = None
         self._next_browse_at: Optional[datetime] = None
-        self._next_reply_check_at: Optional[datetime] = None
 
     def set_wake_callback(self, callback: Callable):
         self.on_wake_callback = callback
 
-    def set_reply_check_callback(self, callback: Callable):
-        self.on_reply_check_callback = callback
 
     def start(self):
         if self.is_running:
@@ -45,13 +42,10 @@ class TaskScheduler:
             self._scheduler_shutdown = False
 
         self.scheduler.remove_all_jobs()
-        now = datetime.now()
         self._next_browse_at = self._next_time(
             self.config.get('schedule.browse_interval_min_minutes', 60),
             self.config.get('schedule.browse_interval_max_minutes', 120)
         )
-        reply_interval = max(1, int(self.config.get('schedule.reply_check_interval_minutes', 1)))
-        self._next_reply_check_at = now + timedelta(minutes=reply_interval)
         self.scheduler.add_job(
             self._poll_tasks,
             IntervalTrigger(seconds=30),
@@ -64,7 +58,7 @@ class TaskScheduler:
         )
         self.scheduler.start()
         self.is_running = True
-        logger.info("✅ 自动运营已启动：随机巡视、定期检查评论回复")
+        logger.info("✅ 自动运营已启动：随机巡视")
 
     def stop(self):
         if not self.is_running:
@@ -118,25 +112,8 @@ class TaskScheduler:
             return
         now = datetime.now()
 
-        # Urgent reply checks run throughout the day. The DeepSeek off-peak
-        # gate applies to the more expensive video browsing/analysis cycle.
-        if (self.on_reply_check_callback
-                and self.config.get('interaction.comment_monitor', False)
-                and self._next_reply_check_at and now >= self._next_reply_check_at):
-            try:
-                accepted = self.on_reply_check_callback()
-                # A busy worker may decline the run. Keep it due so a transient
-                # overlap cannot silently lose an urgent reply check.
-                if accepted is not False:
-                    self._next_reply_check_at = now + timedelta(
-                        minutes=max(1, int(self.config.get('schedule.reply_check_interval_minutes', 1)))
-                    )
-                    # Reply checks have priority; do not queue a browse run
-                    # alongside a worker that has just started checking replies.
-                    return
-            except Exception as exc:
-                logger.error(f"触发评论回复检查失败: {exc}")
-
+        # 回复检查由界面上的常驻定时器负责（即使关闭自动运营也会查），
+        # 这里只排巡视任务，避免两路定时器把同一件事各做一遍。
         if (self._next_browse_at and now >= self._next_browse_at
                 and self._is_low_price_time(now)):
             try:
@@ -167,12 +144,8 @@ class TaskScheduler:
         if self.on_wake_callback:
             self.on_wake_callback()
 
-    def run_reply_check_now(self):
-        if self.on_reply_check_callback:
-            self.on_reply_check_callback()
-
     def get_next_run_time(self) -> Optional[datetime]:
-        times = [t for t in (self._next_browse_at, self._next_reply_check_at) if t]
+        times = [t for t in (self._next_browse_at,) if t]
         return min(times) if times else None
 
     def get_status(self) -> dict:
@@ -182,6 +155,5 @@ class TaskScheduler:
             'wake_windows': self.config.get('schedule.wake_windows', []),
             'next_run_time': self.get_next_run_time().isoformat() if self.get_next_run_time() else None,
             'next_browse_at': self._next_browse_at.isoformat() if self._next_browse_at else None,
-            'next_reply_check_at': self._next_reply_check_at.isoformat() if self._next_reply_check_at else None,
             'jobs_count': len(self.scheduler.get_jobs())
         }

@@ -304,6 +304,7 @@ class ConfigManager:
                 "reply_scope": "all",
                 "own_video_count": 10,
                 "max_own_video_replies_per_check": 10,
+                "max_new_comments_per_check": 30,
                 "mention_owner_on_interesting": False
             },
             "diaries": {
