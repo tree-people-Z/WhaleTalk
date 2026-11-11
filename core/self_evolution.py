@@ -204,6 +204,38 @@ def _existing_titles(db) -> List[str]:
     ]
 
 
+def housekeeping(db, config=None) -> Dict[str, Any]:
+    """衰减并清理成长条目；最多每 24 小时跑一次。
+
+    以前衰减只挂在“学习成功”之后，学习被间隔跳过时就不清理；现在独立成一步，
+    但必须限频，否则每 6 小时调一次会让 14 天未用的条目三天就掉光。
+    """
+    if db is None:
+        return {'skipped': 'no-db'}
+    state = _state()
+    try:
+        last_at = datetime.fromisoformat(str(state.get('last_housekeeping') or ''))
+    except (TypeError, ValueError):
+        last_at = None
+    if last_at and datetime.now() - last_at < timedelta(hours=24):
+        return {'skipped': 'interval'}
+    decayed = db.decay_growth_items(days=14, amount=8)
+    try:
+        max_items = int(config.get('evolution.max_items', 60)) if config else 60
+    except (TypeError, ValueError):
+        max_items = 60
+    pruned = db.prune_growth_items(max_items=max_items)
+    try:
+        db.prune_observed_texts()
+    except Exception:  # noqa: BLE001
+        pass
+    _render_growth_file(db)
+    state['last_housekeeping'] = datetime.now().isoformat()
+    _write_state(state)
+    logger.info(f'🧹 成长档案清理：衰减 {decayed} 条，清理 {pruned} 条')
+    return {'decayed': decayed, 'pruned': pruned}
+
+
 async def learn(
     ai_client, db, config, *, force: bool = False
 ) -> Dict[str, Any]:
@@ -261,11 +293,9 @@ async def learn(
             logger.debug(f'保存成长条目失败: {exc}')
     added = len(set(_existing_titles(db)) - before)
 
-    decayed = db.decay_growth_items(days=14, amount=8)
-    pruned = db.prune_growth_items(
-        max_items=int(config.get('evolution.max_items', 60))
-    )
-    db.prune_observed_texts()
+    cleaned = housekeeping(db, config)
+    decayed = int(cleaned.get('decayed') or 0)
+    pruned = int(cleaned.get('pruned') or 0)
     _render_growth_file(db)
     _write_state({
         'last_learned': datetime.now().isoformat(),

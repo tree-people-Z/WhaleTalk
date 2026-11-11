@@ -306,6 +306,12 @@ class ConfigManager:
                 "max_own_video_replies_per_check": 10,
                 "mention_owner_on_interesting": False
             },
+            "diaries": {
+                "auto_compact": True,
+                "compact_after_days": 3,
+                "compact_min_chars": 1200,
+                "keep_backups": 3
+            },
             "evolution": {
                 "enabled": True,
                 "learn_interval_hours": 12,

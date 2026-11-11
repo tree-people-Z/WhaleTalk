@@ -116,6 +116,52 @@ class MainWindow(QMainWindow):
         self._resource_timer.timeout.connect(self._release_idle_models)
         self._resource_timer.start()
 
+        # 每天自动整理一次过期日记（长文件压成短条目），历史不会越堆越重。
+        self._diary_worker = None
+        QTimer.singleShot(90000, self._maybe_compact_diaries)
+        self._diary_check_timer = QTimer(self)
+        self._diary_check_timer.setInterval(6 * 60 * 60 * 1000)
+        self._diary_check_timer.timeout.connect(self._maybe_compact_diaries)
+        self._diary_check_timer.start()
+
+    def _maybe_compact_diaries(self):
+        """启动后与运行期间各检查一次；每天最多真正跑一次。"""
+        from core.diary_maintenance import ran_today
+
+        if self.ai_client is None:
+            return
+        if not self.config.get('diaries.auto_compact', True):
+            return
+        if self._diary_worker is not None and self._diary_worker.isRunning():
+            return
+        if ran_today():
+            return
+        busy = any(
+            getattr(worker, 'isRunning', lambda: False)()
+            for worker in (getattr(self, 'worker', None),
+                           getattr(self, 'reply_worker', None))
+            if worker is not None
+        )
+        if busy:
+            return
+        from gui.maintenance_worker import DiaryMaintenanceWorker
+
+        self._diary_worker = DiaryMaintenanceWorker(
+            self.ai_client, self.db, self.config, self
+        )
+        self._diary_worker.done.connect(self._on_diary_maintenance_done)
+        self._diary_worker.finished.connect(self._on_diary_maintenance_finished)
+        self._diary_worker.start()
+
+    def _on_diary_maintenance_finished(self):
+        self._diary_worker = None
+
+    def _on_diary_maintenance_done(self, success: bool, message: str):
+        if success:
+            self.log(f"📔 {message}")
+        else:
+            logger.debug(f"日记维护: {message}")
+
     def _release_idle_models(self):
         """空闲时释放本地 Whisper 模型，降低内存占用。"""
         try:
