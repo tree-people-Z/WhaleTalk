@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
 
         # 定期释放空闲的本地语音模型，降低长时间驻留内存。
         self._resource_timer = QTimer(self)
-        self._resource_timer.setInterval(5 * 60 * 1000)
+        self._resource_timer.setInterval(30 * 1000)
         self._resource_timer.timeout.connect(self._release_idle_models)
         self._resource_timer.start()
 
@@ -173,12 +173,12 @@ class MainWindow(QMainWindow):
         try:
             from core.audio_transcriber import LocalAudioTranscriber
             try:
-                minutes = int(self.config.get(
-                    'analysis.local_model_idle_unload_minutes', 10
+                minutes = float(self.config.get(
+                    'analysis.local_model_idle_unload_minutes', 2
                 ))
             except (TypeError, ValueError):
-                minutes = 10
-            LocalAudioTranscriber.release_if_idle(max(60, minutes * 60))
+                minutes = 2
+            LocalAudioTranscriber.release_if_idle(max(15, minutes * 60))
         except Exception as exc:  # noqa: BLE001
             logger.debug(f'释放空闲模型失败: {exc}')
 
@@ -630,6 +630,7 @@ class MainWindow(QMainWindow):
         if result.get('status') == 'cancelled':
             self.statusBar.showMessage("任务已停止")
             self.log("⏹️ Agent 任务已安全停止")
+            self._release_transcription_model()
             return
         if result.get('status') == 'replies_checked':
             self.on_reply_check_finished(result)
@@ -651,6 +652,14 @@ class MainWindow(QMainWindow):
 
         self.update_stats()
         self.load_history()
+
+    def _release_transcription_model(self):
+        """一轮任务结束就释放语音模型，不等空闲计时（显存/内存立即回来）。"""
+        try:
+            from core.audio_transcriber import LocalAudioTranscriber
+            LocalAudioTranscriber.release_now('本轮结束，已释放本地语音模型')
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f'释放语音模型失败: {exc}')
 
     def on_analysis_error(self, error: str):
         """分析出错"""
@@ -804,6 +813,7 @@ class MainWindow(QMainWindow):
             self._publish_new_replies(mentions)
         if result.get('replied', 0):
             self.log(f"💬 已自动回复 {result['replied']} 条新评论")
+        self._release_transcription_model()
 
     def toggle_auto_run(self):
         """切换自动运行"""

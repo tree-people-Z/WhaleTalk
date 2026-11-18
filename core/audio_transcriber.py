@@ -21,13 +21,26 @@ class LocalAudioTranscriber:
     _model_name = None
     _model_lock = threading.Lock()
     _last_used = 0.0
+    # 转录设备：默认 CPU（不占显存）；设置里可改成 cuda 走显卡。
+    _device = 'cpu'
+    _compute_type = 'int8'
 
     # Files required by a faster-whisper / CTranslate2 model directory.
     MODEL_FILES = ('config.json', 'model.bin', 'tokenizer.json', 'vocabulary.txt')
 
-    def __init__(self, model_name: str = 'medium', model_dir: str = 'data/models/faster-whisper'):
+    def __init__(
+        self,
+        model_name: str = 'medium',
+        model_dir: str = 'data/models/faster-whisper',
+        device: str = '',
+        compute_type: str = '',
+    ):
         self.model_name = model_name or 'medium'
         self.model_dir = Path(model_dir)
+        self.device = (device or '').strip().lower() or self._device
+        self.compute_type = (compute_type or '').strip() or (
+            'float16' if self.device.startswith('cuda') else 'int8'
+        )
 
     @classmethod
     def local_model_path(cls, model_dir: Path, model_name: str = 'medium'):
@@ -38,10 +51,22 @@ class LocalAudioTranscriber:
         return None
 
     @classmethod
-    def _get_model(cls, model_name: str, model_dir: Path):
+    def _get_model(
+        cls, model_name: str, model_dir: Path,
+        device: str = '', compute_type: str = '',
+    ):
+        device = (device or '').strip().lower() or cls._device
+        compute_type = (compute_type or '').strip() or (
+            'float16' if device.startswith('cuda') else 'int8'
+        )
         with cls._model_lock:
-            if cls._model is not None and cls._model_name == model_name:
+            if (cls._model is not None and cls._model_name == model_name
+                    and cls._device == device):
                 return cls._model
+            if cls._model is not None:
+                # 换了模型或设备：先把旧的放掉，避免两份同时占内存
+                cls._model = None
+                cls._model_name = None
             # 便携版按需下载的组件位于 data/transcription，需要先加入导入路径。
             try:
                 from utils.transcription_component import (
@@ -79,17 +104,21 @@ class LocalAudioTranscriber:
                 logger.info(f"正在加载本地语音识别模型: {model_name}（首次使用会下载模型）")
             cls._model = WhisperModel(
                 model_argument,
-                device='cpu',
-                compute_type='int8',
+                device=device,
+                compute_type=compute_type,
                 download_root=str(model_dir),
             )
             cls._model_name = model_name
+            cls._device = device
+            cls._compute_type = compute_type
             cls._last_used = time.time()
             return cls._model
 
     @classmethod
-    def release_if_idle(cls, max_idle_seconds: float = 600) -> bool:
-        """空闲一段时间后释放本地模型，降低常驻内存。"""
+    def release_if_idle(
+        cls, max_idle_seconds: float = 600, reason: str = ''
+    ) -> bool:
+        """空闲一段时间后释放本地模型，降低常驻内存/显存。"""
         released = False
         with cls._model_lock:
             if (cls._model is not None
@@ -99,8 +128,13 @@ class LocalAudioTranscriber:
                 released = True
         if released:
             gc.collect()
-            logger.info('本地语音模型空闲，已释放内存')
+            logger.info(reason or '本地语音模型空闲，已释放内存')
         return released
+
+    @classmethod
+    def release_now(cls, reason: str = '立即释放本地语音模型') -> bool:
+        """立刻释放（一轮任务结束后调用），不等空闲计时。"""
+        return cls.release_if_idle(0, reason=reason)
 
     async def transcribe_url(
         self,
@@ -132,7 +166,10 @@ class LocalAudioTranscriber:
             if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
                 detail = result.stderr.decode(errors='replace')[-500:]
                 raise RuntimeError(f"ffmpeg音频解码失败: {detail}")
-            model = self._get_model(self.model_name, self.model_dir)
+            model = self._get_model(
+                self.model_name, self.model_dir,
+                getattr(self, 'device', ''), getattr(self, 'compute_type', ''),
+            )
             # 直接传入 float32 采样数组，避免依赖 PyAV 的版本相关解码接口。
             try:
                 audio_input = self._read_wav_float32(output_path)

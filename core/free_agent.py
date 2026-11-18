@@ -190,10 +190,10 @@ class FreeAgent:
         if mode == 'local':
             try:
                 from core.audio_transcriber import LocalAudioTranscriber
-                minutes = int(self.config.get(
-                    'analysis.local_model_idle_unload_minutes', 10
+                minutes = float(self.config.get(
+                    'analysis.local_model_idle_unload_minutes', 2
                 ))
-                LocalAudioTranscriber.release_if_idle(max(60, minutes * 60))
+                LocalAudioTranscriber.release_if_idle(max(15, minutes * 60))
             except (ImportError, TypeError, ValueError):
                 pass
         audio_url = (media_urls or {}).get('audio')
@@ -234,7 +234,10 @@ class FreeAgent:
                     transcriber = LocalAudioTranscriber(
                         model_name=self.config.get(
                             'analysis.local_transcription_model', 'medium'
-                        )
+                        ),
+                        device=self.config.get(
+                            'analysis.local_transcription_device', 'cpu'
+                        ),
                     )
                     text = await transcriber.transcribe_url(
                         audio_url,

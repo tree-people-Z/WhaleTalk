@@ -170,7 +170,7 @@ class ConfigManager:
         analysis['transcription_mode'] = mode
         analysis['local_transcription_enabled'] = mode == 'local'
         analysis.setdefault('local_transcription_model', 'medium')
-        analysis.setdefault('local_model_idle_unload_minutes', 10)
+        analysis.setdefault('local_model_idle_unload_minutes', 2)
         cloud = analysis.get('cloud_transcription')
         if not isinstance(cloud, dict):
             cloud = {}
@@ -328,7 +328,8 @@ class ConfigManager:
                 "transcription_mode": "off",
                 "local_transcription_enabled": False,
                 "local_transcription_model": "medium",
-                "local_model_idle_unload_minutes": 10,
+                "local_model_idle_unload_minutes": 2,
+                "local_transcription_device": "cpu",
                 "cloud_transcription": {
                     "base_url": "https://api.openai.com/v1",
                     "api_key": "",

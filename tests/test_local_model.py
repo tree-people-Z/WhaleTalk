@@ -26,3 +26,36 @@ class LocalModelDetectionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModelReleaseTests(unittest.TestCase):
+    def setUp(self):
+        import time
+        self._saved = (
+            LocalAudioTranscriber._model,
+            LocalAudioTranscriber._model_name,
+            LocalAudioTranscriber._last_used,
+        )
+        LocalAudioTranscriber._model = object()
+        LocalAudioTranscriber._model_name = 'tiny'
+        LocalAudioTranscriber._last_used = time.time()
+
+    def tearDown(self):
+        (
+            LocalAudioTranscriber._model,
+            LocalAudioTranscriber._model_name,
+            LocalAudioTranscriber._last_used,
+        ) = self._saved
+
+    def test_release_now_drops_model_immediately(self):
+        self.assertTrue(LocalAudioTranscriber.release_now('测试释放'))
+        self.assertIsNone(LocalAudioTranscriber._model)
+
+    def test_release_if_idle_keeps_recently_used_model(self):
+        self.assertFalse(LocalAudioTranscriber.release_if_idle(60))
+        self.assertIsNotNone(LocalAudioTranscriber._model)
+
+    def test_release_if_idle_drops_model_after_window(self):
+        LocalAudioTranscriber._last_used -= 120
+        self.assertTrue(LocalAudioTranscriber.release_if_idle(15))
+        self.assertIsNone(LocalAudioTranscriber._model)
