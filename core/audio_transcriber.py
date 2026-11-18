@@ -133,8 +133,21 @@ class LocalAudioTranscriber:
 
     @classmethod
     def release_now(cls, reason: str = '立即释放本地语音模型') -> bool:
-        """立刻释放（一轮任务结束后调用），不等空闲计时。"""
-        return cls.release_if_idle(0, reason=reason)
+        """立刻释放（一轮任务结束后调用），不等空闲计时。
+
+        不能复用 release_if_idle(0)：空闲阈值是“严格大于”，时钟粒度下
+        elapsed 可能正好为 0，导致刚用完的模型没被释放。
+        """
+        released = False
+        with cls._model_lock:
+            if cls._model is not None:
+                cls._model = None
+                cls._model_name = None
+                released = True
+        if released:
+            gc.collect()
+            logger.info(reason)
+        return released
 
     async def transcribe_url(
         self,

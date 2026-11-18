@@ -74,6 +74,10 @@ analysis = Analysis(
         "numpy", "pandas-stubs", "IPython", "matplotlib", "tkinter",
         # Pulled in by optional dependency paths but unused by WhaleTalk.
         "grpc", "google", "cryptography",
+        # 本地语音识别按需下载到 data/transcription（独立组件包），
+        # 不随主体打包，否则便携包会从 158MB 涨到 244MB。
+        "faster_whisper", "ctranslate2", "av", "tokenizers",
+        "huggingface_hub", "pyarrow", "datasets",
     ],
     noarchive=False,
     optimize=0,
